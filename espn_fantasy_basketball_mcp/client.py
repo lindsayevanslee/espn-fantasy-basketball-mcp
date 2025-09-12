@@ -2,7 +2,7 @@
 
 import httpx
 from typing import List, Dict, Any, Optional
-from .models import Team, Player, Roster, Matchup, NBAGame
+from .models import Team, Player, Roster, Matchup, NBAGame, PlayerPoolEntry, RosterEntry, MatchupTeam
 
 
 class ESPNFantasyBasketballClient:
@@ -47,10 +47,11 @@ class ESPNFantasyBasketballClient:
         for team_data in data.get("teams", []):
             team = Team(
                 id=team_data["id"],
-                abbrev=team_data["abbrev"],
-                name=team_data["name"],
-                location=team_data["location"],
+                abbrev=team_data.get("abbrev", ""),
+                name=team_data.get("name", ""),
+                location=team_data.get("location"),  # Keep as None if not present
                 logo=team_data.get("logo"),
+                owners=team_data.get("owners"),  # ESPN provides owner IDs as strings
                 record=team_data.get("record")
             )
             teams.append(team)
@@ -71,11 +72,42 @@ class ESPNFantasyBasketballClient:
             if team_data["id"] == team_id:
                 roster_entries = []
                 for entry in team_data.get("roster", {}).get("entries", []):
-                    roster_entries.append({
-                        "playerId": entry["playerId"],
-                        "playerPoolEntry": entry["playerPoolEntry"],
-                        "lineupSlotId": entry["lineupSlotId"]
-                    })
+                    # Build player data from the nested structure
+                    player_data = entry["playerPoolEntry"]["player"]
+                    player = Player(
+                        id=player_data["id"],
+                        fullName=player_data.get("fullName", ""),
+                        firstName=player_data.get("firstName", ""),
+                        lastName=player_data.get("lastName", ""),
+                        jersey=player_data.get("jersey"),
+                        proTeamId=player_data.get("proTeamId"),
+                        defaultPositionId=player_data["defaultPositionId"],
+                        eligibleSlots=player_data.get("eligibleSlots"),
+                        injured=player_data.get("injured"),
+                        injuryStatus=entry.get("injuryStatus"),
+                        active=player_data.get("active"),
+                        droppable=player_data.get("droppable")
+                    )
+                    
+                    player_pool_entry = PlayerPoolEntry(
+                        id=entry["playerPoolEntry"]["id"],
+                        player=player,
+                        onTeamId=entry["playerPoolEntry"].get("onTeamId"),
+                        keeperValue=entry["playerPoolEntry"].get("keeperValue"),
+                        keeperValueFuture=entry["playerPoolEntry"].get("keeperValueFuture"),
+                        lineupLocked=entry["playerPoolEntry"].get("lineupLocked")
+                    )
+                    
+                    roster_entry = RosterEntry(
+                        playerId=entry["playerId"],
+                        playerPoolEntry=player_pool_entry,
+                        lineupSlotId=entry["lineupSlotId"],
+                        acquisitionDate=entry.get("acquisitionDate"),
+                        acquisitionType=entry.get("acquisitionType"),
+                        injuryStatus=entry.get("injuryStatus")
+                    )
+                    
+                    roster_entries.append(roster_entry)
                 
                 return Roster(teamId=team_id, entries=roster_entries)
         
@@ -141,11 +173,36 @@ class ESPNFantasyBasketballClient:
         matchups = []
         for schedule_item in data.get("schedule", []):
             if scoring_period is None or schedule_item.get("matchupPeriodId") == scoring_period:
+                # Extract team info from home/away data
+                home_team = None
+                if schedule_item.get("home"):
+                    home_data = schedule_item["home"]
+                    home_team = MatchupTeam(
+                        teamId=home_data.get("teamId"),
+                        totalPoints=home_data.get("totalPoints"),
+                        totalProjectedPoints=home_data.get("totalProjectedPoints"),
+                        gamesPlayed=home_data.get("gamesPlayed"),
+                        cumulativeScore=home_data.get("cumulativeScore")
+                    )
+                
+                away_team = None
+                if schedule_item.get("away"):
+                    away_data = schedule_item["away"]
+                    away_team = MatchupTeam(
+                        teamId=away_data.get("teamId"),
+                        totalPoints=away_data.get("totalPoints"),
+                        totalProjectedPoints=away_data.get("totalProjectedPoints"),
+                        gamesPlayed=away_data.get("gamesPlayed"),
+                        cumulativeScore=away_data.get("cumulativeScore")
+                    )
+                
                 matchup = Matchup(
                     id=schedule_item["id"],
                     matchupPeriodId=schedule_item["matchupPeriodId"],
-                    home=schedule_item["home"],
-                    away=schedule_item["away"]
+                    home=home_team,
+                    away=away_team,
+                    winner=schedule_item.get("winner"),
+                    playoff=schedule_item.get("playoff")
                 )
                 matchups.append(matchup)
         

@@ -24,9 +24,9 @@ class Team(BaseModel):
     id: int
     abbrev: str
     name: str
-    location: str
+    location: Optional[str] = None  # Make location optional since ESPN doesn't always provide it
     logo: Optional[str] = None
-    owners: Optional[List[Owner]] = None
+    owners: Optional[List[str]] = None  # ESPN returns owner IDs as strings
     record: Optional[TeamRecord] = None
 
 
@@ -49,16 +49,26 @@ class Player(BaseModel):
     injuryStatus: Optional[str] = None
     stats: Optional[Dict[str, Any]] = None
     ownership: Optional[PlayerOwnership] = None
+    active: Optional[bool] = None
+    droppable: Optional[bool] = None
 
 
 class PlayerPoolEntry(BaseModel):
+    id: int
     player: Player
+    onTeamId: Optional[int] = None
+    keeperValue: Optional[int] = None
+    keeperValueFuture: Optional[int] = None
+    lineupLocked: Optional[bool] = None
 
 
 class RosterEntry(BaseModel):
     playerId: int
     playerPoolEntry: PlayerPoolEntry
     lineupSlotId: int
+    acquisitionDate: Optional[int] = None
+    acquisitionType: Optional[str] = None
+    injuryStatus: Optional[str] = None
 
 
 class Roster(BaseModel):
@@ -67,16 +77,20 @@ class Roster(BaseModel):
 
 
 class MatchupTeam(BaseModel):
-    teamId: int
+    teamId: Optional[int] = None
     totalPoints: Optional[float] = None
     totalProjectedPoints: Optional[float] = None
+    gamesPlayed: Optional[int] = None
+    cumulativeScore: Optional[Dict[str, Any]] = None
 
 
 class Matchup(BaseModel):
     id: int
     matchupPeriodId: int
-    home: MatchupTeam
-    away: MatchupTeam
+    home: Optional[MatchupTeam] = None
+    away: Optional[MatchupTeam] = None
+    winner: Optional[str] = None
+    playoff: Optional[bool] = None
 
 
 class NBATeam(BaseModel):
