@@ -7,17 +7,28 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 ### Available Tools
 
 1. **get_league_teams** - Get all teams in an ESPN Fantasy Basketball league
-2. **get_team_roster** - Get roster for a specific team
+2. **get_team_roster** - Get roster for a specific team 
 3. **get_free_agents** - Get free agents/waiver wire players
 4. **get_matchups** - Get league matchup schedule
 5. **get_nba_schedule** - Get NBA game schedule
 
 ## Installation
 
-1. Clone or download this repository
-2. Install dependencies:
+### Prerequisites
+- Python 3.10 or higher
+- [uv](https://docs.astral.sh/uv/) package manager
+
+### Setup
+
+1. Clone this repository:
    ```bash
-   pip install -e .
+   git clone <repository-url>
+   cd espn-fantasy-basketball-mcp
+   ```
+
+2. Install dependencies using uv:
+   ```bash
+   uv sync
    ```
 
 ## Usage
@@ -25,20 +36,29 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 ### Running the Server
 
 ```bash
-espn-fantasy-basketball-mcp
+uv run espn_fantasy_basketball.py
 ```
 
 ### Configuration for Claude Desktop
 
-Add to your Claude Desktop configuration:
+Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "espn-fantasy-basketball": {
-      "command": "python",
-      "args": ["-m", "espn_fantasy_basketball_mcp.server"],
-      "env": {}
+      "command": "uv",
+      "args": [
+        "--directory", 
+        "/path/to/espn-fantasy-basketball-mcp",
+        "run", 
+        "espn_fantasy_basketball.py"
+      ],
+      "env": {
+        "ESPN_LEAGUE_ID": "your_league_id",
+        "ESPN_S2": "your_espn_s2_cookie",
+        "ESPN_SWID": "your_swid_cookie"
+      }
     }
   }
 }
@@ -47,13 +67,67 @@ Add to your Claude Desktop configuration:
 ### Private League Access
 
 For private leagues, you'll need ESPN authentication cookies:
-- `espn_s2`: ESPN authentication cookie
-- `swid`: ESPN SWID cookie
+- `ESPN_S2`: ESPN authentication cookie (long string starting with "AE")
+- `ESPN_SWID`: ESPN SWID cookie (format: `{12345678-1234-1234-1234-123456789012}`)
 
 To get these cookies:
 1. Log into ESPN Fantasy in your browser
-2. Open browser developer tools
-3. Find the `espn_s2` and `SWID` cookies in the Application/Storage tab
+2. Open browser developer tools (F12)
+3. Go to Application/Storage tab → Cookies → espn.com
+4. Find and copy the `espn_s2` and `SWID` cookie values
+
+## Development
+
+### Running Tests
+
+```bash
+# Run all tests
+uv run pytest
+
+# Run tests with coverage
+uv run pytest --cov=espn_fantasy_basketball_mcp
+
+# Run specific test file
+uv run pytest tests/test_models.py
+
+# Run tests in verbose mode
+uv run pytest -v
+```
+
+### Code Quality
+
+```bash
+# Format code
+uv run black espn_fantasy_basketball_mcp/ tests/
+
+# Type checking
+uv run mypy espn_fantasy_basketball_mcp/
+
+# Lint code
+uv run ruff espn_fantasy_basketball_mcp/ tests/
+```
+
+### Project Structure
+
+```
+espn-fantasy-basketball-mcp/
+├── espn_fantasy_basketball.py      # Main MCP server using FastMCP
+├── espn_fantasy_basketball_mcp/    # Core library package
+│   ├── __init__.py
+│   ├── client.py                   # ESPN API client
+│   ├── models.py                   # Pydantic data models
+│   └── server.py                   # Legacy MCP server (unused)
+├── tests/                          # Test suite
+│   ├── test_client.py             # Client tests
+│   ├── test_models.py             # Model tests
+│   └── test_server.py             # Server tests
+├── conftest.py                    # Pytest configuration
+├── pyproject.toml                 # Project configuration
+├── requirements.txt               # Dependencies (for pip users)
+├── Pipfile                        # Dependencies (for pipenv users)
+├── .python-version               # Python version for pyenv
+└── README.md                     # This file
+```
 
 ## API Endpoints Used
 
@@ -63,7 +137,7 @@ This MCP server uses the following ESPN API endpoints:
 - **Base URL**: `https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba`
 - **League Data**: `/seasons/{year}/segments/0/leagues/{league_id}`
   - Teams: `?view=mTeam`
-  - Rosters: `?view=mRoster`
+  - Rosters: `?view=mRoster` 
   - Matchups: `?view=mMatchup`
   - Free Agents: `?view=kona_player_info`
 
@@ -79,6 +153,8 @@ This MCP server uses the following ESPN API endpoints:
 2. **Private League Access**: Requires ESPN authentication cookies (`espn_s2` and `SWID`)
 3. **Rate Limiting**: ESPN may rate limit requests (not officially documented)
 4. **Undocumented API**: ESPN's fantasy API is not officially documented and may change
+5. **Data Completeness**: Some fields like team `location` are not provided by ESPN's API
+6. **Season Dependency**: API behavior may vary between active and inactive seasons
 
 ### Alternative APIs You May Need
 
@@ -116,7 +192,28 @@ ESPN uses the following position IDs:
 
 ## Example Usage
 
+### Via MCP Tools (in Claude Desktop)
+
+Once configured, you can ask Claude to:
+- "Get all teams in my fantasy basketball league"
+- "Show me the roster for the Lakers team"
+- "What free agents are available?"
+- "Show me this week's matchups"
+- "What NBA games are today?"
+
+### Direct Python Usage
+
 ```python
+from espn_fantasy_basketball_mcp.client import ESPNFantasyBasketballClient
+
+# Initialize client
+client = ESPNFantasyBasketballClient(
+    league_id=12345,
+    year=2025,
+    espn_s2="your_espn_s2_cookie",  # For private leagues
+    swid="your_swid_cookie"         # For private leagues
+)
+
 # Get all teams in league
 teams = await client.get_league_teams()
 
@@ -133,18 +230,34 @@ matchups = await client.get_matchups()
 nba_games = await client.get_nba_schedule()
 ```
 
-## Development
+## Troubleshooting
+
+### Common Issues
+
+1. **"Team not found" errors**: Verify your league ID and ensure you have access to the league
+2. **Authentication errors**: Check that your `espn_s2` and `SWID` cookies are correct and not expired
+3. **Empty results**: Some data may not be available during off-season or for certain league settings
+4. **Rate limiting**: ESPN may temporarily block requests if you make too many in quick succession
+
+### Debug Mode
+
+The client includes error handling and logging. For debugging, check the server logs when running:
 
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Format code
-black espn_fantasy_basketball_mcp/
-
-# Type checking
-mypy espn_fantasy_basketball_mcp/
-
-# Lint
-ruff espn_fantasy_basketball_mcp/
+uv run espn_fantasy_basketball.py
 ```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature-name`
+3. Make your changes and add tests
+4. Run tests: `uv run pytest`
+5. Run code quality checks: `uv run black . && uv run ruff .`
+6. Commit your changes: `git commit -am 'Add feature'`
+7. Push to the branch: `git push origin feature-name`
+8. Create a Pull Request
+
+## License
+
+MIT License - see LICENSE file for details.
