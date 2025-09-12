@@ -89,9 +89,10 @@ class ESPNFantasyBasketballClient:
             position_id: Filter by position ID (optional)
         """
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        filter_json = f'{{"players":{{"limit":{size},"sortPercOwned":{{"sortAsc":false,"sortPriority":1}}}}}}'
         params = {
             "view": "kona_player_info",
-            "X-Fantasy-Filter": f'{{"players":{{"limit":{size},"sortPercOwned":{{"sortAsc":false,"sortPriority":1}}}}}'
+            "X-Fantasy-Filter": filter_json
         }
         
         if position_id:
