@@ -2,7 +2,10 @@
 
 import httpx
 from typing import List, Dict, Any, Optional
-from .models import Team, Player, Roster, Matchup, NBAGame, PlayerPoolEntry, RosterEntry, MatchupTeam
+from .models import (
+    Team, Player, Roster, Matchup, NBAGame, PlayerPoolEntry, RosterEntry, MatchupTeam,
+    DraftPick, DraftStatus, PlayerDraftInfo, TeamDraftSummary, DraftRecommendation
+)
 
 
 class ESPNFantasyBasketballClient:
@@ -236,3 +239,213 @@ class ESPNFantasyBasketballClient:
         except Exception:
             # If NBA API fails, return empty list
             return []
+    
+    async def get_draft_status(self) -> DraftStatus:
+        """Get current draft status and picks."""
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        params = {"view": "mDraftDetail"}
+        
+        data = await self._make_request(url, params)
+        draft_detail = data.get("draftDetail", {})
+        
+        picks = []
+        for pick_data in draft_detail.get("picks", []):
+            pick = DraftPick(
+                id=pick_data["id"],
+                playerId=pick_data["playerId"],
+                teamId=pick_data["teamId"],
+                bidAmount=pick_data.get("bidAmount", 0),
+                overallPickNumber=pick_data["overallPickNumber"],
+                roundId=pick_data["roundId"],
+                roundPickNumber=pick_data["roundPickNumber"],
+                nominatingTeamId=pick_data.get("nominatingTeamId"),
+                memberId=pick_data.get("memberId"),
+                lineupSlotId=pick_data.get("lineupSlotId"),
+                keeper=pick_data.get("keeper", False)
+            )
+            picks.append(pick)
+        
+        # Determine current pick if draft is in progress
+        current_pick_number = None
+        current_nominating_team = None
+        if draft_detail.get("inProgress", False):
+            current_pick_number = len(picks) + 1
+            # In auction drafts, teams take turns nominating
+            if current_pick_number <= 12:  # Assuming 12 teams
+                current_nominating_team = ((current_pick_number - 1) % 12) + 1
+        
+        return DraftStatus(
+            inProgress=draft_detail.get("inProgress", False),
+            drafted=draft_detail.get("drafted", False),
+            completeDate=draft_detail.get("completeDate"),
+            picks=picks,
+            currentPickNumber=current_pick_number,
+            currentNominatingTeam=current_nominating_team
+        )
+    
+    async def get_available_players(self, limit: int = 100) -> List[PlayerDraftInfo]:
+        """Get available players for draft with auction values."""
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        params = {"view": "kona_player_info"}
+        
+        data = await self._make_request(url, params)
+        
+        # Get current draft status to see who's been drafted
+        draft_status = await self.get_draft_status()
+        drafted_players = {pick.playerId: (pick.teamId, pick.bidAmount) for pick in draft_status.picks}
+        
+        players = []
+        for player_entry in data.get("players", []):
+            if len(players) >= limit:
+                break
+                
+            player_data = player_entry["player"]
+            player_id = player_data["id"]
+            
+            # Skip if already drafted
+            if player_id in drafted_players:
+                continue
+                
+            player = Player(
+                id=player_id,
+                fullName=player_data.get("fullName", ""),
+                firstName=player_data.get("firstName", ""),
+                lastName=player_data.get("lastName", ""),
+                defaultPositionId=player_data["defaultPositionId"],
+                eligibleSlots=player_data.get("eligibleSlots"),
+                proTeamId=player_data.get("proTeamId"),
+                active=player_data.get("active", True),
+                injured=player_data.get("injured", False),
+                injuryStatus=player_data.get("injuryStatus")
+            )
+            
+            # Get auction value from draft rankings
+            auction_value = None
+            rank = None
+            if player_data.get("draftRanksByRankType", {}).get("STANDARD"):
+                auction_value = player_data["draftRanksByRankType"]["STANDARD"].get("auctionValue", 0)
+                rank = player_data["draftRanksByRankType"]["STANDARD"].get("rank")
+            
+            player_draft_info = PlayerDraftInfo(
+                playerId=player_id,
+                player=player,
+                draftAuctionValue=player_entry.get("draftAuctionValue", 0),
+                auctionValue=auction_value,
+                rank=rank,
+                isDrafted=False
+            )
+            
+            players.append(player_draft_info)
+        
+        # Sort by auction value (highest first)
+        players.sort(key=lambda p: p.auctionValue or 0, reverse=True)
+        return players
+    
+    async def get_team_draft_summary(self, team_id: int) -> TeamDraftSummary:
+        """Get draft summary for a specific team."""
+        # Get current draft picks
+        draft_status = await self.get_draft_status()
+        team_picks = [pick for pick in draft_status.picks if pick.teamId == team_id]
+        
+        # Get team info
+        teams = await self.get_league_teams()
+        team = next((t for t in teams if t.id == team_id), None)
+        team_name = team.name if team else f"Team {team_id}"
+        
+        # Calculate spending
+        total_spent = sum(pick.bidAmount for pick in team_picks)
+        players_count = len(team_picks)
+        
+        # Assuming $200 budget (standard for auction)
+        remaining_budget = 200 - total_spent
+        
+        # Get position counts (simplified)
+        position_counts = {}
+        for pick in team_picks:
+            # This would need player data to get actual positions
+            # For now, just count total players
+            pass
+        
+        return TeamDraftSummary(
+            teamId=team_id,
+            teamName=team_name,
+            totalSpent=total_spent,
+            playersCount=players_count,
+            remainingBudget=remaining_budget,
+            positionCounts=position_counts
+        )
+    
+    async def get_draft_recommendation(self, team_id: int, current_player_id: Optional[int] = None) -> DraftRecommendation:
+        """Get draft recommendation for current situation."""
+        # Get team's current status
+        team_summary = await self.get_team_draft_summary(team_id)
+        
+        # Get available players
+        available_players = await self.get_available_players(50)
+        
+        if current_player_id:
+            # Player is currently being nominated - should we bid?
+            current_player = next((p for p in available_players if p.playerId == current_player_id), None)
+            
+            if not current_player:
+                return DraftRecommendation(
+                    action="pass",
+                    reasoning="Player not found in available players list",
+                    priority=1
+                )
+            
+            # Simple bidding logic
+            player_value = current_player.auctionValue or 0
+            max_affordable = min(team_summary.remainingBudget - (13 - team_summary.playersCount), player_value)
+            
+            if player_value >= 10 and max_affordable >= player_value * 0.8:
+                return DraftRecommendation(
+                    action="bid",
+                    playerId=current_player_id,
+                    playerName=current_player.player.fullName,
+                    suggestedBid=min(player_value, max_affordable),
+                    maxBid=max_affordable,
+                    reasoning=f"Good value player worth ${player_value}. You can afford up to ${max_affordable}.",
+                    priority=7,
+                    category_impact={"value": "positive"}
+                )
+            else:
+                return DraftRecommendation(
+                    action="pass",
+                    playerName=current_player.player.fullName,
+                    reasoning=f"Player value (${player_value}) too high for remaining budget (${team_summary.remainingBudget})",
+                    priority=3
+                )
+        else:
+            # Recommend next player to target
+            if available_players:
+                best_player = available_players[0]
+                return DraftRecommendation(
+                    action="nominate",
+                    playerId=best_player.playerId,
+                    playerName=best_player.player.fullName,
+                    suggestedBid=best_player.auctionValue or 1,
+                    reasoning=f"Highest ranked available player (rank #{best_player.rank})",
+                    priority=9,
+                    category_impact={"overall": "strong positive"}
+                )
+            
+            return DraftRecommendation(
+                action="pass",
+                reasoning="No quality players available",
+                priority=1
+            )
+    
+    async def analyze_punt_strategy(self, team_id: int) -> Dict[str, Any]:
+        """Analyze current punt strategy based on drafted players."""
+        team_summary = await self.get_team_draft_summary(team_id)
+        
+        # This would need more sophisticated analysis with player stats
+        # For now, return basic info
+        return {
+            "totalSpent": team_summary.totalSpent,
+            "remainingBudget": team_summary.remainingBudget,
+            "playersCount": team_summary.playersCount,
+            "strategy": "balanced" if team_summary.playersCount < 5 else "punt_detection_needed",
+            "recommendation": f"You have ${team_summary.remainingBudget} for {13 - team_summary.playersCount} more players"
+        }
