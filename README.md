@@ -7,6 +7,8 @@
 
 An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Basketball APIs. This server enables Claude and other MCP clients to fetch fantasy basketball data including league teams, player rosters, waiver wire players, matchup schedules, and NBA schedules.
 
+> **Note**: This is an unofficial third-party tool and is not affiliated with or endorsed by ESPN.
+
 ## Features
 
 ### Available Tools
