@@ -1,15 +1,25 @@
 """Test cases for ESPN Fantasy Basketball data models."""
 
-import pytest
 from espn_fantasy_basketball_mcp.models import (
-    Team, Player, PlayerPoolEntry, RosterEntry, Roster,
-    MatchupTeam, Matchup, NBATeam, NBAGame
+    DraftPick,
+    DraftRecommendation,
+    DraftStatus,
+    Matchup,
+    MatchupTeam,
+    NBAGame,
+    Player,
+    PlayerDraftInfo,
+    PlayerPoolEntry,
+    Roster,
+    RosterEntry,
+    Team,
+    TeamDraftSummary,
 )
 
 
 class TestTeamModel:
     """Test cases for Team model."""
-    
+
     def test_team_creation_minimal(self):
         """Test creating a team with minimal required fields."""
         team = Team(id=1, abbrev="TEST", name="Test Team")
@@ -20,7 +30,7 @@ class TestTeamModel:
         assert team.logo is None
         assert team.owners is None
         assert team.record is None
-    
+
     def test_team_creation_full(self):
         """Test creating a team with all fields."""
         team = Team(
@@ -41,7 +51,7 @@ class TestTeamModel:
 
 class TestPlayerModel:
     """Test cases for Player model."""
-    
+
     def test_player_creation_minimal(self):
         """Test creating a player with minimal required fields."""
         player = Player(
@@ -55,7 +65,7 @@ class TestPlayerModel:
         assert player.firstName is None
         assert player.lastName is None
         assert player.injured is None
-    
+
     def test_player_creation_full(self):
         """Test creating a player with all fields."""
         player = Player(
@@ -88,7 +98,7 @@ class TestPlayerModel:
 
 class TestRosterModel:
     """Test cases for Roster-related models."""
-    
+
     def test_roster_entry_creation(self):
         """Test creating a roster entry."""
         player = Player(id=12345, fullName="Test Player", defaultPositionId=1)
@@ -103,7 +113,7 @@ class TestRosterModel:
         assert roster_entry.playerPoolEntry.id == 12345
         assert roster_entry.lineupSlotId == 0
         assert roster_entry.acquisitionType == "DRAFT"
-    
+
     def test_roster_creation(self):
         """Test creating a complete roster."""
         player = Player(id=12345, fullName="Test Player", defaultPositionId=1)
@@ -121,7 +131,7 @@ class TestRosterModel:
 
 class TestMatchupModel:
     """Test cases for Matchup model."""
-    
+
     def test_matchup_team_creation(self):
         """Test creating a matchup team."""
         matchup_team = MatchupTeam(
@@ -134,7 +144,7 @@ class TestMatchupModel:
         assert matchup_team.totalPoints == 100.5
         assert matchup_team.totalProjectedPoints == 95.0
         assert matchup_team.gamesPlayed == 10
-    
+
     def test_matchup_creation(self):
         """Test creating a matchup."""
         home_team = MatchupTeam(teamId=1, totalPoints=100.5)
@@ -155,19 +165,19 @@ class TestMatchupModel:
 
 class TestNBAModel:
     """Test cases for NBA-related models."""
-    
+
     def test_nba_game_creation(self):
         """Test creating an NBA game."""
         nba_team1 = {"id": "1", "displayName": "Lakers", "abbreviation": "LAL"}
         nba_team2 = {"id": "2", "displayName": "Warriors", "abbreviation": "GSW"}
-        
+
         competition = {
             "competitors": [
                 {"team": nba_team1},
                 {"team": nba_team2}
             ]
         }
-        
+
         nba_game = NBAGame(
             id="12345",
             date="2025-01-15T20:00:00Z",
@@ -176,3 +186,111 @@ class TestNBAModel:
         assert nba_game.id == "12345"
         assert nba_game.date == "2025-01-15T20:00:00Z"
         assert len(nba_game.competitions) == 1
+
+
+class TestDraftModels:
+    """Test cases for draft-related models."""
+
+    def test_draft_pick_creation(self):
+        """Test creating a draft pick."""
+        pick = DraftPick(
+            id=1,
+            playerId=12345,
+            teamId=1,
+            bidAmount=50,
+            overallPickNumber=1,
+            roundId=1,
+            roundPickNumber=1,
+            nominatingTeamId=2,
+            keeper=False
+        )
+        assert pick.id == 1
+        assert pick.playerId == 12345
+        assert pick.teamId == 1
+        assert pick.bidAmount == 50
+        assert pick.overallPickNumber == 1
+        assert pick.roundId == 1
+        assert pick.roundPickNumber == 1
+        assert pick.nominatingTeamId == 2
+        assert pick.keeper is False
+
+    def test_draft_status_creation(self):
+        """Test creating draft status."""
+        pick = DraftPick(
+            id=1,
+            playerId=12345,
+            teamId=1,
+            bidAmount=50,
+            overallPickNumber=1,
+            roundId=1,
+            roundPickNumber=1
+        )
+
+        status = DraftStatus(
+            inProgress=True,
+            drafted=False,
+            picks=[pick],
+            currentPickNumber=2,
+            currentNominatingTeam=2
+        )
+        assert status.inProgress is True
+        assert status.drafted is False
+        assert len(status.picks) == 1
+        assert status.currentPickNumber == 2
+        assert status.currentNominatingTeam == 2
+
+    def test_player_draft_info_creation(self):
+        """Test creating player draft info."""
+        player = Player(id=12345, fullName="Test Player", defaultPositionId=1)
+        draft_info = PlayerDraftInfo(
+            playerId=12345,
+            player=player,
+            auctionValue=30,
+            rank=25,
+            isDrafted=False
+        )
+        assert draft_info.playerId == 12345
+        assert draft_info.player.fullName == "Test Player"
+        assert draft_info.auctionValue == 30
+        assert draft_info.rank == 25
+        assert draft_info.isDrafted is False
+
+    def test_team_draft_summary_creation(self):
+        """Test creating team draft summary."""
+        summary = TeamDraftSummary(
+            teamId=1,
+            teamName="Test Team",
+            totalSpent=150,
+            playersCount=8,
+            remainingBudget=50,
+            positionCounts={"PG": 2, "SG": 1},
+            categories={"points": 100.5, "rebounds": 75.2}
+        )
+        assert summary.teamId == 1
+        assert summary.teamName == "Test Team"
+        assert summary.totalSpent == 150
+        assert summary.playersCount == 8
+        assert summary.remainingBudget == 50
+        assert summary.positionCounts["PG"] == 2
+        assert summary.categories["points"] == 100.5
+
+    def test_draft_recommendation_creation(self):
+        """Test creating draft recommendation."""
+        recommendation = DraftRecommendation(
+            action="bid",
+            playerId=12345,
+            playerName="Test Player",
+            suggestedBid=25,
+            maxBid=30,
+            reasoning="Good value at this price",
+            priority=8,
+            category_impact={"points": "positive", "rebounds": "neutral"}
+        )
+        assert recommendation.action == "bid"
+        assert recommendation.playerId == 12345
+        assert recommendation.playerName == "Test Player"
+        assert recommendation.suggestedBid == 25
+        assert recommendation.maxBid == 30
+        assert recommendation.reasoning == "Good value at this price"
+        assert recommendation.priority == 8
+        assert recommendation.category_impact["points"] == "positive"

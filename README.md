@@ -1,5 +1,10 @@
 # ESPN Fantasy Basketball MCP Server
 
+[![Tests](https://github.com/dharris/espn-fantasy-basketball-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/dharris/espn-fantasy-basketball-mcp/actions/workflows/test.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy-lang.org/)
+
 An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Basketball APIs. This server enables Claude and other MCP clients to fetch fantasy basketball data including league teams, player rosters, waiver wire players, matchup schedules, and NBA schedules.
 
 ## Features

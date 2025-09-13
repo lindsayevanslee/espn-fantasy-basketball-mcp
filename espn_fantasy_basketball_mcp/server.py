@@ -2,13 +2,14 @@
 
 import asyncio
 import json
-from typing import Any, Sequence
-from mcp.server import Server, NotificationOptions
-from mcp.server.models import InitializationOptions
+from typing import Any
+
 import mcp.server.stdio
 import mcp.types as types
-from .client import ESPNFantasyBasketballClient
+from mcp.server import NotificationOptions, Server
+from mcp.server.models import InitializationOptions
 
+from .client import ESPNFantasyBasketballClient
 
 server = Server("espn-fantasy-basketball")
 
@@ -28,7 +29,7 @@ async def handle_list_tools() -> list[types.Tool]:
                         "description": "ESPN Fantasy Basketball league ID"
                     },
                     "year": {
-                        "type": "integer", 
+                        "type": "integer",
                         "description": "Season year (e.g., 2025)"
                     },
                     "espn_s2": {
@@ -162,23 +163,23 @@ async def handle_list_tools() -> list[types.Tool]:
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
     """Handle tool calls."""
-    
+
     if name == "get_league_teams":
         league_id = arguments["league_id"]
         year = arguments["year"]
         espn_s2 = arguments.get("espn_s2")
         swid = arguments.get("swid")
-        
+
         client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
         teams = await client.get_league_teams()
-        
+
         return [
             types.TextContent(
                 type="text",
                 text=json.dumps([team.model_dump() for team in teams], indent=2)
             )
         ]
-    
+
     elif name == "get_team_roster":
         league_id = arguments["league_id"]
         year = arguments["year"]
@@ -186,17 +187,17 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
         scoring_period = arguments.get("scoring_period")
         espn_s2 = arguments.get("espn_s2")
         swid = arguments.get("swid")
-        
+
         client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
         roster = await client.get_team_roster(team_id, scoring_period)
-        
+
         return [
             types.TextContent(
-                type="text", 
+                type="text",
                 text=json.dumps(roster.model_dump(), indent=2)
             )
         ]
-    
+
     elif name == "get_free_agents":
         league_id = arguments["league_id"]
         year = arguments["year"]
@@ -204,48 +205,48 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
         position_id = arguments.get("position_id")
         espn_s2 = arguments.get("espn_s2")
         swid = arguments.get("swid")
-        
+
         client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
         players = await client.get_free_agents(size, position_id)
-        
+
         return [
             types.TextContent(
                 type="text",
                 text=json.dumps([player.model_dump() for player in players], indent=2)
             )
         ]
-    
+
     elif name == "get_matchups":
         league_id = arguments["league_id"]
         year = arguments["year"]
         scoring_period = arguments.get("scoring_period")
         espn_s2 = arguments.get("espn_s2")
         swid = arguments.get("swid")
-        
+
         client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
         matchups = await client.get_matchups(scoring_period)
-        
+
         return [
             types.TextContent(
                 type="text",
                 text=json.dumps([matchup.model_dump() for matchup in matchups], indent=2)
             )
         ]
-    
+
     elif name == "get_nba_schedule":
         date = arguments.get("date")
-        
+
         # Create a temporary client just for NBA API access
         client = ESPNFantasyBasketballClient(1, 2025)  # Dummy values for NBA API
         games = await client.get_nba_schedule(date)
-        
+
         return [
             types.TextContent(
                 type="text",
                 text=json.dumps([game.model_dump() for game in games], indent=2)
             )
         ]
-    
+
     else:
         raise ValueError(f"Unknown tool: {name}")
 

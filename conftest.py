@@ -1,7 +1,8 @@
 """Pytest configuration file for ESPN Fantasy Basketball MCP server."""
 
-import pytest
 import asyncio
+
+import pytest
 
 
 @pytest.fixture(scope="session")
@@ -137,11 +138,103 @@ def sample_nba_game_data():
                     {
                         "team": {
                             "id": "2",
-                            "displayName": "Golden State Warriors", 
+                            "displayName": "Golden State Warriors",
                             "abbreviation": "GSW"
                         }
                     }
                 ]
             }
         ]
+    }
+
+
+@pytest.fixture
+def sample_draft_pick_data():
+    """Sample draft pick data for testing."""
+    return {
+        "id": 1,
+        "playerId": 12345,
+        "teamId": 1,
+        "bidAmount": 50,
+        "overallPickNumber": 1,
+        "roundId": 1,
+        "roundPickNumber": 1,
+        "nominatingTeamId": 2,
+        "keeper": False
+    }
+
+
+@pytest.fixture
+def sample_draft_status_data():
+    """Sample draft status data for testing."""
+    return {
+        "inProgress": True,
+        "drafted": False,
+        "completeDate": None,
+        "picks": [
+            {
+                "id": 1,
+                "playerId": 12345,
+                "teamId": 1,
+                "bidAmount": 50,
+                "overallPickNumber": 1,
+                "roundId": 1,
+                "roundPickNumber": 1
+            }
+        ],
+        "currentPickNumber": 2,
+        "currentNominatingTeam": 2
+    }
+
+
+@pytest.fixture
+def sample_player_draft_info_data():
+    """Sample player draft info data for testing."""
+    return {
+        "playerId": 12345,
+        "player": {
+            "id": 12345,
+            "fullName": "Test Player",
+            "firstName": "Test",
+            "lastName": "Player",
+            "defaultPositionId": 1,
+            "active": True
+        },
+        "draftAuctionValue": 0,
+        "auctionValue": 30,
+        "rank": 25,
+        "isDrafted": False
+    }
+
+
+@pytest.fixture
+def sample_team_draft_summary_data():
+    """Sample team draft summary data for testing."""
+    return {
+        "teamId": 1,
+        "teamName": "Test Team",
+        "totalSpent": 150,
+        "playersCount": 8,
+        "remainingBudget": 50,
+        "positionCounts": {"PG": 2, "SG": 1, "SF": 2, "PF": 2, "C": 1},
+        "categories": {"points": 100.5, "rebounds": 75.2, "assists": 65.8}
+    }
+
+
+@pytest.fixture
+def sample_draft_recommendation_data():
+    """Sample draft recommendation data for testing."""
+    return {
+        "action": "bid",
+        "playerId": 12345,
+        "playerName": "Test Player",
+        "suggestedBid": 25,
+        "maxBid": 30,
+        "reasoning": "Good value player at this price point",
+        "priority": 8,
+        "category_impact": {
+            "points": "positive",
+            "rebounds": "neutral",
+            "assists": "slight_positive"
+        }
     }

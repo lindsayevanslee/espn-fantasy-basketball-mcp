@@ -1,23 +1,26 @@
 """Test cases for ESPN Fantasy Basketball MCP server."""
 
-import pytest
-from unittest.mock import AsyncMock, patch
-import asyncio
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 # Add the project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from espn_fantasy_basketball import (
-    get_league_teams, get_team_roster, get_free_agents, 
-    get_matchups, get_nba_schedule
+    get_free_agents,
+    get_league_teams,
+    get_matchups,
+    get_nba_schedule,
+    get_team_roster,
 )
 
 
 class TestMCPServerTools:
     """Test cases for MCP server tool functions."""
-    
+
     @pytest.mark.asyncio
     async def test_get_league_teams_tool(self):
         """Test the get_league_teams MCP tool."""
@@ -32,28 +35,28 @@ class TestMCPServerTools:
                 "record": None
             }
         ]
-        
+
         with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
             mock_client_instance = MockClient.return_value
             mock_client_instance.get_league_teams = AsyncMock(return_value=[
                 type('Team', (), mock_teams[0])()
             ])
             mock_client_instance.get_league_teams.return_value[0].model_dump = lambda: mock_teams[0]
-            
+
             result = await get_league_teams(
                 league_id=12345,
                 year=2025,
                 espn_s2="test_s2",
                 swid="test_swid"
             )
-            
+
             assert len(result) == 1
             assert result[0]["id"] == 1
             assert result[0]["name"] == "Test Team"
-            
+
             # Verify client was initialized correctly
             MockClient.assert_called_once_with(12345, 2025, "test_s2", "test_swid")
-    
+
     @pytest.mark.asyncio
     async def test_get_team_roster_tool(self):
         """Test the get_team_roster MCP tool."""
@@ -74,12 +77,12 @@ class TestMCPServerTools:
                 }
             ]
         }
-        
+
         with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
             mock_client_instance = MockClient.return_value
             mock_roster_obj = type('Roster', (), {"model_dump": lambda self: mock_roster})()
             mock_client_instance.get_team_roster = AsyncMock(return_value=mock_roster_obj)
-            
+
             result = await get_team_roster(
                 league_id=12345,
                 year=2025,
@@ -87,14 +90,14 @@ class TestMCPServerTools:
                 espn_s2="test_s2",
                 swid="test_swid"
             )
-            
+
             assert result["teamId"] == 1
             assert len(result["entries"]) == 1
             assert result["entries"][0]["playerId"] == 12345
-            
+
             # Verify client method was called correctly
             mock_client_instance.get_team_roster.assert_called_once_with(1, None)
-    
+
     @pytest.mark.asyncio
     async def test_get_free_agents_tool(self):
         """Test the get_free_agents MCP tool."""
@@ -106,25 +109,25 @@ class TestMCPServerTools:
                 "ownership": {"percentOwned": 5.2}
             }
         ]
-        
+
         with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
             mock_client_instance = MockClient.return_value
             mock_player_objs = [type('Player', (), {"model_dump": lambda self: mock_players[0]})()]
             mock_client_instance.get_free_agents = AsyncMock(return_value=mock_player_objs)
-            
+
             result = await get_free_agents(
                 league_id=12345,
                 year=2025,
                 size=10,
                 position_id=1
             )
-            
+
             assert len(result) == 1
             assert result[0]["fullName"] == "Free Agent"
-            
+
             # Verify client method was called correctly
             mock_client_instance.get_free_agents.assert_called_once_with(10, 1)
-    
+
     @pytest.mark.asyncio
     async def test_get_matchups_tool(self):
         """Test the get_matchups MCP tool."""
@@ -138,25 +141,25 @@ class TestMCPServerTools:
                 "playoff": False
             }
         ]
-        
+
         with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
             mock_client_instance = MockClient.return_value
             mock_matchup_objs = [type('Matchup', (), {"model_dump": lambda self: mock_matchups[0]})()]
             mock_client_instance.get_matchups = AsyncMock(return_value=mock_matchup_objs)
-            
+
             result = await get_matchups(
                 league_id=12345,
                 year=2025,
                 scoring_period=1
             )
-            
+
             assert len(result) == 1
             assert result[0]["id"] == 1
             assert result[0]["winner"] == "HOME"
-            
+
             # Verify client method was called correctly
             mock_client_instance.get_matchups.assert_called_once_with(1)
-    
+
     @pytest.mark.asyncio
     async def test_get_nba_schedule_tool(self):
         """Test the get_nba_schedule MCP tool."""
@@ -174,21 +177,21 @@ class TestMCPServerTools:
                 ]
             }
         ]
-        
+
         with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
             mock_client_instance = MockClient.return_value
             mock_game_objs = [type('Game', (), {"model_dump": lambda self: mock_games[0]})()]
             mock_client_instance.get_nba_schedule = AsyncMock(return_value=mock_game_objs)
-            
+
             result = await get_nba_schedule(date="2025-01-15")
-            
+
             assert len(result) == 1
             assert result[0]["id"] == "12345"
             assert result[0]["date"] == "2025-01-15T20:00:00Z"
-            
+
             # Verify client method was called correctly
             mock_client_instance.get_nba_schedule.assert_called_once_with("2025-01-15")
-    
+
     @pytest.mark.asyncio
     async def test_tools_with_minimal_params(self):
         """Test tools with minimal required parameters."""
@@ -198,16 +201,16 @@ class TestMCPServerTools:
             mock_client_instance.get_free_agents = AsyncMock(return_value=[])
             mock_client_instance.get_matchups = AsyncMock(return_value=[])
             mock_client_instance.get_nba_schedule = AsyncMock(return_value=[])
-            
+
             # Test with minimal parameters
             await get_league_teams(league_id=12345, year=2025)
             MockClient.assert_called_with(12345, 2025, None, None)
-            
+
             await get_free_agents(league_id=12345, year=2025)
             mock_client_instance.get_free_agents.assert_called_with(50, None)
-            
+
             await get_matchups(league_id=12345, year=2025)
             mock_client_instance.get_matchups.assert_called_with(None)
-            
+
             await get_nba_schedule()
             mock_client_instance.get_nba_schedule.assert_called_with(None)

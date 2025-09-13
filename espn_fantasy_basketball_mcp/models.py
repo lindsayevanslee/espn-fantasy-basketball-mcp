@@ -1,96 +1,97 @@
 """Data models for ESPN Fantasy Basketball API responses."""
 
-from typing import List, Optional, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel
 
 
 class Owner(BaseModel):
     firstName: str
     lastName: str
-    displayName: Optional[str] = None
+    displayName: str | None = None
 
 
 class OverallRecord(BaseModel):
     wins: int
     losses: int
-    percentage: Optional[float] = None
+    percentage: float | None = None
 
 
 class TeamRecord(BaseModel):
-    overall: Optional[OverallRecord] = None
+    overall: OverallRecord | None = None
 
 
 class Team(BaseModel):
     id: int
     abbrev: str
     name: str
-    location: Optional[str] = None  # Make location optional since ESPN doesn't always provide it
-    logo: Optional[str] = None
-    owners: Optional[List[str]] = None  # ESPN returns owner IDs as strings
-    record: Optional[TeamRecord] = None
+    location: str | None = None  # Make location optional since ESPN doesn't always provide it
+    logo: str | None = None
+    owners: list[str] | None = None  # ESPN returns owner IDs as strings
+    record: TeamRecord | None = None
 
 
 class PlayerOwnership(BaseModel):
-    percentOwned: Optional[float] = None
-    percentChange: Optional[float] = None
-    percentStarted: Optional[float] = None
+    percentOwned: float | None = None
+    percentChange: float | None = None
+    percentStarted: float | None = None
 
 
 class Player(BaseModel):
     id: int
     fullName: str
-    firstName: Optional[str] = None
-    lastName: Optional[str] = None
-    jersey: Optional[str] = None
-    proTeamId: Optional[int] = None
+    firstName: str | None = None
+    lastName: str | None = None
+    jersey: str | None = None
+    proTeamId: int | None = None
     defaultPositionId: int
-    eligibleSlots: Optional[List[int]] = None
-    injured: Optional[bool] = None
-    injuryStatus: Optional[str] = None
-    stats: Optional[Dict[str, Any]] = None
-    ownership: Optional[PlayerOwnership] = None
-    active: Optional[bool] = None
-    droppable: Optional[bool] = None
+    eligibleSlots: list[int] | None = None
+    injured: bool | None = None
+    injuryStatus: str | None = None
+    stats: dict[str, Any] | None = None
+    ownership: PlayerOwnership | None = None
+    active: bool | None = None
+    droppable: bool | None = None
 
 
 class PlayerPoolEntry(BaseModel):
     id: int
     player: Player
-    onTeamId: Optional[int] = None
-    keeperValue: Optional[int] = None
-    keeperValueFuture: Optional[int] = None
-    lineupLocked: Optional[bool] = None
+    onTeamId: int | None = None
+    keeperValue: int | None = None
+    keeperValueFuture: int | None = None
+    lineupLocked: bool | None = None
 
 
 class RosterEntry(BaseModel):
     playerId: int
     playerPoolEntry: PlayerPoolEntry
     lineupSlotId: int
-    acquisitionDate: Optional[int] = None
-    acquisitionType: Optional[str] = None
-    injuryStatus: Optional[str] = None
+    acquisitionDate: int | None = None
+    acquisitionType: str | None = None
+    injuryStatus: str | None = None
 
 
 class Roster(BaseModel):
     teamId: int
-    entries: List[RosterEntry]
+    entries: list[RosterEntry]
 
 
 class MatchupTeam(BaseModel):
-    teamId: Optional[int] = None
-    totalPoints: Optional[float] = None
-    totalProjectedPoints: Optional[float] = None
-    gamesPlayed: Optional[int] = None
-    cumulativeScore: Optional[Dict[str, Any]] = None
+    teamId: int | None = None
+    totalPoints: float | None = None
+    totalProjectedPoints: float | None = None
+    gamesPlayed: int | None = None
+    cumulativeScore: dict[str, Any] | None = None
 
 
 class Matchup(BaseModel):
     id: int
     matchupPeriodId: int
-    home: Optional[MatchupTeam] = None
-    away: Optional[MatchupTeam] = None
-    winner: Optional[str] = None
-    playoff: Optional[bool] = None
+    home: MatchupTeam | None = None
+    away: MatchupTeam | None = None
+    winner: str | None = None
+    playoff: bool | None = None
 
 
 class NBATeam(BaseModel):
@@ -104,13 +105,13 @@ class NBACompetitor(BaseModel):
 
 
 class NBACompetition(BaseModel):
-    competitors: List[NBACompetitor]
+    competitors: list[NBACompetitor]
 
 
 class NBAGame(BaseModel):
     id: str
     date: str
-    competitions: List[NBACompetition]
+    competitions: list[NBACompetition]
 
 
 # Draft-related models
@@ -122,30 +123,30 @@ class DraftPick(BaseModel):
     overallPickNumber: int
     roundId: int
     roundPickNumber: int
-    nominatingTeamId: Optional[int] = None
-    memberId: Optional[str] = None
-    lineupSlotId: Optional[int] = None
+    nominatingTeamId: int | None = None
+    memberId: str | None = None
+    lineupSlotId: int | None = None
     keeper: bool = False
 
 
 class DraftStatus(BaseModel):
     inProgress: bool
     drafted: bool
-    completeDate: Optional[int] = None
-    picks: List[DraftPick]
-    currentPickNumber: Optional[int] = None
-    currentNominatingTeam: Optional[int] = None
+    completeDate: int | None = None
+    picks: list[DraftPick]
+    currentPickNumber: int | None = None
+    currentNominatingTeam: int | None = None
 
 
 class PlayerDraftInfo(BaseModel):
     playerId: int
     player: Player
-    draftAuctionValue: Optional[int] = None
-    auctionValue: Optional[int] = None  # ESPN's projected value
-    rank: Optional[int] = None
+    draftAuctionValue: int | None = None
+    auctionValue: int | None = None  # ESPN's projected value
+    rank: int | None = None
     isDrafted: bool = False
-    draftedByTeam: Optional[int] = None
-    bidAmount: Optional[int] = None
+    draftedByTeam: int | None = None
+    bidAmount: int | None = None
 
 
 class TeamDraftSummary(BaseModel):
@@ -154,16 +155,16 @@ class TeamDraftSummary(BaseModel):
     totalSpent: int
     playersCount: int
     remainingBudget: int
-    positionCounts: Dict[str, int] = {}
-    categories: Dict[str, float] = {}  # Projected category totals
+    positionCounts: dict[str, int] = {}
+    categories: dict[str, float] = {}  # Projected category totals
 
 
 class DraftRecommendation(BaseModel):
     action: str  # "bid", "pass", "nominate"
-    playerId: Optional[int] = None
-    playerName: Optional[str] = None
-    suggestedBid: Optional[int] = None
-    maxBid: Optional[int] = None
+    playerId: int | None = None
+    playerName: str | None = None
+    suggestedBid: int | None = None
+    maxBid: int | None = None
     reasoning: str
     priority: int  # 1-10, 10 being highest
-    category_impact: Dict[str, str] = {}  # How this player affects your categories
+    category_impact: dict[str, str] = {}  # How this player affects your categories
