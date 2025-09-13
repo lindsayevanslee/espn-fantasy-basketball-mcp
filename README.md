@@ -13,11 +13,19 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 
 ### Available Tools
 
+#### Core Fantasy Tools
 1. **get_league_teams** - Get all teams in an ESPN Fantasy Basketball league
 2. **get_team_roster** - Get roster for a specific team 
 3. **get_free_agents** - Get free agents/waiver wire players
 4. **get_matchups** - Get league matchup schedule
 5. **get_nba_schedule** - Get NBA game schedule
+
+#### Live Draft Assistant Tools
+6. **get_draft_status** - Get current draft status including all picks and progress
+7. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
+8. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
+9. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
+10. **get_available_players** - Get top available players for the draft with auction values
 
 ## Installation
 
@@ -71,6 +79,161 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 }
 ```
 
+## Draft Tools Usage
+
+The live draft assistant tools are designed for auction drafts and help answer key questions during your draft:
+
+> **💡 Pro Tip**: These tools work seamlessly with Claude Desktop! Ask Claude questions like "Should I bid on this player?" or "Who should I target next?" and it will use these tools automatically to give you expert draft advice.
+
+### 🔍 **get_draft_status**
+Get the current state of your draft including all picks made so far.
+
+```python
+# Get draft status
+draft_status = await get_draft_status(
+    league_id=123456,
+    year=2025,
+    espn_s2="your_espn_s2_cookie",  # for private leagues
+    swid="your_swid_cookie"         # for private leagues
+)
+```
+
+**Returns:**
+- `inProgress`: Whether draft is currently active
+- `drafted`: Whether draft is completed
+- `picks`: Array of all picks made so far with player details
+- `currentPickNumber`: Next pick number
+- `currentNominatingTeam`: Which team is nominating next
+
+### 💰 **should_i_bid**
+Get AI-powered recommendation on whether to bid for the current player being nominated.
+
+```python
+# Should I bid for this player?
+recommendation = await should_i_bid(
+    league_id=123456,
+    year=2025,
+    team_id=1,                      # Your team ID
+    current_player_id=12345,        # Player being nominated
+    espn_s2="your_espn_s2_cookie",
+    swid="your_swid_cookie"
+)
+```
+
+**Returns:**
+- `action`: "bid" or "pass"
+- `playerName`: Name of the player
+- `suggestedBid`: Recommended bid amount
+- `maxBid`: Maximum you should bid
+- `reasoning`: Explanation of the recommendation
+- `priority`: Priority score (1-10)
+
+### 🎯 **who_should_i_target_next**
+Get recommendation on which player to nominate when it's your turn.
+
+```python
+# Who should I target next?
+recommendation = await who_should_i_target_next(
+    league_id=123456,
+    year=2025,
+    team_id=1,
+    espn_s2="your_espn_s2_cookie",
+    swid="your_swid_cookie"
+)
+```
+
+**Returns:**
+- `action`: "nominate" or "pass"
+- `playerId`: Recommended player ID
+- `playerName`: Player name
+- `suggestedBid`: Recommended opening bid
+- `reasoning`: Why this player is recommended
+- `priority`: Priority score (1-10)
+
+### 📊 **analyze_my_draft_strategy**
+Analyze your current draft progress, spending patterns, and punt strategy.
+
+```python
+# Analyze my draft strategy
+analysis = await analyze_my_draft_strategy(
+    league_id=123456,
+    year=2025,
+    team_id=1,
+    espn_s2="your_espn_s2_cookie",
+    swid="your_swid_cookie"
+)
+```
+
+**Returns:**
+- `team_summary`: Your current roster and spending
+  - `totalSpent`: Money spent so far
+  - `playersCount`: Number of players drafted
+  - `remainingBudget`: Money left to spend
+- `punt_analysis`: Strategy analysis and recommendations
+- `budget_per_remaining_player`: Average $ per remaining roster spot
+
+### 📋 **get_available_players**
+Get list of top available players with auction values and rankings.
+
+```python
+# Get best available players
+players = await get_available_players(
+    league_id=123456,
+    year=2025,
+    limit=25,                       # Number of players to return
+    espn_s2="your_espn_s2_cookie",
+    swid="your_swid_cookie"
+)
+```
+
+**Returns:** Array of available players with:
+- `playerId`: Player ID
+- `player`: Player details (name, position, team)
+- `auctionValue`: Projected auction value
+- `rank`: Overall ranking
+- `isDrafted`: False (only undrafted players returned)
+
+### 💡 **Draft Assistant Example Workflow**
+
+```python
+# 1. Check draft status
+status = await get_draft_status(league_id, year, espn_s2, swid)
+if not status["inProgress"]:
+    print("Draft not in progress")
+
+# 2. If someone nominated a player, should you bid?
+if current_player_being_nominated:
+    advice = await should_i_bid(league_id, year, team_id, player_id, espn_s2, swid)
+    print(f"{advice['action'].upper()}: {advice['reasoning']}")
+    if advice["action"] == "bid":
+        print(f"Suggested bid: ${advice['suggestedBid']}")
+
+# 3. If it's your turn to nominate
+if its_your_turn:
+    target = await who_should_i_target_next(league_id, year, team_id, espn_s2, swid)
+    print(f"Target: {target['playerName']} (${target['suggestedBid']})")
+    print(f"Reasoning: {target['reasoning']}")
+
+# 4. Analyze your strategy periodically
+strategy = await analyze_my_draft_strategy(league_id, year, team_id, espn_s2, swid)
+print(f"Spent: ${strategy['team_summary']['totalSpent']}")
+print(f"Budget per remaining player: ${strategy['budget_per_remaining_player']}")
+```
+
+### 🆔 **Finding Your Team ID**
+
+Most draft tools require your `team_id`. To find it:
+
+1. Use the `get_league_teams` tool to see all teams:
+```python
+teams = await get_league_teams(league_id, year, espn_s2, swid)
+# Look through the results to find your team
+```
+
+2. Or check the ESPN Fantasy Basketball URL when viewing your team:
+   - URL format: `https://fantasy.espn.com/basketball/team?leagueId=123456&teamId=1`
+   - Your team ID is the number after `teamId=`
+
 ### Private League Access
 
 For private leagues, you'll need ESPN authentication cookies:
@@ -104,14 +267,14 @@ uv run pytest -v
 ### Code Quality
 
 ```bash
-# Format code
-uv run black espn_fantasy_basketball_mcp/ tests/
+# Lint and format code
+uv run ruff check --fix .
 
 # Type checking
 uv run mypy espn_fantasy_basketball_mcp/
 
-# Lint code
-uv run ruff espn_fantasy_basketball_mcp/ tests/
+# Run all CI checks locally
+./scripts/check.sh
 ```
 
 ### Project Structure
