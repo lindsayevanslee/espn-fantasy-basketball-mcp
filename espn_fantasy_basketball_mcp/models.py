@@ -5,6 +5,59 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class PlayerStats(BaseModel):
+    """Player statistics for a given timeframe."""
+    playerId: int
+    playerName: str
+    timeframe: str  # "season", "last_7", "last_30", "projections"
+    gamesPlayed: int | None = None
+    points: float | None = None
+    rebounds: float | None = None
+    assists: float | None = None
+    steals: float | None = None
+    blocks: float | None = None
+    threePointMade: float | None = None
+    fieldGoalPercentage: float | None = None
+    freeThrowPercentage: float | None = None
+    turnovers: float | None = None
+    minutes: float | None = None
+    fantasyPoints: float | None = None
+    rank: int | None = None
+
+
+class PlayerComparison(BaseModel):
+    """Comparison between multiple players."""
+    players: list[PlayerStats]
+    categories: list[str]
+    winner_by_category: dict[str, int]  # category -> player_id
+    overall_recommendation: str
+    analysis: str
+
+
+class TradeAnalysis(BaseModel):
+    """Analysis of a trade proposal."""
+    your_players: list[PlayerStats]
+    their_players: list[PlayerStats]
+    your_total_value: float
+    their_total_value: float
+    value_difference: float
+    recommendation: str  # "accept", "reject", "negotiate"
+    reasoning: str
+    category_impact: dict[str, str]  # category -> "gain", "loss", "neutral"
+    confidence: float  # 0-1 confidence in recommendation
+
+
+class TrendingPlayer(BaseModel):
+    """Player trending information."""
+    playerId: int
+    player: "Player"
+    trend_direction: str  # "up", "down", "hot", "cold"
+    add_percentage: float
+    drop_percentage: float
+    net_adds: int
+    reason: str
+
+
 class Owner(BaseModel):
     firstName: str
     lastName: str

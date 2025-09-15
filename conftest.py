@@ -238,3 +238,113 @@ def sample_draft_recommendation_data():
             "assists": "slight_positive"
         }
     }
+
+
+@pytest.fixture
+def sample_player_stats_data():
+    """Sample player statistics data for testing."""
+    return {
+        "playerId": 12345,
+        "playerName": "Test Player",
+        "timeframe": "season",
+        "gamesPlayed": 50,
+        "points": 25.5,
+        "rebounds": 8.2,
+        "assists": 6.1,
+        "steals": 1.8,
+        "blocks": 0.9,
+        "threePointMade": 2.1,
+        "fieldGoalPercentage": 0.485,
+        "freeThrowPercentage": 0.825,
+        "turnovers": 3.2,
+        "minutes": 34.5,
+        "fantasyPoints": 45.8,
+        "rank": 15
+    }
+
+
+@pytest.fixture
+def sample_player_comparison_data():
+    """Sample player comparison data for testing."""
+    return {
+        "players": [
+            {
+                "playerId": 12345,
+                "playerName": "Player A",
+                "timeframe": "season",
+                "points": 25.5,
+                "rebounds": 8.2,
+                "assists": 6.1,
+                "fantasyPoints": 45.8
+            },
+            {
+                "playerId": 54321,
+                "playerName": "Player B",
+                "timeframe": "season",
+                "points": 22.1,
+                "rebounds": 10.5,
+                "assists": 4.8,
+                "fantasyPoints": 42.3
+            }
+        ],
+        "categories": ["points", "rebounds", "assists"],
+        "winner_by_category": {
+            "points": 12345,
+            "rebounds": 54321,
+            "assists": 12345
+        },
+        "overall_recommendation": "Player A wins 2/3 categories",
+        "analysis": "Detailed comparison across 3 statistical categories. Player A provides the most balanced production."
+    }
+
+
+@pytest.fixture
+def sample_trade_analysis_data():
+    """Sample trade analysis data for testing."""
+    return {
+        "your_players": [
+            {
+                "playerId": 12345,
+                "playerName": "Your Player",
+                "timeframe": "season",
+                "fantasyPoints": 45.8
+            }
+        ],
+        "their_players": [
+            {
+                "playerId": 54321,
+                "playerName": "Their Player",
+                "timeframe": "season",
+                "fantasyPoints": 48.2
+            }
+        ],
+        "your_total_value": 45.8,
+        "their_total_value": 48.2,
+        "value_difference": 2.4,
+        "recommendation": "slight_accept",
+        "reasoning": "You gain moderate value (+2.4 fantasy points)",
+        "category_impact": {
+            "points": "gain",
+            "rebounds": "loss",
+            "assists": "neutral"
+        },
+        "confidence": 0.8
+    }
+
+
+@pytest.fixture
+def sample_trending_player_data():
+    """Sample trending player data for testing."""
+    return {
+        "playerId": 12345,
+        "player": {
+            "id": 12345,
+            "fullName": "Trending Player",
+            "defaultPositionId": 1
+        },
+        "trend_direction": "up",
+        "add_percentage": 15.5,
+        "drop_percentage": 0.0,
+        "net_adds": 1550,
+        "reason": "Increased add rate due to recent performance"
+    }

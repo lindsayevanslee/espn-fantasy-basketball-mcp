@@ -2,6 +2,7 @@
 """ESPN Fantasy Basketball MCP Server using FastMCP."""
 
 import logging
+import os
 
 from mcp.server.fastmcp import FastMCP
 
@@ -15,24 +16,46 @@ logger = logging.getLogger("espn-fantasy-basketball-mcp")
 mcp = FastMCP("ESPN Fantasy Basketball")
 
 
+def _get_espn_credentials(league_id: int | None = None, year: int | None = None, espn_s2: str | None = None, swid: str | None = None) -> tuple[int, int, str | None, str | None]:
+    """Get ESPN credentials from parameters or environment variables.
+
+    Args:
+        league_id: League ID parameter (optional)
+        year: Year parameter (optional)
+        espn_s2: ESPN S2 cookie parameter (optional)
+        swid: ESPN SWID parameter (optional)
+
+    Returns:
+        Tuple of (league_id, year, espn_s2, swid) with environment fallbacks
+    """
+    # Use provided parameters or fall back to environment variables
+    final_league_id = league_id or int(os.getenv("ESPN_LEAGUE_ID", "0"))
+    final_year = year or int(os.getenv("ESPN_YEAR", "2025"))
+    final_espn_s2 = espn_s2 or os.getenv("ESPN_S2")
+    final_swid = swid or os.getenv("ESPN_SWID")
+
+    return final_league_id, final_year, final_espn_s2, final_swid
+
+
 @mcp.tool()
 async def get_league_teams(
-    league_id: int,
-    year: int,
+    league_id: int | None = None,
+    year: int | None = None,
     espn_s2: str | None = None,
     swid: str | None = None
 ) -> list[dict]:
     """Get all teams in an ESPN Fantasy Basketball league.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         List of team dictionaries with id, name, location, record, etc.
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     teams = await client.get_league_teams()
     return [team.model_dump() for team in teams]
@@ -40,9 +63,9 @@ async def get_league_teams(
 
 @mcp.tool()
 async def get_team_roster(
-    league_id: int,
-    year: int,
     team_id: int,
+    league_id: int | None = None,
+    year: int | None = None,
     scoring_period: int | None = None,
     espn_s2: str | None = None,
     swid: str | None = None
@@ -50,16 +73,17 @@ async def get_team_roster(
     """Get roster for a specific team in an ESPN Fantasy Basketball league.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
         team_id: Team ID to get roster for
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         scoring_period: Specific scoring period (optional)
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         Dictionary with team roster including all players and their positions
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     roster = await client.get_team_roster(team_id, scoring_period)
     return roster.model_dump()
@@ -67,8 +91,8 @@ async def get_team_roster(
 
 @mcp.tool()
 async def get_free_agents(
-    league_id: int,
-    year: int,
+    league_id: int | None = None,
+    year: int | None = None,
     size: int = 50,
     position_id: int | None = None,
     espn_s2: str | None = None,
@@ -77,16 +101,17 @@ async def get_free_agents(
     """Get free agents/waiver wire players from an ESPN Fantasy Basketball league.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         size: Number of players to return (max 50, default 50)
         position_id: Filter by position ID (optional)
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         List of available free agent player dictionaries
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     players = await client.get_free_agents(size, position_id)
     return [player.model_dump() for player in players]
@@ -94,8 +119,8 @@ async def get_free_agents(
 
 @mcp.tool()
 async def get_matchups(
-    league_id: int,
-    year: int,
+    league_id: int | None = None,
+    year: int | None = None,
     scoring_period: int | None = None,
     espn_s2: str | None = None,
     swid: str | None = None
@@ -103,15 +128,16 @@ async def get_matchups(
     """Get matchups/schedule for an ESPN Fantasy Basketball league.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         scoring_period: Specific scoring period to get matchups for (optional)
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         List of matchup dictionaries with home/away teams and scores
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     matchups = await client.get_matchups(scoring_period)
     return [matchup.model_dump() for matchup in matchups]
@@ -135,22 +161,23 @@ async def get_nba_schedule(date: str | None = None) -> list[dict]:
 
 @mcp.tool()
 async def get_draft_status(
-    league_id: int,
-    year: int,
+    league_id: int | None = None,
+    year: int | None = None,
     espn_s2: str | None = None,
     swid: str | None = None
 ) -> dict:
     """Get current draft status including all picks and progress.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         Dictionary with draft status, picks, and current state
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     draft_status = await client.get_draft_status()
     return draft_status.model_dump()
@@ -158,26 +185,27 @@ async def get_draft_status(
 
 @mcp.tool()
 async def should_i_bid(
-    league_id: int,
-    year: int,
     team_id: int,
     current_player_id: int,
+    league_id: int | None = None,
+    year: int | None = None,
     espn_s2: str | None = None,
     swid: str | None = None
 ) -> dict:
     """Get recommendation on whether to bid for the current player being nominated.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
         team_id: Your team ID
         current_player_id: ID of player currently being nominated
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         Dictionary with bid recommendation, suggested amount, and reasoning
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     recommendation = await client.get_draft_recommendation(team_id, current_player_id)
     return recommendation.model_dump()
@@ -185,24 +213,25 @@ async def should_i_bid(
 
 @mcp.tool()
 async def who_should_i_target_next(
-    league_id: int,
-    year: int,
     team_id: int,
+    league_id: int | None = None,
+    year: int | None = None,
     espn_s2: str | None = None,
     swid: str | None = None
 ) -> dict:
     """Get recommendation on which player to target/nominate next.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
         team_id: Your team ID
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         Dictionary with player recommendation and reasoning
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     recommendation = await client.get_draft_recommendation(team_id, None)
     return recommendation.model_dump()
@@ -210,24 +239,25 @@ async def who_should_i_target_next(
 
 @mcp.tool()
 async def analyze_my_draft_strategy(
-    league_id: int,
-    year: int,
     team_id: int,
+    league_id: int | None = None,
+    year: int | None = None,
     espn_s2: str | None = None,
     swid: str | None = None
 ) -> dict:
     """Analyze your current draft strategy and spending patterns.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
         team_id: Your team ID
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         Dictionary with punt strategy analysis, spending summary, and recommendations
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
 
     # Get team summary and strategy analysis
@@ -243,8 +273,8 @@ async def analyze_my_draft_strategy(
 
 @mcp.tool()
 async def get_available_players(
-    league_id: int,
-    year: int,
+    league_id: int | None = None,
+    year: int | None = None,
     limit: int = 50,
     espn_s2: str | None = None,
     swid: str | None = None
@@ -252,18 +282,131 @@ async def get_available_players(
     """Get top available players for the draft with auction values.
 
     Args:
-        league_id: ESPN Fantasy Basketball league ID
-        year: Season year (e.g., 2025)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         limit: Number of players to return (default 50)
-        espn_s2: ESPN authentication cookie for private leagues (optional)
-        swid: ESPN SWID cookie for private leagues (optional)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         List of available player dictionaries with auction values and rankings
     """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     players = await client.get_available_players(limit)
     return [player.model_dump() for player in players]
+
+
+@mcp.tool()
+async def get_player_stats(
+    player_id: int,
+    league_id: int | None = None,
+    year: int | None = None,
+    timeframe: str = "season",
+    espn_s2: str | None = None,
+    swid: str | None = None
+) -> dict:
+    """Get comprehensive player statistics for specified timeframe.
+
+    Args:
+        player_id: ESPN player ID
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        timeframe: Time period - "season", "projections", "last_7", "last_30"
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        Dictionary with comprehensive player statistics across all categories
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    stats = await client.get_player_stats(player_id, timeframe)
+    return stats.model_dump()
+
+
+@mcp.tool()
+async def compare_players(
+    player_ids: list[int],
+    league_id: int | None = None,
+    year: int | None = None,
+    categories: list[str] | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None
+) -> dict:
+    """Compare multiple players across statistical categories.
+
+    Args:
+        player_ids: List of ESPN player IDs to compare
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        categories: List of categories to compare (optional, defaults to 9-cat)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        Dictionary with detailed player comparison and winner by category
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    comparison = await client.compare_players(player_ids, categories)
+    return comparison.model_dump()
+
+
+@mcp.tool()
+async def analyze_trade_proposal(
+    your_player_ids: list[int],
+    their_player_ids: list[int],
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None
+) -> dict:
+    """Analyze a trade proposal using comprehensive statistical analysis.
+
+    Args:
+        your_player_ids: List of player IDs you would trade away
+        their_player_ids: List of player IDs you would receive
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        Dictionary with trade analysis, recommendation, and category impact
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    analysis = await client.analyze_trade_proposal(your_player_ids, their_player_ids)
+    return analysis.model_dump()
+
+
+@mcp.tool()
+async def get_trending_players(
+    league_id: int | None = None,
+    year: int | None = None,
+    direction: str = "up",
+    limit: int = 20,
+    espn_s2: str | None = None,
+    swid: str | None = None
+) -> list[dict]:
+    """Get players trending up or down in adds/drops for waiver wire intelligence.
+
+    Args:
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        direction: Trending direction - "up" or "down"
+        limit: Number of players to return (default 20)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        List of trending player dictionaries with add/drop percentages and reasons
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    trending = await client.get_trending_players(direction, limit)
+    return [player.model_dump() for player in trending]
 
 
 if __name__ == "__main__":

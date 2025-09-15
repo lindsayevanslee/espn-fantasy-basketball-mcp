@@ -8,12 +8,16 @@ from espn_fantasy_basketball_mcp.models import (
     MatchupTeam,
     NBAGame,
     Player,
+    PlayerComparison,
     PlayerDraftInfo,
     PlayerPoolEntry,
+    PlayerStats,
     Roster,
     RosterEntry,
     Team,
     TeamDraftSummary,
+    TradeAnalysis,
+    TrendingPlayer,
 )
 
 
@@ -294,3 +298,138 @@ class TestDraftModels:
         assert recommendation.reasoning == "Good value at this price"
         assert recommendation.priority == 8
         assert recommendation.category_impact["points"] == "positive"
+
+
+class TestStatisticalAnalysisModels:
+    """Test cases for statistical analysis models."""
+
+    def test_player_stats_creation(self):
+        """Test creating player statistics."""
+        stats = PlayerStats(
+            playerId=12345,
+            playerName="Test Player",
+            timeframe="season",
+            gamesPlayed=50,
+            points=25.5,
+            rebounds=8.2,
+            assists=6.1,
+            steals=1.8,
+            blocks=0.9,
+            threePointMade=2.1,
+            fieldGoalPercentage=0.485,
+            freeThrowPercentage=0.825,
+            turnovers=3.2,
+            minutes=34.5,
+            fantasyPoints=45.8,
+            rank=15
+        )
+        assert stats.playerId == 12345
+        assert stats.playerName == "Test Player"
+        assert stats.timeframe == "season"
+        assert stats.points == 25.5
+        assert stats.rebounds == 8.2
+        assert stats.assists == 6.1
+        assert stats.fantasyPoints == 45.8
+        assert stats.rank == 15
+
+    def test_player_stats_minimal(self):
+        """Test creating player statistics with minimal fields."""
+        stats = PlayerStats(
+            playerId=12345,
+            playerName="Test Player",
+            timeframe="season"
+        )
+        assert stats.playerId == 12345
+        assert stats.playerName == "Test Player"
+        assert stats.timeframe == "season"
+        assert stats.points is None
+        assert stats.fantasyPoints is None
+
+    def test_player_comparison_creation(self):
+        """Test creating player comparison."""
+        player_a = PlayerStats(
+            playerId=12345,
+            playerName="Player A",
+            timeframe="season",
+            points=25.5,
+            rebounds=8.2
+        )
+        player_b = PlayerStats(
+            playerId=54321,
+            playerName="Player B",
+            timeframe="season",
+            points=22.1,
+            rebounds=10.5
+        )
+
+        comparison = PlayerComparison(
+            players=[player_a, player_b],
+            categories=["points", "rebounds"],
+            winner_by_category={"points": 12345, "rebounds": 54321},
+            overall_recommendation="Player A wins 1/2 categories",
+            analysis="Balanced comparison"
+        )
+
+        assert len(comparison.players) == 2
+        assert comparison.categories == ["points", "rebounds"]
+        assert comparison.winner_by_category["points"] == 12345
+        assert comparison.winner_by_category["rebounds"] == 54321
+        assert "Player A wins" in comparison.overall_recommendation
+
+    def test_trade_analysis_creation(self):
+        """Test creating trade analysis."""
+        your_player = PlayerStats(
+            playerId=12345,
+            playerName="Your Player",
+            timeframe="season",
+            fantasyPoints=45.8
+        )
+        their_player = PlayerStats(
+            playerId=54321,
+            playerName="Their Player",
+            timeframe="season",
+            fantasyPoints=48.2
+        )
+
+        analysis = TradeAnalysis(
+            your_players=[your_player],
+            their_players=[their_player],
+            your_total_value=45.8,
+            their_total_value=48.2,
+            value_difference=2.4,
+            recommendation="slight_accept",
+            reasoning="You gain moderate value",
+            category_impact={"points": "gain", "rebounds": "loss"},
+            confidence=0.8
+        )
+
+        assert len(analysis.your_players) == 1
+        assert len(analysis.their_players) == 1
+        assert analysis.your_total_value == 45.8
+        assert analysis.their_total_value == 48.2
+        assert analysis.value_difference == 2.4
+        assert analysis.recommendation == "slight_accept"
+        assert analysis.confidence == 0.8
+        assert analysis.category_impact["points"] == "gain"
+
+    def test_trending_player_creation(self):
+        """Test creating trending player."""
+        player = Player(id=12345, fullName="Trending Player", defaultPositionId=1)
+
+        trending = TrendingPlayer(
+            playerId=12345,
+            player=player,
+            trend_direction="up",
+            add_percentage=15.5,
+            drop_percentage=0.0,
+            net_adds=1550,
+            reason="Increased add rate due to recent performance"
+        )
+
+        assert trending.playerId == 12345
+        assert trending.player.fullName == "Trending Player"
+        assert trending.trend_direction == "up"
+        assert trending.add_percentage == 15.5
+        assert trending.drop_percentage == 0.0
+        assert trending.net_adds == 1550
+        assert "recent performance" in trending.reason
