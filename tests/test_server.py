@@ -1,6 +1,5 @@
 """Test cases for ESPN Fantasy Basketball MCP server."""
 
-import os
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
