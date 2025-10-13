@@ -64,10 +64,7 @@ class TestStatisticalAnalysisClient:
     def client(self):
         """Create a test client instance."""
         return ESPNFantasyBasketballClient(
-            league_id=12345,
-            year=2025,
-            espn_s2="test_s2",
-            swid="test_swid"
+            league_id=12345, year=2025, espn_s2="test_s2", swid="test_swid"
         )
 
     @pytest.mark.asyncio
@@ -83,20 +80,20 @@ class TestStatisticalAnalysisClient:
                             {
                                 "appliedStats": {
                                     "0": 25.5,  # Points
-                                    "1": 8.2,   # Rebounds
-                                    "2": 6.1,   # Assists
-                                    "3": 1.8,   # Steals
-                                    "4": 0.9    # Blocks
+                                    "1": 8.2,  # Rebounds
+                                    "2": 6.1,  # Assists
+                                    "3": 1.8,  # Steals
+                                    "4": 0.9,  # Blocks
                                 },
-                                "appliedTotal": 45.8
+                                "appliedTotal": 45.8,
                             }
-                        ]
+                        ],
                     }
                 }
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
 
             stats = await client.get_player_stats(12345, "season")
@@ -114,7 +111,7 @@ class TestStatisticalAnalysisClient:
         """Test player stats when player not found."""
         mock_response = {"players": []}
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
 
             with pytest.raises(ValueError, match="Player 12345 not found"):
@@ -131,7 +128,7 @@ class TestStatisticalAnalysisClient:
             points=25.5,
             rebounds=8.2,
             assists=6.1,
-            fantasyPoints=45.8
+            fantasyPoints=45.8,
         )
         mock_player_2 = PlayerStats(
             playerId=54321,
@@ -140,13 +137,15 @@ class TestStatisticalAnalysisClient:
             points=22.1,
             rebounds=10.5,
             assists=4.8,
-            fantasyPoints=42.3
+            fantasyPoints=42.3,
         )
 
-        with patch.object(client, 'get_player_stats', new_callable=AsyncMock) as mock_stats:
+        with patch.object(client, "get_player_stats", new_callable=AsyncMock) as mock_stats:
             mock_stats.side_effect = [mock_player_1, mock_player_2]
 
-            comparison = await client.compare_players([12345, 54321], ["points", "rebounds", "assists"])
+            comparison = await client.compare_players(
+                [12345, 54321], ["points", "rebounds", "assists"]
+            )
 
             assert len(comparison.players) == 2
             assert comparison.categories == ["points", "rebounds", "assists"]
@@ -159,7 +158,7 @@ class TestStatisticalAnalysisClient:
     @pytest.mark.asyncio
     async def test_compare_players_insufficient_players(self, client):
         """Test player comparison with insufficient players."""
-        with patch.object(client, 'get_player_stats', new_callable=AsyncMock) as mock_stats:
+        with patch.object(client, "get_player_stats", new_callable=AsyncMock) as mock_stats:
             mock_stats.side_effect = [ValueError("Player not found")]
 
             with pytest.raises(ValueError, match="Need at least 2 valid players"):
@@ -169,19 +168,13 @@ class TestStatisticalAnalysisClient:
     async def test_analyze_trade_proposal_accept(self, client):
         """Test trade analysis recommending accept."""
         your_player = PlayerStats(
-            playerId=12345,
-            playerName="Your Player",
-            timeframe="season",
-            fantasyPoints=40.0
+            playerId=12345, playerName="Your Player", timeframe="season", fantasyPoints=40.0
         )
         their_player = PlayerStats(
-            playerId=54321,
-            playerName="Their Player",
-            timeframe="season",
-            fantasyPoints=50.0
+            playerId=54321, playerName="Their Player", timeframe="season", fantasyPoints=50.0
         )
 
-        with patch.object(client, 'get_player_stats', new_callable=AsyncMock) as mock_stats:
+        with patch.object(client, "get_player_stats", new_callable=AsyncMock) as mock_stats:
             mock_stats.side_effect = [your_player, their_player]
 
             analysis = await client.analyze_trade_proposal([12345], [54321])
@@ -196,19 +189,13 @@ class TestStatisticalAnalysisClient:
     async def test_analyze_trade_proposal_reject(self, client):
         """Test trade analysis recommending reject."""
         your_player = PlayerStats(
-            playerId=12345,
-            playerName="Your Player",
-            timeframe="season",
-            fantasyPoints=50.0
+            playerId=12345, playerName="Your Player", timeframe="season", fantasyPoints=50.0
         )
         their_player = PlayerStats(
-            playerId=54321,
-            playerName="Their Player",
-            timeframe="season",
-            fantasyPoints=30.0
+            playerId=54321, playerName="Their Player", timeframe="season", fantasyPoints=30.0
         )
 
-        with patch.object(client, 'get_player_stats', new_callable=AsyncMock) as mock_stats:
+        with patch.object(client, "get_player_stats", new_callable=AsyncMock) as mock_stats:
             mock_stats.side_effect = [your_player, their_player]
 
             analysis = await client.analyze_trade_proposal([12345], [54321])
@@ -225,29 +212,21 @@ class TestStatisticalAnalysisClient:
         mock_response = {
             "players": [
                 {
-                    "player": {
-                        "id": 12345,
-                        "fullName": "Trending Player",
-                        "defaultPositionId": 1
-                    },
+                    "player": {"id": 12345, "fullName": "Trending Player", "defaultPositionId": 1},
                     "ownership": {
                         "percentChange": 5.5  # Trending up
-                    }
+                    },
                 },
                 {
-                    "player": {
-                        "id": 54321,
-                        "fullName": "Stable Player",
-                        "defaultPositionId": 2
-                    },
+                    "player": {"id": 54321, "fullName": "Stable Player", "defaultPositionId": 2},
                     "ownership": {
                         "percentChange": 0.2  # Not trending enough
-                    }
-                }
+                    },
+                },
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
 
             trending = await client.get_trending_players("up", 10)
@@ -263,19 +242,15 @@ class TestStatisticalAnalysisClient:
         mock_response = {
             "players": [
                 {
-                    "player": {
-                        "id": 12345,
-                        "fullName": "Dropping Player",
-                        "defaultPositionId": 1
-                    },
+                    "player": {"id": 12345, "fullName": "Dropping Player", "defaultPositionId": 1},
                     "ownership": {
                         "percentChange": -3.2  # Trending down
-                    }
+                    },
                 }
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
 
             trending = await client.get_trending_players("down", 10)

@@ -28,7 +28,7 @@ class TestDraftModels:
             roundId=1,
             roundPickNumber=1,
             nominatingTeamId=2,
-            keeper=False
+            keeper=False,
         )
         assert pick.id == 1
         assert pick.playerId == 12345
@@ -38,8 +38,13 @@ class TestDraftModels:
     def test_draft_status_creation(self):
         """Test creating draft status."""
         pick = DraftPick(
-            id=1, playerId=12345, teamId=1, bidAmount=50,
-            overallPickNumber=1, roundId=1, roundPickNumber=1
+            id=1,
+            playerId=12345,
+            teamId=1,
+            bidAmount=50,
+            overallPickNumber=1,
+            roundId=1,
+            roundPickNumber=1,
         )
 
         status = DraftStatus(
@@ -47,7 +52,7 @@ class TestDraftModels:
             drafted=False,
             picks=[pick],
             currentPickNumber=2,
-            currentNominatingTeam=2
+            currentNominatingTeam=2,
         )
         assert status.inProgress is True
         assert status.drafted is False
@@ -63,7 +68,7 @@ class TestDraftModels:
             playersCount=8,
             remainingBudget=50,
             positionCounts={"PG": 2, "SG": 1},
-            categories={"points": 100.5, "rebounds": 75.2}
+            categories={"points": 100.5, "rebounds": 75.2},
         )
         assert summary.teamId == 1
         assert summary.totalSpent == 150
@@ -80,7 +85,7 @@ class TestDraftModels:
             maxBid=30,
             reasoning="Good value at this price",
             priority=8,
-            category_impact={"points": "positive", "rebounds": "neutral"}
+            category_impact={"points": "positive", "rebounds": "neutral"},
         )
         assert recommendation.action == "bid"
         assert recommendation.suggestedBid == 25
@@ -95,10 +100,7 @@ class TestDraftClient:
     def client(self):
         """Create a test client instance."""
         return ESPNFantasyBasketballClient(
-            league_id=12345,
-            year=2025,
-            espn_s2="test_s2",
-            swid="test_swid"
+            league_id=12345, year=2025, espn_s2="test_s2", swid="test_swid"
         )
 
     @pytest.mark.asyncio
@@ -119,13 +121,13 @@ class TestDraftClient:
                         "roundId": 1,
                         "roundPickNumber": 1,
                         "nominatingTeamId": 2,
-                        "keeper": False
+                        "keeper": False,
                     }
-                ]
+                ],
             }
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             draft_status = await client.get_draft_status()
 
@@ -151,9 +153,9 @@ class TestDraftClient:
                         "bidAmount": 50,
                         "overallPickNumber": 1,
                         "roundId": 1,
-                        "roundPickNumber": 1
+                        "roundPickNumber": 1,
                     }
-                ]
+                ],
             }
         }
 
@@ -168,13 +170,8 @@ class TestDraftClient:
                         "lastName": "Player",
                         "defaultPositionId": 1,
                         "active": True,
-                        "draftRanksByRankType": {
-                            "STANDARD": {
-                                "auctionValue": 25,
-                                "rank": 50
-                            }
-                        }
-                    }
+                        "draftRanksByRankType": {"STANDARD": {"auctionValue": 25, "rank": 50}},
+                    },
                 },
                 {
                     "draftAuctionValue": 50,
@@ -183,18 +180,13 @@ class TestDraftClient:
                         "fullName": "Drafted Player",
                         "defaultPositionId": 1,
                         "active": True,
-                        "draftRanksByRankType": {
-                            "STANDARD": {
-                                "auctionValue": 50,
-                                "rank": 10
-                            }
-                        }
-                    }
-                }
+                        "draftRanksByRankType": {"STANDARD": {"auctionValue": 50, "rank": 10}},
+                    },
+                },
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             # Mock both API calls - first for draft status, then for players
             mock_request.side_effect = [mock_players_response, mock_draft_response]
 
@@ -222,7 +214,7 @@ class TestDraftClient:
                         "bidAmount": 50,
                         "overallPickNumber": 1,
                         "roundId": 1,
-                        "roundPickNumber": 1
+                        "roundPickNumber": 1,
                     },
                     {
                         "id": 2,
@@ -231,7 +223,7 @@ class TestDraftClient:
                         "bidAmount": 30,
                         "overallPickNumber": 3,
                         "roundId": 1,
-                        "roundPickNumber": 3
+                        "roundPickNumber": 3,
                     },
                     {
                         "id": 3,
@@ -240,22 +232,17 @@ class TestDraftClient:
                         "bidAmount": 40,
                         "overallPickNumber": 2,
                         "roundId": 1,
-                        "roundPickNumber": 2
-                    }
-                ]
+                        "roundPickNumber": 2,
+                    },
+                ],
             }
         }
 
-
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
-            with patch.object(client, 'get_league_teams', new_callable=AsyncMock) as mock_teams:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
+            with patch.object(client, "get_league_teams", new_callable=AsyncMock) as mock_teams:
                 mock_request.return_value = mock_draft_response
                 mock_teams.return_value = [
-                    type('Team', (), {
-                        'id': 1,
-                        'name': 'Test Team',
-                        'abbrev': 'TEST'
-                    })()
+                    type("Team", (), {"id": 1, "name": "Test Team", "abbrev": "TEST"})()
                 ]
 
                 summary = await client.get_team_draft_summary(team_id=1)
@@ -271,34 +258,28 @@ class TestDraftClient:
         """Test draft recommendation for bidding scenario."""
         # Mock team summary
         mock_team_summary = TeamDraftSummary(
-            teamId=1,
-            teamName="Test Team",
-            totalSpent=100,
-            playersCount=5,
-            remainingBudget=100
+            teamId=1, teamName="Test Team", totalSpent=100, playersCount=5, remainingBudget=100
         )
 
         # Mock available players
         from espn_fantasy_basketball_mcp.models import Player
-        mock_player = Player(id=12345, fullName='Test Player', defaultPositionId=1)
+
+        mock_player = Player(id=12345, fullName="Test Player", defaultPositionId=1)
         mock_available_players = [
             PlayerDraftInfo(
-                playerId=12345,
-                player=mock_player,
-                auctionValue=30,
-                rank=25,
-                isDrafted=False
+                playerId=12345, player=mock_player, auctionValue=30, rank=25, isDrafted=False
             )
         ]
 
-        with patch.object(client, 'get_team_draft_summary', new_callable=AsyncMock) as mock_summary:
-            with patch.object(client, 'get_available_players', new_callable=AsyncMock) as mock_players:
+        with patch.object(client, "get_team_draft_summary", new_callable=AsyncMock) as mock_summary:
+            with patch.object(
+                client, "get_available_players", new_callable=AsyncMock
+            ) as mock_players:
                 mock_summary.return_value = mock_team_summary
                 mock_players.return_value = mock_available_players
 
                 recommendation = await client.get_draft_recommendation(
-                    team_id=1,
-                    current_player_id=12345
+                    team_id=1, current_player_id=12345
                 )
 
                 assert recommendation.action == "bid"
@@ -312,28 +293,23 @@ class TestDraftClient:
         """Test draft recommendation for nomination scenario."""
         # Mock team summary
         mock_team_summary = TeamDraftSummary(
-            teamId=1,
-            teamName="Test Team",
-            totalSpent=50,
-            playersCount=3,
-            remainingBudget=150
+            teamId=1, teamName="Test Team", totalSpent=50, playersCount=3, remainingBudget=150
         )
 
         # Mock available players
         from espn_fantasy_basketball_mcp.models import Player
-        mock_player = Player(id=54321, fullName='Best Available Player', defaultPositionId=1)
+
+        mock_player = Player(id=54321, fullName="Best Available Player", defaultPositionId=1)
         mock_available_players = [
             PlayerDraftInfo(
-                playerId=54321,
-                player=mock_player,
-                auctionValue=40,
-                rank=15,
-                isDrafted=False
+                playerId=54321, player=mock_player, auctionValue=40, rank=15, isDrafted=False
             )
         ]
 
-        with patch.object(client, 'get_team_draft_summary', new_callable=AsyncMock) as mock_summary:
-            with patch.object(client, 'get_available_players', new_callable=AsyncMock) as mock_players:
+        with patch.object(client, "get_team_draft_summary", new_callable=AsyncMock) as mock_summary:
+            with patch.object(
+                client, "get_available_players", new_callable=AsyncMock
+            ) as mock_players:
                 mock_summary.return_value = mock_team_summary
                 mock_players.return_value = mock_available_players
 
@@ -348,14 +324,10 @@ class TestDraftClient:
     async def test_analyze_punt_strategy(self, client):
         """Test punt strategy analysis."""
         mock_team_summary = TeamDraftSummary(
-            teamId=1,
-            teamName="Test Team",
-            totalSpent=120,
-            playersCount=7,
-            remainingBudget=80
+            teamId=1, teamName="Test Team", totalSpent=120, playersCount=7, remainingBudget=80
         )
 
-        with patch.object(client, 'get_team_draft_summary', new_callable=AsyncMock) as mock_summary:
+        with patch.object(client, "get_team_draft_summary", new_callable=AsyncMock) as mock_summary:
             mock_summary.return_value = mock_team_summary
 
             analysis = await client.analyze_punt_strategy(team_id=1)

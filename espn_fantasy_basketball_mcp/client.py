@@ -31,7 +31,9 @@ class ESPNFantasyBasketballClient:
     BASE_URL = "https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba"
     NBA_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba"
 
-    def __init__(self, league_id: int, year: int, espn_s2: str | None = None, swid: str | None = None):
+    def __init__(
+        self, league_id: int, year: int, espn_s2: str | None = None, swid: str | None = None
+    ):
         """Initialize the client.
 
         Args:
@@ -72,7 +74,7 @@ class ESPNFantasyBasketballClient:
                 location=team_data.get("location"),  # Keep as None if not present
                 logo=team_data.get("logo"),
                 owners=team_data.get("owners"),  # ESPN provides owner IDs as strings
-                record=team_data.get("record")
+                record=team_data.get("record"),
             )
             teams.append(team)
 
@@ -106,7 +108,7 @@ class ESPNFantasyBasketballClient:
                         injured=player_data.get("injured"),
                         injuryStatus=entry.get("injuryStatus"),
                         active=player_data.get("active"),
-                        droppable=player_data.get("droppable")
+                        droppable=player_data.get("droppable"),
                     )
 
                     player_pool_entry = PlayerPoolEntry(
@@ -115,7 +117,7 @@ class ESPNFantasyBasketballClient:
                         onTeamId=entry["playerPoolEntry"].get("onTeamId"),
                         keeperValue=entry["playerPoolEntry"].get("keeperValue"),
                         keeperValueFuture=entry["playerPoolEntry"].get("keeperValueFuture"),
-                        lineupLocked=entry["playerPoolEntry"].get("lineupLocked")
+                        lineupLocked=entry["playerPoolEntry"].get("lineupLocked"),
                     )
 
                     roster_entry = RosterEntry(
@@ -124,7 +126,7 @@ class ESPNFantasyBasketballClient:
                         lineupSlotId=entry["lineupSlotId"],
                         acquisitionDate=entry.get("acquisitionDate"),
                         acquisitionType=entry.get("acquisitionType"),
-                        injuryStatus=entry.get("injuryStatus")
+                        injuryStatus=entry.get("injuryStatus"),
                     )
 
                     roster_entries.append(roster_entry)
@@ -141,18 +143,17 @@ class ESPNFantasyBasketballClient:
             position_id: Filter by position ID (optional)
         """
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
-        filter_json = f'{{"players":{{"limit":{size},"sortPercOwned":{{"sortAsc":false,"sortPriority":1}}}}}}'
-        params = {
-            "view": "kona_player_info",
-            "X-Fantasy-Filter": filter_json
-        }
+        filter_json = (
+            f'{{"players":{{"limit":{size},"sortPercOwned":{{"sortAsc":false,"sortPriority":1}}}}}}'
+        )
+        params = {"view": "kona_player_info", "X-Fantasy-Filter": filter_json}
 
         if position_id:
             filter_dict = {
                 "players": {
                     "limit": size,
                     "sortPercOwned": {"sortAsc": False, "sortPriority": 1},
-                    "filterSlotIds": {"value": [position_id]}
+                    "filterSlotIds": {"value": [position_id]},
                 }
             }
             params["X-Fantasy-Filter"] = str(filter_dict).replace("'", '"')
@@ -174,7 +175,7 @@ class ESPNFantasyBasketballClient:
                     eligibleSlots=player_info.get("eligibleSlots"),
                     injured=player_info.get("injured", False),
                     injuryStatus=player_info.get("injuryStatus"),
-                    ownership=player_data.get("ownership")
+                    ownership=player_data.get("ownership"),
                 )
                 players.append(player)
 
@@ -202,7 +203,7 @@ class ESPNFantasyBasketballClient:
                         totalPoints=home_data.get("totalPoints"),
                         totalProjectedPoints=home_data.get("totalProjectedPoints"),
                         gamesPlayed=home_data.get("gamesPlayed"),
-                        cumulativeScore=home_data.get("cumulativeScore")
+                        cumulativeScore=home_data.get("cumulativeScore"),
                     )
 
                 away_team = None
@@ -213,7 +214,7 @@ class ESPNFantasyBasketballClient:
                         totalPoints=away_data.get("totalPoints"),
                         totalProjectedPoints=away_data.get("totalProjectedPoints"),
                         gamesPlayed=away_data.get("gamesPlayed"),
-                        cumulativeScore=away_data.get("cumulativeScore")
+                        cumulativeScore=away_data.get("cumulativeScore"),
                     )
 
                 matchup = Matchup(
@@ -222,7 +223,7 @@ class ESPNFantasyBasketballClient:
                     home=home_team,
                     away=away_team,
                     winner=schedule_item.get("winner"),
-                    playoff=schedule_item.get("playoff")
+                    playoff=schedule_item.get("playoff"),
                 )
                 matchups.append(matchup)
 
@@ -246,9 +247,7 @@ class ESPNFantasyBasketballClient:
             games = []
             for event in data.get("events", []):
                 game = NBAGame(
-                    id=event["id"],
-                    date=event["date"],
-                    competitions=event["competitions"]
+                    id=event["id"], date=event["date"], competitions=event["competitions"]
                 )
                 games.append(game)
 
@@ -278,7 +277,7 @@ class ESPNFantasyBasketballClient:
                 nominatingTeamId=pick_data.get("nominatingTeamId"),
                 memberId=pick_data.get("memberId"),
                 lineupSlotId=pick_data.get("lineupSlotId"),
-                keeper=pick_data.get("keeper", False)
+                keeper=pick_data.get("keeper", False),
             )
             picks.append(pick)
 
@@ -297,7 +296,7 @@ class ESPNFantasyBasketballClient:
             completeDate=draft_detail.get("completeDate"),
             picks=picks,
             currentPickNumber=current_pick_number,
-            currentNominatingTeam=current_nominating_team
+            currentNominatingTeam=current_nominating_team,
         )
 
     async def get_available_players(self, limit: int = 100) -> list[PlayerDraftInfo]:
@@ -309,7 +308,9 @@ class ESPNFantasyBasketballClient:
 
         # Get current draft status to see who's been drafted
         draft_status = await self.get_draft_status()
-        drafted_players = {pick.playerId: (pick.teamId, pick.bidAmount) for pick in draft_status.picks}
+        drafted_players = {
+            pick.playerId: (pick.teamId, pick.bidAmount) for pick in draft_status.picks
+        }
 
         players: list[PlayerDraftInfo] = []
         for player_entry in data.get("players", []):
@@ -333,14 +334,16 @@ class ESPNFantasyBasketballClient:
                 proTeamId=player_data.get("proTeamId"),
                 active=player_data.get("active", True),
                 injured=player_data.get("injured", False),
-                injuryStatus=player_data.get("injuryStatus")
+                injuryStatus=player_data.get("injuryStatus"),
             )
 
             # Get auction value from draft rankings
             auction_value = None
             rank = None
             if player_data.get("draftRanksByRankType", {}).get("STANDARD"):
-                auction_value = player_data["draftRanksByRankType"]["STANDARD"].get("auctionValue", 0)
+                auction_value = player_data["draftRanksByRankType"]["STANDARD"].get(
+                    "auctionValue", 0
+                )
                 rank = player_data["draftRanksByRankType"]["STANDARD"].get("rank")
 
             player_draft_info = PlayerDraftInfo(
@@ -349,7 +352,7 @@ class ESPNFantasyBasketballClient:
                 draftAuctionValue=player_entry.get("draftAuctionValue", 0),
                 auctionValue=auction_value,
                 rank=rank,
-                isDrafted=False
+                isDrafted=False,
             )
 
             players.append(player_draft_info)
@@ -389,10 +392,12 @@ class ESPNFantasyBasketballClient:
             totalSpent=total_spent,
             playersCount=players_count,
             remainingBudget=remaining_budget,
-            positionCounts=position_counts
+            positionCounts=position_counts,
         )
 
-    async def get_draft_recommendation(self, team_id: int, current_player_id: int | None = None) -> DraftRecommendation:
+    async def get_draft_recommendation(
+        self, team_id: int, current_player_id: int | None = None
+    ) -> DraftRecommendation:
         """Get draft recommendation for current situation."""
         # Get team's current status
         team_summary = await self.get_team_draft_summary(team_id)
@@ -402,18 +407,22 @@ class ESPNFantasyBasketballClient:
 
         if current_player_id:
             # Player is currently being nominated - should we bid?
-            current_player = next((p for p in available_players if p.playerId == current_player_id), None)
+            current_player = next(
+                (p for p in available_players if p.playerId == current_player_id), None
+            )
 
             if not current_player:
                 return DraftRecommendation(
                     action="pass",
                     reasoning="Player not found in available players list",
-                    priority=1
+                    priority=1,
                 )
 
             # Simple bidding logic
             player_value = current_player.auctionValue or 0
-            max_affordable = min(team_summary.remainingBudget - (13 - team_summary.playersCount), player_value)
+            max_affordable = min(
+                team_summary.remainingBudget - (13 - team_summary.playersCount), player_value
+            )
 
             if player_value >= 10 and max_affordable >= player_value * 0.8:
                 return DraftRecommendation(
@@ -424,14 +433,14 @@ class ESPNFantasyBasketballClient:
                     maxBid=max_affordable,
                     reasoning=f"Good value player worth ${player_value}. You can afford up to ${max_affordable}.",
                     priority=7,
-                    category_impact={"value": "positive"}
+                    category_impact={"value": "positive"},
                 )
             else:
                 return DraftRecommendation(
                     action="pass",
                     playerName=current_player.player.fullName,
                     reasoning=f"Player value (${player_value}) too high for remaining budget (${team_summary.remainingBudget})",
-                    priority=3
+                    priority=3,
                 )
         else:
             # Recommend next player to target
@@ -444,13 +453,11 @@ class ESPNFantasyBasketballClient:
                     suggestedBid=best_player.auctionValue or 1,
                     reasoning=f"Highest ranked available player (rank #{best_player.rank})",
                     priority=9,
-                    category_impact={"overall": "strong positive"}
+                    category_impact={"overall": "strong positive"},
                 )
 
             return DraftRecommendation(
-                action="pass",
-                reasoning="No quality players available",
-                priority=1
+                action="pass", reasoning="No quality players available", priority=1
             )
 
     async def analyze_punt_strategy(self, team_id: int) -> dict[str, Any]:
@@ -464,7 +471,7 @@ class ESPNFantasyBasketballClient:
             "remainingBudget": team_summary.remainingBudget,
             "playersCount": team_summary.playersCount,
             "strategy": "balanced" if team_summary.playersCount < 5 else "punt_detection_needed",
-            "recommendation": f"You have ${team_summary.remainingBudget} for {13 - team_summary.playersCount} more players"
+            "recommendation": f"You have ${team_summary.remainingBudget} for {13 - team_summary.playersCount} more players",
         }
 
     async def get_player_stats(self, player_id: int, timeframe: str = "season") -> PlayerStats:
@@ -498,7 +505,7 @@ class ESPNFantasyBasketballClient:
             playerId=player_id,
             playerName=player_info.get("fullName", "Unknown Player"),
             timeframe=timeframe,
-            **stats
+            **stats,
         )
 
     def _extract_player_stats(self, player_data: dict[str, Any], timeframe: str) -> dict[str, Any]:
@@ -534,17 +541,17 @@ class ESPNFantasyBasketballClient:
         # ESPN uses different stat IDs for different categories
         # This is a mapping of common ESPN stat IDs to our field names
         stat_mapping = {
-            "0": "points",          # Points
-            "1": "rebounds",        # Rebounds
-            "2": "assists",         # Assists
-            "3": "steals",          # Steals
-            "4": "blocks",          # Blocks
-            "17": "threePointMade", # 3PM
+            "0": "points",  # Points
+            "1": "rebounds",  # Rebounds
+            "2": "assists",  # Assists
+            "3": "steals",  # Steals
+            "4": "blocks",  # Blocks
+            "17": "threePointMade",  # 3PM
             "19": "fieldGoalPercentage",  # FG%
             "20": "freeThrowPercentage",  # FT%
-            "11": "turnovers",      # Turnovers
-            "40": "minutes",        # Minutes
-            "gamesPlayed": "gamesPlayed"
+            "11": "turnovers",  # Turnovers
+            "40": "minutes",  # Minutes
+            "gamesPlayed": "gamesPlayed",
         }
 
         parsed_stats = {}
@@ -570,11 +577,22 @@ class ESPNFantasyBasketballClient:
 
         return parsed_stats
 
-    async def compare_players(self, player_ids: list[int], categories: list[str] | None = None) -> PlayerComparison:
+    async def compare_players(
+        self, player_ids: list[int], categories: list[str] | None = None
+    ) -> PlayerComparison:
         """Compare multiple players across specified statistical categories."""
         if categories is None:
-            categories = ["points", "rebounds", "assists", "steals", "blocks", "threePointMade",
-                         "fieldGoalPercentage", "freeThrowPercentage", "turnovers"]
+            categories = [
+                "points",
+                "rebounds",
+                "assists",
+                "steals",
+                "blocks",
+                "threePointMade",
+                "fieldGoalPercentage",
+                "freeThrowPercentage",
+                "turnovers",
+            ]
 
         # Get stats for all players
         players_stats = []
@@ -603,8 +621,7 @@ class ESPNFantasyBasketballClient:
                 value = getattr(player_stats, category, None)
                 if value is not None:
                     if best_value is None or (
-                        (value > best_value and not reverse) or
-                        (value < best_value and reverse)
+                        (value > best_value and not reverse) or (value < best_value and reverse)
                     ):
                         best_value = value
                         best_player_id = player_stats.playerId
@@ -616,8 +633,7 @@ class ESPNFantasyBasketballClient:
         category_wins = {}
         for player_stats in players_stats:
             category_wins[player_stats.playerId] = sum(
-                1 for winner in winner_by_category.values()
-                if winner == player_stats.playerId
+                1 for winner in winner_by_category.values() if winner == player_stats.playerId
             )
 
         best_overall = max(category_wins.items(), key=lambda x: x[1])
@@ -625,22 +641,24 @@ class ESPNFantasyBasketballClient:
             p.playerName for p in players_stats if p.playerId == best_overall[0]
         )
 
-        overall_recommendation = f"{best_player_name} wins {best_overall[1]}/{len(categories)} categories"
-        analysis = f"Detailed comparison across {len(categories)} statistical categories. " \
-                  f"{best_player_name} provides the most balanced production."
+        overall_recommendation = (
+            f"{best_player_name} wins {best_overall[1]}/{len(categories)} categories"
+        )
+        analysis = (
+            f"Detailed comparison across {len(categories)} statistical categories. "
+            f"{best_player_name} provides the most balanced production."
+        )
 
         return PlayerComparison(
             players=players_stats,
             categories=categories,
             winner_by_category=winner_by_category,
             overall_recommendation=overall_recommendation,
-            analysis=analysis
+            analysis=analysis,
         )
 
     async def analyze_trade_proposal(
-        self,
-        your_player_ids: list[int],
-        their_player_ids: list[int]
+        self, your_player_ids: list[int], their_player_ids: list[int]
     ) -> TradeAnalysis:
         """Analyze a trade proposal using comprehensive statistical analysis."""
         # Get stats for all players involved
@@ -688,7 +706,9 @@ class ESPNFantasyBasketballClient:
                 reasoning = f"You lose significant value ({value_difference:.1f} fantasy points)"
             else:
                 recommendation = "negotiate"
-                reasoning = f"You lose some value ({value_difference:.1f} fantasy points), try to get more"
+                reasoning = (
+                    f"You lose some value ({value_difference:.1f} fantasy points), try to get more"
+                )
 
         # Analyze category impact (simplified)
         category_impact = self._analyze_category_impact(your_players, their_players)
@@ -705,10 +725,12 @@ class ESPNFantasyBasketballClient:
             recommendation=recommendation,
             reasoning=reasoning,
             category_impact=category_impact,
-            confidence=confidence
+            confidence=confidence,
         )
 
-    def _analyze_category_impact(self, your_players: list[PlayerStats], their_players: list[PlayerStats]) -> dict[str, str]:
+    def _analyze_category_impact(
+        self, your_players: list[PlayerStats], their_players: list[PlayerStats]
+    ) -> dict[str, str]:
         """Analyze the category-by-category impact of a trade."""
         categories = ["points", "rebounds", "assists", "steals", "blocks", "threePointMade"]
         impact = {}
@@ -727,14 +749,16 @@ class ESPNFantasyBasketballClient:
 
         return impact
 
-    async def get_trending_players(self, direction: str = "up", limit: int = 20) -> list[TrendingPlayer]:
+    async def get_trending_players(
+        self, direction: str = "up", limit: int = 20
+    ) -> list[TrendingPlayer]:
         """Get players trending up or down in adds/drops."""
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         params = {"view": "kona_player_info"}
 
         data = await self._make_request(url, params)
 
-        trending_players = []
+        trending_players: list[TrendingPlayer] = []
 
         for player_entry in data.get("players", []):
             if len(trending_players) >= limit:
@@ -759,7 +783,7 @@ class ESPNFantasyBasketballClient:
             player = Player(
                 id=player_info["id"],
                 fullName=player_info.get("fullName", ""),
-                defaultPositionId=player_info["defaultPositionId"]
+                defaultPositionId=player_info["defaultPositionId"],
             )
 
             # Determine reason for trending
@@ -773,11 +797,15 @@ class ESPNFantasyBasketballClient:
             trending_player = TrendingPlayer(
                 playerId=player_info["id"],
                 player=player,
-                trend_direction="up" if is_trending_up else "down" if is_trending_down else "stable",
+                trend_direction="up"
+                if is_trending_up
+                else "down"
+                if is_trending_down
+                else "stable",
                 add_percentage=max(0, add_percentage),
                 drop_percentage=max(0, -add_percentage),
                 net_adds=int(add_percentage * 100),  # Approximate
-                reason=reason
+                reason=reason,
             )
 
             trending_players.append(trending_player)

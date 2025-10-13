@@ -23,13 +23,7 @@ def sample_team_data():
         "location": "Test City",
         "logo": "https://example.com/logo.png",
         "owners": ["owner1", "owner2"],
-        "record": {
-            "overall": {
-                "wins": 5,
-                "losses": 3,
-                "percentage": 0.625
-            }
-        }
+        "record": {"overall": {"wins": 5, "losses": 3, "percentage": 0.625}},
     }
 
 
@@ -49,10 +43,7 @@ def sample_player_data():
         "injuryStatus": "NORMAL",
         "active": True,
         "droppable": True,
-        "ownership": {
-            "percentOwned": 85.5,
-            "percentStarted": 82.1
-        }
+        "ownership": {"percentOwned": 85.5, "percentStarted": 82.1},
     }
 
 
@@ -80,11 +71,11 @@ def sample_roster_data():
                         "lastName": "Doe",
                         "defaultPositionId": 1,
                         "active": True,
-                        "droppable": True
-                    }
-                }
+                        "droppable": True,
+                    },
+                },
             }
-        ]
+        ],
     }
 
 
@@ -99,23 +90,17 @@ def sample_matchup_data():
             "totalPoints": 100.5,
             "totalProjectedPoints": 105.2,
             "gamesPlayed": 10,
-            "cumulativeScore": {
-                "wins": 6,
-                "losses": 3
-            }
+            "cumulativeScore": {"wins": 6, "losses": 3},
         },
         "away": {
             "teamId": 2,
             "totalPoints": 95.0,
             "totalProjectedPoints": 98.7,
             "gamesPlayed": 10,
-            "cumulativeScore": {
-                "wins": 3,
-                "losses": 6
-            }
+            "cumulativeScore": {"wins": 3, "losses": 6},
         },
         "winner": "HOME",
-        "playoff": False
+        "playoff": False,
     }
 
 
@@ -132,19 +117,19 @@ def sample_nba_game_data():
                         "team": {
                             "id": "1",
                             "displayName": "Los Angeles Lakers",
-                            "abbreviation": "LAL"
+                            "abbreviation": "LAL",
                         }
                     },
                     {
                         "team": {
                             "id": "2",
                             "displayName": "Golden State Warriors",
-                            "abbreviation": "GSW"
+                            "abbreviation": "GSW",
                         }
-                    }
+                    },
                 ]
             }
-        ]
+        ],
     }
 
 
@@ -160,7 +145,7 @@ def sample_draft_pick_data():
         "roundId": 1,
         "roundPickNumber": 1,
         "nominatingTeamId": 2,
-        "keeper": False
+        "keeper": False,
     }
 
 
@@ -179,11 +164,11 @@ def sample_draft_status_data():
                 "bidAmount": 50,
                 "overallPickNumber": 1,
                 "roundId": 1,
-                "roundPickNumber": 1
+                "roundPickNumber": 1,
             }
         ],
         "currentPickNumber": 2,
-        "currentNominatingTeam": 2
+        "currentNominatingTeam": 2,
     }
 
 
@@ -198,12 +183,12 @@ def sample_player_draft_info_data():
             "firstName": "Test",
             "lastName": "Player",
             "defaultPositionId": 1,
-            "active": True
+            "active": True,
         },
         "draftAuctionValue": 0,
         "auctionValue": 30,
         "rank": 25,
-        "isDrafted": False
+        "isDrafted": False,
     }
 
 
@@ -217,7 +202,7 @@ def sample_team_draft_summary_data():
         "playersCount": 8,
         "remainingBudget": 50,
         "positionCounts": {"PG": 2, "SG": 1, "SF": 2, "PF": 2, "C": 1},
-        "categories": {"points": 100.5, "rebounds": 75.2, "assists": 65.8}
+        "categories": {"points": 100.5, "rebounds": 75.2, "assists": 65.8},
     }
 
 
@@ -235,8 +220,8 @@ def sample_draft_recommendation_data():
         "category_impact": {
             "points": "positive",
             "rebounds": "neutral",
-            "assists": "slight_positive"
-        }
+            "assists": "slight_positive",
+        },
     }
 
 
@@ -259,7 +244,7 @@ def sample_player_stats_data():
         "turnovers": 3.2,
         "minutes": 34.5,
         "fantasyPoints": 45.8,
-        "rank": 15
+        "rank": 15,
     }
 
 
@@ -275,7 +260,7 @@ def sample_player_comparison_data():
                 "points": 25.5,
                 "rebounds": 8.2,
                 "assists": 6.1,
-                "fantasyPoints": 45.8
+                "fantasyPoints": 45.8,
             },
             {
                 "playerId": 54321,
@@ -284,17 +269,13 @@ def sample_player_comparison_data():
                 "points": 22.1,
                 "rebounds": 10.5,
                 "assists": 4.8,
-                "fantasyPoints": 42.3
-            }
+                "fantasyPoints": 42.3,
+            },
         ],
         "categories": ["points", "rebounds", "assists"],
-        "winner_by_category": {
-            "points": 12345,
-            "rebounds": 54321,
-            "assists": 12345
-        },
+        "winner_by_category": {"points": 12345, "rebounds": 54321, "assists": 12345},
         "overall_recommendation": "Player A wins 2/3 categories",
-        "analysis": "Detailed comparison across 3 statistical categories. Player A provides the most balanced production."
+        "analysis": "Detailed comparison across 3 statistical categories. Player A provides the most balanced production.",
     }
 
 
@@ -307,7 +288,7 @@ def sample_trade_analysis_data():
                 "playerId": 12345,
                 "playerName": "Your Player",
                 "timeframe": "season",
-                "fantasyPoints": 45.8
+                "fantasyPoints": 45.8,
             }
         ],
         "their_players": [
@@ -315,7 +296,7 @@ def sample_trade_analysis_data():
                 "playerId": 54321,
                 "playerName": "Their Player",
                 "timeframe": "season",
-                "fantasyPoints": 48.2
+                "fantasyPoints": 48.2,
             }
         ],
         "your_total_value": 45.8,
@@ -323,12 +304,8 @@ def sample_trade_analysis_data():
         "value_difference": 2.4,
         "recommendation": "slight_accept",
         "reasoning": "You gain moderate value (+2.4 fantasy points)",
-        "category_impact": {
-            "points": "gain",
-            "rebounds": "loss",
-            "assists": "neutral"
-        },
-        "confidence": 0.8
+        "category_impact": {"points": "gain", "rebounds": "loss", "assists": "neutral"},
+        "confidence": 0.8,
     }
 
 
@@ -337,14 +314,10 @@ def sample_trending_player_data():
     """Sample trending player data for testing."""
     return {
         "playerId": 12345,
-        "player": {
-            "id": 12345,
-            "fullName": "Trending Player",
-            "defaultPositionId": 1
-        },
+        "player": {"id": 12345, "fullName": "Trending Player", "defaultPositionId": 1},
         "trend_direction": "up",
         "add_percentage": 15.5,
         "drop_percentage": 0.0,
         "net_adds": 1550,
-        "reason": "Increased add rate due to recent performance"
+        "reason": "Increased add rate due to recent performance",
     }

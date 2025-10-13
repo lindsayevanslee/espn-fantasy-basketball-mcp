@@ -26,23 +26,20 @@ async def handle_list_tools() -> list[types.Tool]:
                 "properties": {
                     "league_id": {
                         "type": "integer",
-                        "description": "ESPN Fantasy Basketball league ID"
+                        "description": "ESPN Fantasy Basketball league ID",
                     },
-                    "year": {
-                        "type": "integer",
-                        "description": "Season year (e.g., 2025)"
-                    },
+                    "year": {"type": "integer", "description": "Season year (e.g., 2025)"},
                     "espn_s2": {
                         "type": "string",
-                        "description": "ESPN authentication cookie for private leagues (optional)"
+                        "description": "ESPN authentication cookie for private leagues (optional)",
                     },
                     "swid": {
                         "type": "string",
-                        "description": "ESPN SWID cookie for private leagues (optional)"
-                    }
+                        "description": "ESPN SWID cookie for private leagues (optional)",
+                    },
                 },
-                "required": ["league_id", "year"]
-            }
+                "required": ["league_id", "year"],
+            },
         ),
         types.Tool(
             name="get_team_roster",
@@ -52,31 +49,25 @@ async def handle_list_tools() -> list[types.Tool]:
                 "properties": {
                     "league_id": {
                         "type": "integer",
-                        "description": "ESPN Fantasy Basketball league ID"
+                        "description": "ESPN Fantasy Basketball league ID",
                     },
-                    "year": {
-                        "type": "integer",
-                        "description": "Season year (e.g., 2025)"
-                    },
-                    "team_id": {
-                        "type": "integer",
-                        "description": "Team ID to get roster for"
-                    },
+                    "year": {"type": "integer", "description": "Season year (e.g., 2025)"},
+                    "team_id": {"type": "integer", "description": "Team ID to get roster for"},
                     "scoring_period": {
                         "type": "integer",
-                        "description": "Specific scoring period (optional)"
+                        "description": "Specific scoring period (optional)",
                     },
                     "espn_s2": {
                         "type": "string",
-                        "description": "ESPN authentication cookie for private leagues (optional)"
+                        "description": "ESPN authentication cookie for private leagues (optional)",
                     },
                     "swid": {
                         "type": "string",
-                        "description": "ESPN SWID cookie for private leagues (optional)"
-                    }
+                        "description": "ESPN SWID cookie for private leagues (optional)",
+                    },
                 },
-                "required": ["league_id", "year", "team_id"]
-            }
+                "required": ["league_id", "year", "team_id"],
+            },
         ),
         types.Tool(
             name="get_free_agents",
@@ -86,32 +77,29 @@ async def handle_list_tools() -> list[types.Tool]:
                 "properties": {
                     "league_id": {
                         "type": "integer",
-                        "description": "ESPN Fantasy Basketball league ID"
+                        "description": "ESPN Fantasy Basketball league ID",
                     },
-                    "year": {
-                        "type": "integer",
-                        "description": "Season year (e.g., 2025)"
-                    },
+                    "year": {"type": "integer", "description": "Season year (e.g., 2025)"},
                     "size": {
                         "type": "integer",
                         "description": "Number of players to return (max 50, default 50)",
-                        "default": 50
+                        "default": 50,
                     },
                     "position_id": {
                         "type": "integer",
-                        "description": "Filter by position ID (optional)"
+                        "description": "Filter by position ID (optional)",
                     },
                     "espn_s2": {
                         "type": "string",
-                        "description": "ESPN authentication cookie for private leagues (optional)"
+                        "description": "ESPN authentication cookie for private leagues (optional)",
                     },
                     "swid": {
                         "type": "string",
-                        "description": "ESPN SWID cookie for private leagues (optional)"
-                    }
+                        "description": "ESPN SWID cookie for private leagues (optional)",
+                    },
                 },
-                "required": ["league_id", "year"]
-            }
+                "required": ["league_id", "year"],
+            },
         ),
         types.Tool(
             name="get_matchups",
@@ -121,27 +109,24 @@ async def handle_list_tools() -> list[types.Tool]:
                 "properties": {
                     "league_id": {
                         "type": "integer",
-                        "description": "ESPN Fantasy Basketball league ID"
+                        "description": "ESPN Fantasy Basketball league ID",
                     },
-                    "year": {
-                        "type": "integer",
-                        "description": "Season year (e.g., 2025)"
-                    },
+                    "year": {"type": "integer", "description": "Season year (e.g., 2025)"},
                     "scoring_period": {
                         "type": "integer",
-                        "description": "Specific scoring period to get matchups for (optional)"
+                        "description": "Specific scoring period to get matchups for (optional)",
                     },
                     "espn_s2": {
                         "type": "string",
-                        "description": "ESPN authentication cookie for private leagues (optional)"
+                        "description": "ESPN authentication cookie for private leagues (optional)",
                     },
                     "swid": {
                         "type": "string",
-                        "description": "ESPN SWID cookie for private leagues (optional)"
-                    }
+                        "description": "ESPN SWID cookie for private leagues (optional)",
+                    },
                 },
-                "required": ["league_id", "year"]
-            }
+                "required": ["league_id", "year"],
+            },
         ),
         types.Tool(
             name="get_nba_schedule",
@@ -151,12 +136,12 @@ async def handle_list_tools() -> list[types.Tool]:
                 "properties": {
                     "date": {
                         "type": "string",
-                        "description": "Date in YYYY-MM-DD format (optional, defaults to today)"
+                        "description": "Date in YYYY-MM-DD format (optional, defaults to today)",
                     }
                 },
-                "required": []
-            }
-        )
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -175,8 +160,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
 
         return [
             types.TextContent(
-                type="text",
-                text=json.dumps([team.model_dump() for team in teams], indent=2)
+                type="text", text=json.dumps([team.model_dump() for team in teams], indent=2)
             )
         ]
 
@@ -191,12 +175,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
         client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
         roster = await client.get_team_roster(team_id, scoring_period)
 
-        return [
-            types.TextContent(
-                type="text",
-                text=json.dumps(roster.model_dump(), indent=2)
-            )
-        ]
+        return [types.TextContent(type="text", text=json.dumps(roster.model_dump(), indent=2))]
 
     elif name == "get_free_agents":
         league_id = arguments["league_id"]
@@ -211,8 +190,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
 
         return [
             types.TextContent(
-                type="text",
-                text=json.dumps([player.model_dump() for player in players], indent=2)
+                type="text", text=json.dumps([player.model_dump() for player in players], indent=2)
             )
         ]
 
@@ -229,7 +207,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
         return [
             types.TextContent(
                 type="text",
-                text=json.dumps([matchup.model_dump() for matchup in matchups], indent=2)
+                text=json.dumps([matchup.model_dump() for matchup in matchups], indent=2),
             )
         ]
 
@@ -242,8 +220,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
 
         return [
             types.TextContent(
-                type="text",
-                text=json.dumps([game.model_dump() for game in games], indent=2)
+                type="text", text=json.dumps([game.model_dump() for game in games], indent=2)
             )
         ]
 

@@ -36,23 +36,22 @@ class TestDraftMCPTools:
                     "bidAmount": 50,
                     "overallPickNumber": 1,
                     "roundId": 1,
-                    "roundPickNumber": 1
+                    "roundPickNumber": 1,
                 }
             ],
             "currentPickNumber": 2,
-            "currentNominatingTeam": 2
+            "currentNominatingTeam": 2,
         }
 
-        with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_status_obj = type('DraftStatus', (), {"model_dump": lambda self: mock_draft_status})()
+            mock_status_obj = type(
+                "DraftStatus", (), {"model_dump": lambda self: mock_draft_status}
+            )()
             mock_client_instance.get_draft_status = AsyncMock(return_value=mock_status_obj)
 
             result = await get_draft_status(
-                league_id=12345,
-                year=2025,
-                espn_s2="test_s2",
-                swid="test_swid"
+                league_id=12345, year=2025, espn_s2="test_s2", swid="test_swid"
             )
 
             assert result["inProgress"] is True
@@ -74,15 +73,17 @@ class TestDraftMCPTools:
             "maxBid": 30,
             "reasoning": "Good value player at this price",
             "priority": 8,
-            "category_impact": {"points": "positive"}
+            "category_impact": {"points": "positive"},
         }
 
-        with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_recommendation_obj = type('DraftRecommendation', (), {
-                "model_dump": lambda self: mock_recommendation
-            })()
-            mock_client_instance.get_draft_recommendation = AsyncMock(return_value=mock_recommendation_obj)
+            mock_recommendation_obj = type(
+                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+            )()
+            mock_client_instance.get_draft_recommendation = AsyncMock(
+                return_value=mock_recommendation_obj
+            )
 
             result = await should_i_bid(
                 league_id=12345,
@@ -90,7 +91,7 @@ class TestDraftMCPTools:
                 team_id=1,
                 current_player_id=12345,
                 espn_s2="test_s2",
-                swid="test_swid"
+                swid="test_swid",
             )
 
             assert result["action"] == "bid"
@@ -111,21 +112,19 @@ class TestDraftMCPTools:
             "suggestedBid": 40,
             "reasoning": "Best available player for your needs",
             "priority": 9,
-            "category_impact": {"overall": "strong positive"}
+            "category_impact": {"overall": "strong positive"},
         }
 
-        with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_recommendation_obj = type('DraftRecommendation', (), {
-                "model_dump": lambda self: mock_recommendation
-            })()
-            mock_client_instance.get_draft_recommendation = AsyncMock(return_value=mock_recommendation_obj)
-
-            result = await who_should_i_target_next(
-                league_id=12345,
-                year=2025,
-                team_id=1
+            mock_recommendation_obj = type(
+                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+            )()
+            mock_client_instance.get_draft_recommendation = AsyncMock(
+                return_value=mock_recommendation_obj
             )
+
+            result = await who_should_i_target_next(league_id=12345, year=2025, team_id=1)
 
             assert result["action"] == "nominate"
             assert result["playerId"] == 54321
@@ -143,7 +142,7 @@ class TestDraftMCPTools:
             "teamName": "Test Team",
             "totalSpent": 150,
             "playersCount": 8,
-            "remainingBudget": 50
+            "remainingBudget": 50,
         }
 
         mock_punt_analysis = {
@@ -151,24 +150,26 @@ class TestDraftMCPTools:
             "remainingBudget": 50,
             "playersCount": 8,
             "strategy": "punt_detection_needed",
-            "recommendation": "You have $50 for 5 more players"
+            "recommendation": "You have $50 for 5 more players",
         }
 
-        with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_team_summary_obj = type('TeamDraftSummary', (), {
-                "model_dump": lambda self: mock_team_summary,
-                "remainingBudget": 50,
-                "playersCount": 8
-            })()
-            mock_client_instance.get_team_draft_summary = AsyncMock(return_value=mock_team_summary_obj)
+            mock_team_summary_obj = type(
+                "TeamDraftSummary",
+                (),
+                {
+                    "model_dump": lambda self: mock_team_summary,
+                    "remainingBudget": 50,
+                    "playersCount": 8,
+                },
+            )()
+            mock_client_instance.get_team_draft_summary = AsyncMock(
+                return_value=mock_team_summary_obj
+            )
             mock_client_instance.analyze_punt_strategy = AsyncMock(return_value=mock_punt_analysis)
 
-            result = await analyze_my_draft_strategy(
-                league_id=12345,
-                year=2025,
-                team_id=1
-            )
+            result = await analyze_my_draft_strategy(league_id=12345, year=2025, team_id=1)
 
             assert result["team_summary"]["teamName"] == "Test Team"
             assert result["punt_analysis"]["strategy"] == "punt_detection_needed"
@@ -184,41 +185,29 @@ class TestDraftMCPTools:
         mock_players = [
             {
                 "playerId": 12345,
-                "player": {
-                    "id": 12345,
-                    "fullName": "Available Player 1",
-                    "defaultPositionId": 1
-                },
+                "player": {"id": 12345, "fullName": "Available Player 1", "defaultPositionId": 1},
                 "auctionValue": 30,
                 "rank": 25,
-                "isDrafted": False
+                "isDrafted": False,
             },
             {
                 "playerId": 54321,
-                "player": {
-                    "id": 54321,
-                    "fullName": "Available Player 2",
-                    "defaultPositionId": 2
-                },
+                "player": {"id": 54321, "fullName": "Available Player 2", "defaultPositionId": 2},
                 "auctionValue": 25,
                 "rank": 35,
-                "isDrafted": False
-            }
+                "isDrafted": False,
+            },
         ]
 
-        with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_player_objs = [
-                type('PlayerDraftInfo', (), {"model_dump": lambda self: mock_players[0]})(),
-                type('PlayerDraftInfo', (), {"model_dump": lambda self: mock_players[1]})()
+                type("PlayerDraftInfo", (), {"model_dump": lambda self: mock_players[0]})(),
+                type("PlayerDraftInfo", (), {"model_dump": lambda self: mock_players[1]})(),
             ]
             mock_client_instance.get_available_players = AsyncMock(return_value=mock_player_objs)
 
-            result = await get_available_players(
-                league_id=12345,
-                year=2025,
-                limit=25
-            )
+            result = await get_available_players(league_id=12345, year=2025, limit=25)
 
             assert len(result) == 2
             assert result[0]["playerId"] == 12345
@@ -232,14 +221,34 @@ class TestDraftMCPTools:
     @pytest.mark.asyncio
     async def test_tools_with_minimal_params(self):
         """Test draft tools with minimal required parameters."""
-        with patch('espn_fantasy_basketball.ESPNFantasyBasketballClient') as MockClient:
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_client_instance.get_draft_status = AsyncMock(return_value=type('DraftStatus', (), {
-                "model_dump": lambda self: {"inProgress": False, "drafted": True, "picks": []}
-            })())
-            mock_client_instance.get_draft_recommendation = AsyncMock(return_value=type('DraftRecommendation', (), {
-                "model_dump": lambda self: {"action": "pass", "reasoning": "No good options", "priority": 1}
-            })())
+            mock_client_instance.get_draft_status = AsyncMock(
+                return_value=type(
+                    "DraftStatus",
+                    (),
+                    {
+                        "model_dump": lambda self: {
+                            "inProgress": False,
+                            "drafted": True,
+                            "picks": [],
+                        }
+                    },
+                )()
+            )
+            mock_client_instance.get_draft_recommendation = AsyncMock(
+                return_value=type(
+                    "DraftRecommendation",
+                    (),
+                    {
+                        "model_dump": lambda self: {
+                            "action": "pass",
+                            "reasoning": "No good options",
+                            "priority": 1,
+                        }
+                    },
+                )()
+            )
             mock_client_instance.get_available_players = AsyncMock(return_value=[])
 
             # Test with minimal parameters (no auth cookies)
@@ -251,3 +260,140 @@ class TestDraftMCPTools:
 
             await get_available_players(league_id=12345, year=2025)
             mock_client_instance.get_available_players.assert_called_with(50)  # Default limit
+
+
+class TestDraftToolsWithTeamIdEnv:
+    """Test cases for draft tools using ESPN_TEAM_ID environment variable."""
+
+    @pytest.mark.asyncio
+    async def test_should_i_bid_with_env_team_id(self, monkeypatch):
+        """Test should_i_bid uses ESPN_TEAM_ID env var when team_id not provided."""
+        monkeypatch.setenv("ESPN_TEAM_ID", "5")
+
+        mock_recommendation = {
+            "action": "bid",
+            "playerId": 12345,
+            "playerName": "Test Player",
+            "suggestedBid": 25,
+            "maxBid": 30,
+            "reasoning": "Good value",
+            "priority": 8,
+            "category_impact": {},
+        }
+
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
+            mock_client_instance = MockClient.return_value
+            mock_recommendation_obj = type(
+                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+            )()
+            mock_client_instance.get_draft_recommendation = AsyncMock(
+                return_value=mock_recommendation_obj
+            )
+
+            result = await should_i_bid(current_player_id=12345, league_id=12345, year=2025)
+
+            assert result["action"] == "bid"
+            # Verify team_id from env var was used
+            mock_client_instance.get_draft_recommendation.assert_called_once_with(5, 12345)
+
+    @pytest.mark.asyncio
+    async def test_should_i_bid_parameter_overrides_env(self, monkeypatch):
+        """Test should_i_bid parameter overrides ESPN_TEAM_ID env var."""
+        monkeypatch.setenv("ESPN_TEAM_ID", "5")
+
+        mock_recommendation = {
+            "action": "pass",
+            "playerId": 12345,
+            "playerName": "Test Player",
+            "reasoning": "Not needed",
+            "priority": 2,
+            "category_impact": {},
+        }
+
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
+            mock_client_instance = MockClient.return_value
+            mock_recommendation_obj = type(
+                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+            )()
+            mock_client_instance.get_draft_recommendation = AsyncMock(
+                return_value=mock_recommendation_obj
+            )
+
+            result = await should_i_bid(
+                current_player_id=12345, team_id=3, league_id=12345, year=2025
+            )
+
+            assert result["action"] == "pass"
+            # Verify explicit team_id was used, not env var
+            mock_client_instance.get_draft_recommendation.assert_called_once_with(3, 12345)
+
+    @pytest.mark.asyncio
+    async def test_who_should_i_target_next_with_env_team_id(self, monkeypatch):
+        """Test who_should_i_target_next uses ESPN_TEAM_ID env var when team_id not provided."""
+        monkeypatch.setenv("ESPN_TEAM_ID", "8")
+
+        mock_recommendation = {
+            "action": "nominate",
+            "playerId": 54321,
+            "playerName": "Target Player",
+            "suggestedBid": 40,
+            "reasoning": "Best available",
+            "priority": 9,
+            "category_impact": {},
+        }
+
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
+            mock_client_instance = MockClient.return_value
+            mock_recommendation_obj = type(
+                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+            )()
+            mock_client_instance.get_draft_recommendation = AsyncMock(
+                return_value=mock_recommendation_obj
+            )
+
+            result = await who_should_i_target_next(league_id=12345, year=2025)
+
+            assert result["action"] == "nominate"
+            # Verify team_id from env var was used
+            mock_client_instance.get_draft_recommendation.assert_called_once_with(8, None)
+
+    @pytest.mark.asyncio
+    async def test_analyze_my_draft_strategy_with_env_team_id(self, monkeypatch):
+        """Test analyze_my_draft_strategy uses ESPN_TEAM_ID env var when team_id not provided."""
+        monkeypatch.setenv("ESPN_TEAM_ID", "6")
+
+        mock_team_summary = {
+            "teamId": 6,
+            "teamName": "Test Team",
+            "totalSpent": 100,
+            "playersCount": 5,
+            "remainingBudget": 100,
+        }
+
+        mock_punt_analysis = {
+            "strategy": "balanced",
+            "recommendation": "Continue balanced approach",
+        }
+
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
+            mock_client_instance = MockClient.return_value
+            mock_team_summary_obj = type(
+                "TeamDraftSummary",
+                (),
+                {
+                    "model_dump": lambda self: mock_team_summary,
+                    "remainingBudget": 100,
+                    "playersCount": 5,
+                },
+            )()
+            mock_client_instance.get_team_draft_summary = AsyncMock(
+                return_value=mock_team_summary_obj
+            )
+            mock_client_instance.analyze_punt_strategy = AsyncMock(return_value=mock_punt_analysis)
+
+            result = await analyze_my_draft_strategy(league_id=12345, year=2025)
+
+            assert result["team_summary"]["teamId"] == 6
+            # Verify team_id from env var was used
+            mock_client_instance.get_team_draft_summary.assert_called_once_with(6)
+            mock_client_instance.analyze_punt_strategy.assert_called_once_with(6)

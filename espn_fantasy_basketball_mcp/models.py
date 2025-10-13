@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class PlayerStats(BaseModel):
     """Player statistics for a given timeframe."""
+
     playerId: int
     playerName: str
     timeframe: str  # "season", "last_7", "last_30", "projections"
@@ -27,6 +28,7 @@ class PlayerStats(BaseModel):
 
 class PlayerComparison(BaseModel):
     """Comparison between multiple players."""
+
     players: list[PlayerStats]
     categories: list[str]
     winner_by_category: dict[str, int]  # category -> player_id
@@ -36,6 +38,7 @@ class PlayerComparison(BaseModel):
 
 class TradeAnalysis(BaseModel):
     """Analysis of a trade proposal."""
+
     your_players: list[PlayerStats]
     their_players: list[PlayerStats]
     your_total_value: float
@@ -49,6 +52,7 @@ class TradeAnalysis(BaseModel):
 
 class TrendingPlayer(BaseModel):
     """Player trending information."""
+
     playerId: int
     player: "Player"
     trend_direction: str  # "up", "down", "hot", "cold"

@@ -14,10 +14,7 @@ class TestESPNFantasyBasketballClient:
     def client(self):
         """Create a test client instance."""
         return ESPNFantasyBasketballClient(
-            league_id=12345,
-            year=2025,
-            espn_s2="test_s2",
-            swid="test_swid"
+            league_id=12345, year=2025, espn_s2="test_s2", swid="test_swid"
         )
 
     def test_client_initialization(self, client):
@@ -39,22 +36,12 @@ class TestESPNFantasyBasketballClient:
         """Test successful league teams retrieval."""
         mock_response = {
             "teams": [
-                {
-                    "id": 1,
-                    "abbrev": "TEST1",
-                    "name": "Test Team 1",
-                    "owners": ["owner1"]
-                },
-                {
-                    "id": 2,
-                    "abbrev": "TEST2",
-                    "name": "Test Team 2",
-                    "owners": ["owner2"]
-                }
+                {"id": 1, "abbrev": "TEST1", "name": "Test Team 1", "owners": ["owner1"]},
+                {"id": 2, "abbrev": "TEST2", "name": "Test Team 2", "owners": ["owner2"]},
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             teams = await client.get_league_teams()
 
@@ -91,17 +78,17 @@ class TestESPNFantasyBasketballClient:
                                         "lastName": "Player",
                                         "defaultPositionId": 1,
                                         "active": True,
-                                        "droppable": True
-                                    }
-                                }
+                                        "droppable": True,
+                                    },
+                                },
                             }
                         ]
-                    }
+                    },
                 }
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             roster = await client.get_team_roster(team_id=1)
 
@@ -115,7 +102,7 @@ class TestESPNFantasyBasketballClient:
         """Test team roster retrieval when team is not found."""
         mock_response = {"teams": []}
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
 
             with pytest.raises(ValueError, match="Team 999 not found"):
@@ -135,16 +122,14 @@ class TestESPNFantasyBasketballClient:
                         "lastName": "Agent",
                         "defaultPositionId": 1,
                         "active": True,
-                        "droppable": True
+                        "droppable": True,
                     },
-                    "ownership": {
-                        "percentOwned": 5.2
-                    }
+                    "ownership": {"percentOwned": 5.2},
                 }
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             players = await client.get_free_agents(size=10)
 
@@ -159,20 +144,14 @@ class TestESPNFantasyBasketballClient:
                 {
                     "id": 1,
                     "matchupPeriodId": 1,
-                    "home": {
-                        "teamId": 1,
-                        "totalPoints": 100.5
-                    },
-                    "away": {
-                        "teamId": 2,
-                        "totalPoints": 95.0
-                    },
-                    "winner": "HOME"
+                    "home": {"teamId": 1, "totalPoints": 100.5},
+                    "away": {"teamId": 2, "totalPoints": 95.0},
+                    "winner": "HOME",
                 }
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             matchups = await client.get_matchups()
 
@@ -197,24 +176,24 @@ class TestESPNFantasyBasketballClient:
                                     "team": {
                                         "id": "1",
                                         "displayName": "Lakers",
-                                        "abbreviation": "LAL"
+                                        "abbreviation": "LAL",
                                     }
                                 },
                                 {
                                     "team": {
                                         "id": "2",
                                         "displayName": "Warriors",
-                                        "abbreviation": "GSW"
+                                        "abbreviation": "GSW",
                                     }
-                                }
+                                },
                             ]
                         }
-                    ]
+                    ],
                 }
             ]
         }
 
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
             games = await client.get_nba_schedule()
 
@@ -225,7 +204,7 @@ class TestESPNFantasyBasketballClient:
     @pytest.mark.asyncio
     async def test_get_nba_schedule_api_failure(self, client):
         """Test NBA schedule retrieval when API fails."""
-        with patch.object(client, '_make_request', new_callable=AsyncMock) as mock_request:
+        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.side_effect = Exception("API Error")
             games = await client.get_nba_schedule()
 

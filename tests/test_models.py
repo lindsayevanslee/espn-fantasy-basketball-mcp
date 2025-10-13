@@ -58,11 +58,7 @@ class TestPlayerModel:
 
     def test_player_creation_minimal(self):
         """Test creating a player with minimal required fields."""
-        player = Player(
-            id=12345,
-            fullName="Test Player",
-            defaultPositionId=1
-        )
+        player = Player(id=12345, fullName="Test Player", defaultPositionId=1)
         assert player.id == 12345
         assert player.fullName == "Test Player"
         assert player.defaultPositionId == 1
@@ -84,7 +80,7 @@ class TestPlayerModel:
             injured=False,
             injuryStatus="NORMAL",
             active=True,
-            droppable=True
+            droppable=True,
         )
         assert player.id == 12345
         assert player.fullName == "John Doe"
@@ -111,7 +107,7 @@ class TestRosterModel:
             playerId=12345,
             playerPoolEntry=player_pool_entry,
             lineupSlotId=0,
-            acquisitionType="DRAFT"
+            acquisitionType="DRAFT",
         )
         assert roster_entry.playerId == 12345
         assert roster_entry.playerPoolEntry.id == 12345
@@ -123,9 +119,7 @@ class TestRosterModel:
         player = Player(id=12345, fullName="Test Player", defaultPositionId=1)
         player_pool_entry = PlayerPoolEntry(id=12345, player=player)
         roster_entry = RosterEntry(
-            playerId=12345,
-            playerPoolEntry=player_pool_entry,
-            lineupSlotId=0
+            playerId=12345, playerPoolEntry=player_pool_entry, lineupSlotId=0
         )
         roster = Roster(teamId=1, entries=[roster_entry])
         assert roster.teamId == 1
@@ -139,10 +133,7 @@ class TestMatchupModel:
     def test_matchup_team_creation(self):
         """Test creating a matchup team."""
         matchup_team = MatchupTeam(
-            teamId=1,
-            totalPoints=100.5,
-            totalProjectedPoints=95.0,
-            gamesPlayed=10
+            teamId=1, totalPoints=100.5, totalProjectedPoints=95.0, gamesPlayed=10
         )
         assert matchup_team.teamId == 1
         assert matchup_team.totalPoints == 100.5
@@ -153,13 +144,7 @@ class TestMatchupModel:
         """Test creating a matchup."""
         home_team = MatchupTeam(teamId=1, totalPoints=100.5)
         away_team = MatchupTeam(teamId=2, totalPoints=95.0)
-        matchup = Matchup(
-            id=1,
-            matchupPeriodId=1,
-            home=home_team,
-            away=away_team,
-            winner="HOME"
-        )
+        matchup = Matchup(id=1, matchupPeriodId=1, home=home_team, away=away_team, winner="HOME")
         assert matchup.id == 1
         assert matchup.matchupPeriodId == 1
         assert matchup.home.teamId == 1
@@ -175,18 +160,9 @@ class TestNBAModel:
         nba_team1 = {"id": "1", "displayName": "Lakers", "abbreviation": "LAL"}
         nba_team2 = {"id": "2", "displayName": "Warriors", "abbreviation": "GSW"}
 
-        competition = {
-            "competitors": [
-                {"team": nba_team1},
-                {"team": nba_team2}
-            ]
-        }
+        competition = {"competitors": [{"team": nba_team1}, {"team": nba_team2}]}
 
-        nba_game = NBAGame(
-            id="12345",
-            date="2025-01-15T20:00:00Z",
-            competitions=[competition]
-        )
+        nba_game = NBAGame(id="12345", date="2025-01-15T20:00:00Z", competitions=[competition])
         assert nba_game.id == "12345"
         assert nba_game.date == "2025-01-15T20:00:00Z"
         assert len(nba_game.competitions) == 1
@@ -206,7 +182,7 @@ class TestDraftModels:
             roundId=1,
             roundPickNumber=1,
             nominatingTeamId=2,
-            keeper=False
+            keeper=False,
         )
         assert pick.id == 1
         assert pick.playerId == 12345
@@ -227,7 +203,7 @@ class TestDraftModels:
             bidAmount=50,
             overallPickNumber=1,
             roundId=1,
-            roundPickNumber=1
+            roundPickNumber=1,
         )
 
         status = DraftStatus(
@@ -235,7 +211,7 @@ class TestDraftModels:
             drafted=False,
             picks=[pick],
             currentPickNumber=2,
-            currentNominatingTeam=2
+            currentNominatingTeam=2,
         )
         assert status.inProgress is True
         assert status.drafted is False
@@ -247,11 +223,7 @@ class TestDraftModels:
         """Test creating player draft info."""
         player = Player(id=12345, fullName="Test Player", defaultPositionId=1)
         draft_info = PlayerDraftInfo(
-            playerId=12345,
-            player=player,
-            auctionValue=30,
-            rank=25,
-            isDrafted=False
+            playerId=12345, player=player, auctionValue=30, rank=25, isDrafted=False
         )
         assert draft_info.playerId == 12345
         assert draft_info.player.fullName == "Test Player"
@@ -268,7 +240,7 @@ class TestDraftModels:
             playersCount=8,
             remainingBudget=50,
             positionCounts={"PG": 2, "SG": 1},
-            categories={"points": 100.5, "rebounds": 75.2}
+            categories={"points": 100.5, "rebounds": 75.2},
         )
         assert summary.teamId == 1
         assert summary.teamName == "Test Team"
@@ -288,7 +260,7 @@ class TestDraftModels:
             maxBid=30,
             reasoning="Good value at this price",
             priority=8,
-            category_impact={"points": "positive", "rebounds": "neutral"}
+            category_impact={"points": "positive", "rebounds": "neutral"},
         )
         assert recommendation.action == "bid"
         assert recommendation.playerId == 12345
@@ -321,7 +293,7 @@ class TestStatisticalAnalysisModels:
             turnovers=3.2,
             minutes=34.5,
             fantasyPoints=45.8,
-            rank=15
+            rank=15,
         )
         assert stats.playerId == 12345
         assert stats.playerName == "Test Player"
@@ -334,11 +306,7 @@ class TestStatisticalAnalysisModels:
 
     def test_player_stats_minimal(self):
         """Test creating player statistics with minimal fields."""
-        stats = PlayerStats(
-            playerId=12345,
-            playerName="Test Player",
-            timeframe="season"
-        )
+        stats = PlayerStats(playerId=12345, playerName="Test Player", timeframe="season")
         assert stats.playerId == 12345
         assert stats.playerName == "Test Player"
         assert stats.timeframe == "season"
@@ -348,18 +316,10 @@ class TestStatisticalAnalysisModels:
     def test_player_comparison_creation(self):
         """Test creating player comparison."""
         player_a = PlayerStats(
-            playerId=12345,
-            playerName="Player A",
-            timeframe="season",
-            points=25.5,
-            rebounds=8.2
+            playerId=12345, playerName="Player A", timeframe="season", points=25.5, rebounds=8.2
         )
         player_b = PlayerStats(
-            playerId=54321,
-            playerName="Player B",
-            timeframe="season",
-            points=22.1,
-            rebounds=10.5
+            playerId=54321, playerName="Player B", timeframe="season", points=22.1, rebounds=10.5
         )
 
         comparison = PlayerComparison(
@@ -367,7 +327,7 @@ class TestStatisticalAnalysisModels:
             categories=["points", "rebounds"],
             winner_by_category={"points": 12345, "rebounds": 54321},
             overall_recommendation="Player A wins 1/2 categories",
-            analysis="Balanced comparison"
+            analysis="Balanced comparison",
         )
 
         assert len(comparison.players) == 2
@@ -379,16 +339,10 @@ class TestStatisticalAnalysisModels:
     def test_trade_analysis_creation(self):
         """Test creating trade analysis."""
         your_player = PlayerStats(
-            playerId=12345,
-            playerName="Your Player",
-            timeframe="season",
-            fantasyPoints=45.8
+            playerId=12345, playerName="Your Player", timeframe="season", fantasyPoints=45.8
         )
         their_player = PlayerStats(
-            playerId=54321,
-            playerName="Their Player",
-            timeframe="season",
-            fantasyPoints=48.2
+            playerId=54321, playerName="Their Player", timeframe="season", fantasyPoints=48.2
         )
 
         analysis = TradeAnalysis(
@@ -400,7 +354,7 @@ class TestStatisticalAnalysisModels:
             recommendation="slight_accept",
             reasoning="You gain moderate value",
             category_impact={"points": "gain", "rebounds": "loss"},
-            confidence=0.8
+            confidence=0.8,
         )
 
         assert len(analysis.your_players) == 1
@@ -423,7 +377,7 @@ class TestStatisticalAnalysisModels:
             add_percentage=15.5,
             drop_percentage=0.0,
             net_adds=1550,
-            reason="Increased add rate due to recent performance"
+            reason="Increased add rate due to recent performance",
         )
 
         assert trending.playerId == 12345

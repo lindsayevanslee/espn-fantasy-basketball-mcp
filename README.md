@@ -64,13 +64,14 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
     "espn-fantasy-basketball": {
       "command": "uv",
       "args": [
-        "--directory", 
+        "--directory",
         "/path/to/espn-fantasy-basketball-mcp",
-        "run", 
+        "run",
         "espn_fantasy_basketball.py"
       ],
       "env": {
         "ESPN_LEAGUE_ID": "your_league_id",
+        "ESPN_TEAM_ID": "your_team_id",
         "ESPN_S2": "your_espn_s2_cookie",
         "ESPN_SWID": "your_swid_cookie"
       }
@@ -111,12 +112,12 @@ Get AI-powered recommendation on whether to bid for the current player being nom
 ```python
 # Should I bid for this player?
 recommendation = await should_i_bid(
-    league_id=123456,
-    year=2025,
-    team_id=1,                      # Your team ID
     current_player_id=12345,        # Player being nominated
-    espn_s2="your_espn_s2_cookie",
-    swid="your_swid_cookie"
+    team_id=1,                      # Your team ID (optional, uses ESPN_TEAM_ID env var)
+    league_id=123456,               # Optional, uses ESPN_LEAGUE_ID env var
+    year=2025,                      # Optional, uses ESPN_YEAR env var
+    espn_s2="your_espn_s2_cookie",  # Optional, uses ESPN_S2 env var
+    swid="your_swid_cookie"         # Optional, uses ESPN_SWID env var
 )
 ```
 
@@ -134,11 +135,11 @@ Get recommendation on which player to nominate when it's your turn.
 ```python
 # Who should I target next?
 recommendation = await who_should_i_target_next(
-    league_id=123456,
-    year=2025,
-    team_id=1,
-    espn_s2="your_espn_s2_cookie",
-    swid="your_swid_cookie"
+    team_id=1,                      # Your team ID (optional, uses ESPN_TEAM_ID env var)
+    league_id=123456,               # Optional, uses ESPN_LEAGUE_ID env var
+    year=2025,                      # Optional, uses ESPN_YEAR env var
+    espn_s2="your_espn_s2_cookie",  # Optional, uses ESPN_S2 env var
+    swid="your_swid_cookie"         # Optional, uses ESPN_SWID env var
 )
 ```
 
@@ -156,11 +157,11 @@ Analyze your current draft progress, spending patterns, and punt strategy.
 ```python
 # Analyze my draft strategy
 analysis = await analyze_my_draft_strategy(
-    league_id=123456,
-    year=2025,
-    team_id=1,
-    espn_s2="your_espn_s2_cookie",
-    swid="your_swid_cookie"
+    team_id=1,                      # Your team ID (optional, uses ESPN_TEAM_ID env var)
+    league_id=123456,               # Optional, uses ESPN_LEAGUE_ID env var
+    year=2025,                      # Optional, uses ESPN_YEAR env var
+    espn_s2="your_espn_s2_cookie",  # Optional, uses ESPN_S2 env var
+    swid="your_swid_cookie"         # Optional, uses ESPN_SWID env var
 )
 ```
 
@@ -222,7 +223,7 @@ print(f"Budget per remaining player: ${strategy['budget_per_remaining_player']}"
 
 ### 🆔 **Finding Your Team ID**
 
-Most draft tools require your `team_id`. To find it:
+Most draft and roster tools require your `team_id`. To find it:
 
 1. Use the `get_league_teams` tool to see all teams:
 ```python
@@ -233,6 +234,10 @@ teams = await get_league_teams(league_id, year, espn_s2, swid)
 2. Or check the ESPN Fantasy Basketball URL when viewing your team:
    - URL format: `https://fantasy.espn.com/basketball/team?leagueId=123456&teamId=1`
    - Your team ID is the number after `teamId=`
+
+3. **Configure it as an environment variable** to avoid being asked every time:
+   - Add `ESPN_TEAM_ID` to your Claude Desktop config (see Configuration section above)
+   - Once configured, you can omit `team_id` from tool calls and it will use your configured team automatically
 
 ### Private League Access
 
