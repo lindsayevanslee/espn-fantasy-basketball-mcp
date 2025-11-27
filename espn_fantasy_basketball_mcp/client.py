@@ -83,7 +83,7 @@ class ESPNFantasyBasketballClient:
     async def get_team_roster(self, team_id: int, scoring_period: int | None = None) -> Roster:
         """Get roster for a specific team."""
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
-        params = {"view": "mRoster"}
+        params = {"view": ["mRoster", "mTeam"]}  
 
         if scoring_period:
             params["scoringPeriodId"] = str(scoring_period)
@@ -105,8 +105,8 @@ class ESPNFantasyBasketballClient:
                         proTeamId=player_data.get("proTeamId"),
                         defaultPositionId=player_data["defaultPositionId"],
                         eligibleSlots=player_data.get("eligibleSlots"),
-                        injured=player_data.get("injured"),
-                        injuryStatus=entry.get("injuryStatus"),
+                        injured=player_data.get("injured", False),
+                        injuryStatus=player_data.get("injuryStatus") or entry.get("injuryStatus", "ACTIVE"),
                         active=player_data.get("active"),
                         droppable=player_data.get("droppable"),
                     )
