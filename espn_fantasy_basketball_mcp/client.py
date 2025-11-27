@@ -81,14 +81,30 @@ class ESPNFantasyBasketballClient:
         return teams
 
     async def get_team_roster(self, team_id: int, scoring_period: int | None = None) -> Roster:
-        """Get roster for a specific team."""
+        """Get roster for a specific team with player stats included."""
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
-        params = {"view": ["mRoster", "mTeam"]}  
+        
+        # Build filter to include stats for rostered players
+        filter_dict = {
+            "players": {
+                "filterStatsForTopScoringPeriodIds": {
+                    "value": 5,
+                    "additionalValue": [
+                        f"00{self.year}",   # Current season actuals
+                        f"10{self.year}",   # Projections
+                    ]
+                }
+            }
+        }
+        
+        import json
+        headers = {"x-fantasy-filter": json.dumps(filter_dict)}
+        params = {"view": ["mRoster", "mTeam"]}
 
         if scoring_period:
             params["scoringPeriodId"] = str(scoring_period)
 
-        data = await self._make_request(url, params)
+        data = await self._make_request(url, params, headers)
 
         for team_data in data.get("teams", []):
             if team_data["id"] == team_id:
@@ -96,6 +112,17 @@ class ESPNFantasyBasketballClient:
                 for entry in team_data.get("roster", {}).get("entries", []):
                     # Build player data from the nested structure
                     player_data = entry["playerPoolEntry"]["player"]
+                    
+                    # Get injury status - check multiple locations
+                    injury_status = (
+                        entry.get("injuryStatus") 
+                        or player_data.get("injuryStatus") 
+                        or "ACTIVE"
+                    )
+                    
+                    # Parse player stats
+                    stats_data = self._parse_player_stats(player_data.get("stats", []))
+                    
                     player = Player(
                         id=player_data["id"],
                         fullName=player_data.get("fullName", ""),
@@ -106,9 +133,10 @@ class ESPNFantasyBasketballClient:
                         defaultPositionId=player_data["defaultPositionId"],
                         eligibleSlots=player_data.get("eligibleSlots"),
                         injured=player_data.get("injured", False),
-                        injuryStatus=player_data.get("injuryStatus") or entry.get("injuryStatus", "ACTIVE"),
+                        injuryStatus=injury_status,
                         active=player_data.get("active"),
                         droppable=player_data.get("droppable"),
+                        stats=stats_data,
                     )
 
                     player_pool_entry = PlayerPoolEntry(
@@ -126,7 +154,7 @@ class ESPNFantasyBasketballClient:
                         lineupSlotId=entry["lineupSlotId"],
                         acquisitionDate=entry.get("acquisitionDate"),
                         acquisitionType=entry.get("acquisitionType"),
-                        injuryStatus=entry.get("injuryStatus"),
+                        injuryStatus=injury_status,
                     )
 
                     roster_entries.append(roster_entry)
@@ -134,6 +162,84 @@ class ESPNFantasyBasketballClient:
                 return Roster(teamId=team_id, entries=roster_entries)
 
         raise ValueError(f"Team {team_id} not found")
+
+    def _parse_player_stats(self, stats_list: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Parse ESPN stats array into a clean stats dictionary."""
+        if not stats_list:
+            return None
+        
+        stats_data = {}
+        
+        for stat_set in stats_list:
+            stat_id = str(stat_set.get("id", ""))
+            
+            # "00YYYY" = season actuals (what we want primarily)
+            # "10YYYY" = projections
+            # "01YYYY" = last 7 days
+            # "02YYYY" = last 15 days
+            # "03YYYY" = last 30 days
+            if stat_id.startswith("00"):
+                averages = stat_set.get("averages", {})
+                totals = stat_set.get("stats", {})
+                
+                # ESPN stat ID mapping for basketball:
+                # 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB, 11=TO, 17=3PM, 19=FG%, 20=FT%, 40=MIN, 42=GP
+                
+                # Calculate per-game averages if we have totals but not averages
+                games_played = totals.get("42", 0)
+                
+                if averages:
+                    stats_data = {
+                        "gamesPlayed": int(games_played) if games_played else 0,
+                        "minutes": round(averages.get("40", 0), 1),
+                        "points": round(averages.get("0", 0), 1),
+                        "rebounds": round(averages.get("6", 0), 1),
+                        "assists": round(averages.get("3", 0), 1),
+                        "steals": round(averages.get("2", 0), 1),
+                        "blocks": round(averages.get("1", 0), 1),
+                        "threes": round(averages.get("17", 0), 1),
+                        "turnovers": round(averages.get("11", 0), 1),
+                        "fg_pct": round(averages.get("19", 0) * 100, 1) if averages.get("19") else None,
+                        "ft_pct": round(averages.get("20", 0) * 100, 1) if averages.get("20") else None,
+                    }
+                elif totals and games_played > 0:
+                    # Calculate averages from totals
+                    gp = games_played
+                    stats_data = {
+                        "gamesPlayed": int(gp),
+                        "minutes": round(totals.get("40", 0) / gp, 1),
+                        "points": round(totals.get("0", 0) / gp, 1),
+                        "rebounds": round(totals.get("6", 0) / gp, 1),
+                        "assists": round(totals.get("3", 0) / gp, 1),
+                        "steals": round(totals.get("2", 0) / gp, 1),
+                        "blocks": round(totals.get("1", 0) / gp, 1),
+                        "threes": round(totals.get("17", 0) / gp, 1),
+                        "turnovers": round(totals.get("11", 0) / gp, 1),
+                        "fg_pct": round(totals.get("19", 0) * 100, 1) if totals.get("19") else None,
+                        "ft_pct": round(totals.get("20", 0) * 100, 1) if totals.get("20") else None,
+                    }
+                
+                # Add season totals as well (useful for category leagues)
+                if totals:
+                    stats_data["totals"] = {
+                        "points": int(totals.get("0", 0)),
+                        "rebounds": int(totals.get("6", 0)),
+                        "assists": int(totals.get("3", 0)),
+                        "steals": int(totals.get("2", 0)),
+                        "blocks": int(totals.get("1", 0)),
+                        "threes": int(totals.get("17", 0)),
+                        "turnovers": int(totals.get("11", 0)),
+                    }
+                
+                # Add fantasy points average if available
+                if "appliedAverage" in stat_set:
+                    stats_data["fantasyAvg"] = round(stat_set["appliedAverage"], 1)
+                if "appliedTotal" in stat_set:
+                    stats_data["fantasyTotal"] = round(stat_set["appliedTotal"], 1)
+                    
+                break  # Found season stats, stop looking
+        
+        return stats_data if stats_data else None
 
     async def get_free_agents(self, size: int = 50, position_id: int | None = None) -> list[Player]:
         """Get free agents/waiver wire players.
@@ -536,38 +642,138 @@ class ESPNFantasyBasketballClient:
         }
 
     async def get_player_stats(self, player_id: int, timeframe: str = "season") -> PlayerStats:
-        """Get comprehensive player statistics for specified timeframe."""
+        """Get comprehensive player statistics for specified timeframe.
+        
+        Args:
+            player_id: ESPN player ID
+            timeframe: One of "season", "projections", "last_7", "last_15", "last_30"
+        """
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
 
-        # Determine the appropriate view and parameters based on timeframe
-        if timeframe == "projections":
-            params = {"view": "kona_player_info"}
-        else:
-            params = {"view": "mPlayer"}
+        # Map timeframe to ESPN stat period ID prefix
+        timeframe_map = {
+            "season": f"00{self.year}",
+            "projections": f"10{self.year}",
+            "last_7": f"01{self.year}",
+            "last_15": f"02{self.year}",
+            "last_30": f"03{self.year}",
+        }
+        
+        stat_period = timeframe_map.get(timeframe, f"00{self.year}")
 
-        data = await self._make_request(url, params)
+        # Build filter to request specific player with stats
+        filter_dict = {
+            "players": {
+                "filterIds": {"value": [player_id]},
+                "filterStatsForTopScoringPeriodIds": {
+                    "value": 5,
+                    "additionalValue": [stat_period]
+                }
+            }
+        }
+        
+        import json
+        headers = {"x-fantasy-filter": json.dumps(filter_dict)}
+        params = {"view": "kona_player_info"}
 
-        # Find the specific player in the response
+        data = await self._make_request(url, params, headers)
+
+        # Find the player in the response
         player_data = None
         for player_entry in data.get("players", []):
-            if player_entry["player"]["id"] == player_id:
+            if player_entry.get("player", {}).get("id") == player_id:
                 player_data = player_entry
                 break
-
+        
         if not player_data:
             raise ValueError(f"Player {player_id} not found")
 
-        player_info = player_data["player"]
-
-        # Extract stats based on timeframe
-        stats = self._extract_player_stats(player_data, timeframe)
+        player_info = player_data.get("player", {})
+        
+        # Parse stats for the requested timeframe
+        stats_dict = self._parse_player_stats_for_timeframe(
+            player_info.get("stats", []), 
+            timeframe
+        )
 
         return PlayerStats(
             playerId=player_id,
             playerName=player_info.get("fullName", "Unknown Player"),
             timeframe=timeframe,
-            **stats,
+            gamesPlayed=stats_dict.get("gamesPlayed"),
+            minutes=stats_dict.get("minutes"),
+            points=stats_dict.get("points"),
+            rebounds=stats_dict.get("rebounds"),
+            assists=stats_dict.get("assists"),
+            steals=stats_dict.get("steals"),
+            blocks=stats_dict.get("blocks"),
+            threePointMade=stats_dict.get("threes"),
+            turnovers=stats_dict.get("turnovers"),
+            fieldGoalPercentage=stats_dict.get("fg_pct"),
+            freeThrowPercentage=stats_dict.get("ft_pct"),
+            fantasyPoints=stats_dict.get("fantasyAvg"),
         )
+
+    def _parse_player_stats_for_timeframe(
+        self, stats_list: list[dict[str, Any]], timeframe: str
+    ) -> dict[str, Any]:
+        """Parse stats for a specific timeframe."""
+        # Map timeframe to ESPN stat ID prefix
+        prefix_map = {
+            "season": "00",
+            "projections": "10", 
+            "last_7": "01",
+            "last_15": "02",
+            "last_30": "03",
+        }
+        target_prefix = prefix_map.get(timeframe, "00")
+        
+        for stat_set in stats_list:
+            stat_id = str(stat_set.get("id", ""))
+            
+            if stat_id.startswith(target_prefix):
+                averages = stat_set.get("averages", {})
+                totals = stat_set.get("stats", {})
+                games_played = totals.get("42", 0)
+                
+                stats_data = {}
+                
+                if averages:
+                    stats_data = {
+                        "gamesPlayed": int(games_played) if games_played else 0,
+                        "minutes": round(averages.get("40", 0), 1),
+                        "points": round(averages.get("0", 0), 1),
+                        "rebounds": round(averages.get("6", 0), 1),
+                        "assists": round(averages.get("3", 0), 1),
+                        "steals": round(averages.get("2", 0), 1),
+                        "blocks": round(averages.get("1", 0), 1),
+                        "threes": round(averages.get("17", 0), 1),
+                        "turnovers": round(averages.get("11", 0), 1),
+                        "fg_pct": round(averages.get("19", 0) * 100, 1) if averages.get("19") else None,
+                        "ft_pct": round(averages.get("20", 0) * 100, 1) if averages.get("20") else None,
+                    }
+                elif totals and games_played > 0:
+                    gp = games_played
+                    stats_data = {
+                        "gamesPlayed": int(gp),
+                        "minutes": round(totals.get("40", 0) / gp, 1),
+                        "points": round(totals.get("0", 0) / gp, 1),
+                        "rebounds": round(totals.get("6", 0) / gp, 1),
+                        "assists": round(totals.get("3", 0) / gp, 1),
+                        "steals": round(totals.get("2", 0) / gp, 1),
+                        "blocks": round(totals.get("1", 0) / gp, 1),
+                        "threes": round(totals.get("17", 0) / gp, 1),
+                        "turnovers": round(totals.get("11", 0) / gp, 1),
+                        "fg_pct": round(totals.get("19", 0) * 100, 1) if totals.get("19") else None,
+                        "ft_pct": round(totals.get("20", 0) * 100, 1) if totals.get("20") else None,
+                    }
+                
+                if "appliedAverage" in stat_set:
+                    stats_data["fantasyAvg"] = round(stat_set["appliedAverage"], 1)
+                    
+                return stats_data
+        
+        return {}
 
     def _extract_player_stats(self, player_data: dict[str, Any], timeframe: str) -> dict[str, Any]:
         """Extract statistics from ESPN player data based on timeframe."""
