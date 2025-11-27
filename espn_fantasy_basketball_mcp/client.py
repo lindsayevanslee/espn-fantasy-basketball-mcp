@@ -51,10 +51,10 @@ class ESPNFantasyBasketballClient:
         if swid:
             self.cookies["SWID"] = swid
 
-    async def _make_request(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _make_request(self, url: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
         """Make HTTP request to ESPN API."""
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, cookies=self.cookies)
+            response = await client.get(url, params=params, headers=headers, cookies=self.cookies)
             response.raise_for_status()
             return response.json()  # type: ignore[no-any-return]
 
@@ -143,42 +143,77 @@ class ESPNFantasyBasketballClient:
             position_id: Filter by position ID (optional)
         """
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
-        filter_json = (
-            f'{{"players":{{"limit":{size},"sortPercOwned":{{"sortAsc":false,"sortPriority":1}}}}}}'
-        )
-        params = {"view": "kona_player_info", "X-Fantasy-Filter": filter_json}
-
-        if position_id:
-            filter_dict = {
-                "players": {
-                    "limit": size,
-                    "sortPercOwned": {"sortAsc": False, "sortPriority": 1},
-                    "filterSlotIds": {"value": [position_id]},
-                }
+        
+        # Build the filter for free agents, sorted by ownership %
+        filter_dict = {
+            "players": {
+                "filterStatus": {"value": ["FREEAGENT", "WAIVERS"]},
+                "limit": size,
+                "sortPercOwned": {"sortAsc": False, "sortPriority": 1},
             }
-            params["X-Fantasy-Filter"] = str(filter_dict).replace("'", '"')
+        }
+        
+        # Add position filter if specified
+        if position_id:
+            filter_dict["players"]["filterSlotIds"] = {"value": [position_id]}
+        
+        # ESPN expects the filter as a header, not a param
+        import json
+        headers = {"x-fantasy-filter": json.dumps(filter_dict)}
+        params = {"view": "kona_player_info"}
 
-        data = await self._make_request(url, params)
+        data = await self._make_request(url, params, headers)
 
         players = []
         for player_data in data.get("players", []):
-            if player_data.get("onTeamId") is None:  # Free agent
-                player_info = player_data["player"]
-                player = Player(
-                    id=player_info["id"],
-                    fullName=player_info["fullName"],
-                    firstName=player_info.get("firstName"),
-                    lastName=player_info.get("lastName"),
-                    jersey=player_info.get("jersey"),
-                    proTeamId=player_info.get("proTeamId"),
-                    defaultPositionId=player_info["defaultPositionId"],
-                    eligibleSlots=player_info.get("eligibleSlots"),
-                    injured=player_info.get("injured", False),
-                    injuryStatus=player_info.get("injuryStatus"),
-                    ownership=player_data.get("ownership"),
-                )
-                players.append(player)
+            player_info = player_data["player"]
+            
+            # Parse ownership data
+            ownership_data = player_data.get("ownership", {})
+            percent_owned = ownership_data.get("percentOwned", 0)
+            percent_change = ownership_data.get("percentChange", 0)
+            
+            # Parse stats if available (ESPN stat IDs: 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB, 17=3PM)
+            stats_data = {}
+            player_stats = player_info.get("stats", [])
+            if player_stats and len(player_stats) > 0:
+                # Usually index 0 is current season stats
+                season_stats = player_stats[0] if isinstance(player_stats, list) else player_stats
+                if "averages" in season_stats:
+                    avg = season_stats["averages"]
+                    stats_data = {
+                        "points": avg.get("0", 0),
+                        "rebounds": avg.get("6", 0),
+                        "assists": avg.get("3", 0),
+                        "steals": avg.get("2", 0),
+                        "blocks": avg.get("1", 0),
+                        "threes": avg.get("17", 0),
+                    }
+                elif "appliedAverage" in season_stats:
+                    stats_data["fantasyAvg"] = season_stats.get("appliedAverage", 0)
+            
+            player = Player(
+                id=player_info["id"],
+                fullName=player_info["fullName"],
+                firstName=player_info.get("firstName"),
+                lastName=player_info.get("lastName"),
+                jersey=player_info.get("jersey"),
+                proTeamId=player_info.get("proTeamId"),
+                defaultPositionId=player_info["defaultPositionId"],
+                eligibleSlots=player_info.get("eligibleSlots"),
+                injured=player_info.get("injured", False),
+                injuryStatus=player_info.get("injuryStatus"),
+                ownership={
+                    "percentOwned": percent_owned,
+                    "percentChange": percent_change,
+                },
+                stats=stats_data if stats_data else None,
+            )
+            players.append(player)
 
+        # Sort by percent owned (highest first) - should already be sorted but ensure it
+        # players.sort(key=lambda p: p.ownership.get("percentOwned", 0) if isinstance(p.ownership, dict) and p.ownership else (p.ownership.percentOwned if p.ownership and hasattr(p.ownership, 'percentOwned') else 0), reverse=True)        
+        
         return players
 
     async def get_matchups(self, scoring_period: int | None = None) -> list[Matchup]:
