@@ -144,12 +144,19 @@ class ESPNFantasyBasketballClient:
         """
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         
-        # Build the filter for free agents, sorted by ownership %
+        # Build the filter for free agents, sorted by ownership %, with stats
         filter_dict = {
             "players": {
                 "filterStatus": {"value": ["FREEAGENT", "WAIVERS"]},
                 "limit": size,
                 "sortPercOwned": {"sortAsc": False, "sortPriority": 1},
+                "filterStatsForTopScoringPeriodIds": {
+                    "value": 5,
+                    "additionalValue": [
+                        f"00{self.year}",   # Current season total
+                        f"10{self.year}",   # Current season projected
+                    ]
+                }
             }
         }
         
@@ -173,24 +180,45 @@ class ESPNFantasyBasketballClient:
             percent_owned = ownership_data.get("percentOwned", 0)
             percent_change = ownership_data.get("percentChange", 0)
             
-            # Parse stats if available (ESPN stat IDs: 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB, 17=3PM)
+            # Parse stats - ESPN returns stats as a list of stat objects by period
             stats_data = {}
-            player_stats = player_info.get("stats", [])
-            if player_stats and len(player_stats) > 0:
-                # Usually index 0 is current season stats
-                season_stats = player_stats[0] if isinstance(player_stats, list) else player_stats
-                if "averages" in season_stats:
-                    avg = season_stats["averages"]
-                    stats_data = {
-                        "points": avg.get("0", 0),
-                        "rebounds": avg.get("6", 0),
-                        "assists": avg.get("3", 0),
-                        "steals": avg.get("2", 0),
-                        "blocks": avg.get("1", 0),
-                        "threes": avg.get("17", 0),
-                    }
-                elif "appliedAverage" in season_stats:
-                    stats_data["fantasyAvg"] = season_stats.get("appliedAverage", 0)
+            player_stats_list = player_info.get("stats", [])
+            
+            if player_stats_list and len(player_stats_list) > 0:
+                # Find the current season stats (id starts with "00" for actuals)
+                for stat_set in player_stats_list:
+                    stat_id = str(stat_set.get("id", ""))
+                    
+                    # "00YYYY" = season actuals, "10YYYY" = projections
+                    if stat_id.startswith("00"):
+                        # Get averages if available, otherwise use totals
+                        averages = stat_set.get("averages", {})
+                        totals = stat_set.get("stats", {})
+                        
+                        # Use averages preferentially (per-game stats)
+                        source = averages if averages else totals
+                        
+                        # ESPN stat ID mapping for basketball:
+                        # 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB, 13=FG%, 14=FT%, 17=3PM, 11=TO, 40=MIN
+                        stats_data = {
+                            "points": round(source.get("0", 0), 1),
+                            "blocks": round(source.get("1", 0), 1),
+                            "steals": round(source.get("2", 0), 1),
+                            "assists": round(source.get("3", 0), 1),
+                            "rebounds": round(source.get("6", 0), 1),
+                            "fg_pct": round(source.get("19", 0) * 100, 1) if source.get("19") else None,  # FG%
+                            "ft_pct": round(source.get("20", 0) * 100, 1) if source.get("20") else None,  # FT%
+                            "threes": round(source.get("17", 0), 1),
+                            "turnovers": round(source.get("11", 0), 1),
+                            "minutes": round(source.get("40", 0), 1),
+                            "games_played": stat_set.get("stats", {}).get("42", 0),
+                        }
+                        
+                        # Also grab fantasy points average if available
+                        if "appliedAverage" in stat_set:
+                            stats_data["fantasy_avg"] = round(stat_set["appliedAverage"], 1)
+                        
+                        break  # Found season stats, stop looking
             
             player = Player(
                 id=player_info["id"],
@@ -211,10 +239,8 @@ class ESPNFantasyBasketballClient:
             )
             players.append(player)
 
-        # Sort by percent owned (highest first) - should already be sorted but ensure it
-        # players.sort(key=lambda p: p.ownership.get("percentOwned", 0) if isinstance(p.ownership, dict) and p.ownership else (p.ownership.percentOwned if p.ownership and hasattr(p.ownership, 'percentOwned') else 0), reverse=True)        
-        
         return players
+
 
     async def get_matchups(self, scoring_period: int | None = None) -> list[Matchup]:
         """Get matchups for the league."""
