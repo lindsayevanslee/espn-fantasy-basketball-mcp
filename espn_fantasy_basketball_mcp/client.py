@@ -114,11 +114,24 @@ class ESPNFantasyBasketballClient:
                     player_data = entry["playerPoolEntry"]["player"]
                     
                     # Get injury status - check multiple locations
+                    # ESPN may return various status values: "ACTIVE", "NORMAL", "DTD", "DAY_TO_DAY", 
+                    # "QUESTIONABLE", "OUT", "FUTURE_TO_IR", etc.
+                    # IMPORTANT: Player-level injuryStatus is more accurate than entry-level
+                    # Entry-level often shows "NORMAL" even when player-level shows "DAY_TO_DAY"
+                    # So we prioritize player-level status first
                     injury_status = (
-                        entry.get("injuryStatus") 
-                        or player_data.get("injuryStatus") 
-                        or "ACTIVE"
+                        player_data.get("injuryStatus")
+                        or entry.get("playerPoolEntry", {}).get("player", {}).get("injuryStatus")
+                        or entry.get("injuryStatus")  # Fall back to entry level if player level not available
                     )
+                    # ESPN might return null/empty for DTD players - check if there's an injury object
+                    if not injury_status:
+                        injury_info = player_data.get("injury") or entry.get("injury")
+                        if injury_info:
+                            # ESPN might have injury details in an object
+                            injury_status = injury_info.get("status") or injury_info.get("injuryStatus")
+                    # If still no status, preserve None rather than defaulting (let the model handle it)
+                    # This way we don't mask DTD players that ESPN marks differently
                     
                     # Parse player stats
                     stats_data = self._parse_player_stats(player_data.get("stats", []))
