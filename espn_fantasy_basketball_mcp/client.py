@@ -170,6 +170,9 @@ class ESPNFantasyBasketballClient:
         
         stats_data = {}
         
+        # Look for current season stats first (00YYYY format)
+        current_season_id = f"00{self.year}"
+        
         for stat_set in stats_list:
             stat_id = str(stat_set.get("id", ""))
             
@@ -178,7 +181,8 @@ class ESPNFantasyBasketballClient:
             # "01YYYY" = last 7 days
             # "02YYYY" = last 15 days
             # "03YYYY" = last 30 days
-            if stat_id.startswith("00"):
+            # Prioritize current season (2026) over previous seasons
+            if stat_id == current_season_id:
                 averages = stat_set.get("averages", {})
                 totals = stat_set.get("stats", {})
                 
