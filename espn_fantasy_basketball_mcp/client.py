@@ -1,5 +1,6 @@
 """ESPN Fantasy Basketball API client."""
 
+import logging
 from typing import Any
 
 import httpx
@@ -24,6 +25,8 @@ from .models import (
     TrendingPlayer,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class ESPNFantasyBasketballClient:
     """Client for ESPN Fantasy Basketball API."""
@@ -41,7 +44,18 @@ class ESPNFantasyBasketballClient:
             year: Season year
             espn_s2: ESPN authentication cookie (for private leagues)
             swid: ESPN SWID cookie (for private leagues)
+
+        Raises:
+            ValueError: If league_id or year is invalid
         """
+        # Validate league_id
+        if not isinstance(league_id, int) or league_id <= 0:
+            raise ValueError(f"Invalid league_id: {league_id}. Must be a positive integer.")
+
+        # Validate year
+        if not isinstance(year, int) or year < 2000 or year > 2100:
+            raise ValueError(f"Invalid year: {year}. Must be between 2000 and 2100.")
+
         self.league_id = league_id
         self.year = year
         self.cookies = {}
@@ -51,12 +65,56 @@ class ESPNFantasyBasketballClient:
         if swid:
             self.cookies["SWID"] = swid
 
+    @staticmethod
+    def _validate_positive_int(value: int | None, name: str) -> None:
+        """Validate that a value is a positive integer.
+
+        Args:
+            value: Value to validate
+            name: Parameter name for error message
+
+        Raises:
+            ValueError: If value is not a positive integer
+        """
+        if value is not None and (not isinstance(value, int) or value <= 0):
+            raise ValueError(f"Invalid {name}: {value}. Must be a positive integer.")
+
     async def _make_request(self, url: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
-        """Make HTTP request to ESPN API."""
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, headers=headers, cookies=self.cookies)
-            response.raise_for_status()
-            return response.json()  # type: ignore[no-any-return]
+        """Make HTTP request to ESPN API.
+
+        Args:
+            url: Full URL to request
+            params: Query parameters
+            headers: HTTP headers
+
+        Returns:
+            JSON response data
+
+        Raises:
+            ValueError: If URL is not HTTPS
+            httpx.HTTPError: For HTTP-related errors
+        """
+        # Enforce HTTPS
+        if not url.startswith("https://"):
+            raise ValueError(f"Only HTTPS URLs are allowed. Got: {url}")
+
+        try:
+            # Set a reasonable timeout (30 seconds)
+            timeout = httpx.Timeout(30.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                logger.debug(f"Making request to {url}")
+                response = await client.get(url, params=params, headers=headers, cookies=self.cookies)
+                response.raise_for_status()
+                return response.json()  # type: ignore[no-any-return]
+        except httpx.TimeoutException as e:
+            logger.error(f"Request timeout for {url}: {e}")
+            raise
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error {e.response.status_code} for {url}: {e}")
+            raise
+        except httpx.RequestError as e:
+            logger.error(f"Request error for {url}: {e}")
+            raise
 
     async def get_league_teams(self) -> list[Team]:
         """Get all teams in the league."""
@@ -81,7 +139,22 @@ class ESPNFantasyBasketballClient:
         return teams
 
     async def get_team_roster(self, team_id: int, scoring_period: int | None = None) -> Roster:
-        """Get roster for a specific team with player stats included."""
+        """Get roster for a specific team with player stats included.
+
+        Args:
+            team_id: Team ID to get roster for
+            scoring_period: Specific scoring period (optional)
+
+        Returns:
+            Roster object with team roster data
+
+        Raises:
+            ValueError: If team_id or scoring_period is invalid, or team not found
+        """
+        # Validate inputs
+        self._validate_positive_int(team_id, "team_id")
+        self._validate_positive_int(scoring_period, "scoring_period")
+
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         
         # Build filter to include stats for rostered players
@@ -174,7 +247,9 @@ class ESPNFantasyBasketballClient:
 
                 return Roster(teamId=team_id, entries=roster_entries)
 
-        raise ValueError(f"Team {team_id} not found")
+        # Log the detailed error but return generic message
+        logger.warning(f"Team with ID {team_id} not found in league {self.league_id}")
+        raise ValueError("Team not found in this league")
 
     def _parse_player_stats(self, stats_list: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Parse ESPN stats array into a clean stats dictionary."""
@@ -264,7 +339,15 @@ class ESPNFantasyBasketballClient:
         Args:
             size: Number of players to return (max 50)
             position_id: Filter by position ID (optional)
+
+        Raises:
+            ValueError: If size or position_id is invalid
         """
+        # Validate inputs
+        if not isinstance(size, int) or size <= 0 or size > 50:
+            raise ValueError(f"Invalid size: {size}. Must be between 1 and 50.")
+        self._validate_positive_int(position_id, "position_id")
+
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         
         # Build the filter for free agents, sorted by ownership %, with stats
@@ -418,7 +501,16 @@ class ESPNFantasyBasketballClient:
 
         Args:
             date: Date in YYYY-MM-DD format (optional, defaults to today)
+
+        Returns:
+            List of NBA games, or empty list if API fails
         """
+        # Validate date format if provided
+        if date:
+            import re
+            if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+                raise ValueError(f"Invalid date format: {date}. Must be YYYY-MM-DD.")
+
         url = f"{self.NBA_BASE_URL}/scoreboard"
         params = {}
 
@@ -436,8 +528,13 @@ class ESPNFantasyBasketballClient:
                 games.append(game)
 
             return games
-        except Exception:
-            # If NBA API fails, return empty list
+        except httpx.HTTPError as e:
+            # Log specific HTTP errors but return empty list
+            logger.warning(f"NBA API request failed with HTTP error: {e}")
+            return []
+        except Exception as e:
+            # Log unexpected errors but return empty list
+            logger.error(f"Unexpected error fetching NBA schedule: {e}")
             return []
 
     async def get_draft_status(self) -> DraftStatus:
@@ -564,11 +661,8 @@ class ESPNFantasyBasketballClient:
         remaining_budget = 200 - total_spent
 
         # Get position counts (simplified)
+        # TODO: This would need player data to get actual positions
         position_counts: dict[str, int] = {}
-        for _pick in team_picks:
-            # This would need player data to get actual positions
-            # For now, just count total players
-            pass
 
         return TeamDraftSummary(
             teamId=team_id,
@@ -660,12 +754,16 @@ class ESPNFantasyBasketballClient:
 
     async def get_player_stats(self, player_id: int, timeframe: str = "season") -> PlayerStats:
         """Get comprehensive player statistics for specified timeframe.
-        
+
         Args:
             player_id: ESPN player ID
             timeframe: One of "season", "projections", "last_7", "last_15", "last_30"
+
+        Raises:
+            ValueError: If player_id or timeframe is invalid, or player not found
         """
-        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        # Validate inputs
+        self._validate_positive_int(player_id, "player_id")
 
         # Map timeframe to ESPN stat period ID prefix
         timeframe_map = {
@@ -675,8 +773,12 @@ class ESPNFantasyBasketballClient:
             "last_15": f"02{self.year}",
             "last_30": f"03{self.year}",
         }
-        
-        stat_period = timeframe_map.get(timeframe, f"00{self.year}")
+
+        if timeframe not in timeframe_map:
+            raise ValueError(f"Invalid timeframe: {timeframe}. Must be one of {list(timeframe_map.keys())}")
+
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        stat_period = timeframe_map[timeframe]
 
         # Build filter to request specific player with stats
         filter_dict = {
@@ -703,7 +805,8 @@ class ESPNFantasyBasketballClient:
                 break
         
         if not player_data:
-            raise ValueError(f"Player {player_id} not found")
+            logger.warning(f"Player with ID {player_id} not found")
+            raise ValueError("Player not found")
 
         player_info = player_data.get("player", {})
         

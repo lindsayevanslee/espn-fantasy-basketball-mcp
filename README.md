@@ -56,6 +56,12 @@ uv run espn_fantasy_basketball.py
 
 ### Configuration for Claude Desktop
 
+> **⚠️ SECURITY WARNING**: The ESPN_S2 and ESPN_SWID cookies provide full access to your ESPN Fantasy account. Treat them like passwords:
+> - Never share these credentials with anyone
+> - Never commit them to version control
+> - Ensure your Claude Desktop config file has restricted permissions (`chmod 600`)
+> - These cookies can expire - you'll need to refresh them periodically from your browser
+
 Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
 ```json
@@ -78,6 +84,11 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
     }
   }
 }
+```
+
+**After adding credentials, secure your config file:**
+```bash
+chmod 600 ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
 
 ## Draft Tools Usage
@@ -245,11 +256,14 @@ For private leagues, you'll need ESPN authentication cookies:
 - `ESPN_S2`: ESPN authentication cookie (long string starting with "AE")
 - `ESPN_SWID`: ESPN SWID cookie (format: `{12345678-1234-1234-1234-123456789012}`)
 
+> **⚠️ SECURITY REMINDER**: These cookies grant full access to your ESPN account. Keep them secure and never share them.
+
 To get these cookies:
 1. Log into ESPN Fantasy in your browser
 2. Open browser developer tools (F12)
 3. Go to Application/Storage tab → Cookies → espn.com
 4. Find and copy the `espn_s2` and `SWID` cookie values
+5. **Important**: Clear your browser's developer tools history after copying to avoid leaving credentials visible
 
 ## Development
 

@@ -105,7 +105,7 @@ class TestESPNFantasyBasketballClient:
         with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
 
-            with pytest.raises(ValueError, match="Team 999 not found"):
+            with pytest.raises(ValueError, match="Team not found in this league"):
                 await client.get_team_roster(team_id=999)
 
     @pytest.mark.asyncio

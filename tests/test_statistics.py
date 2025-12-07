@@ -78,14 +78,23 @@ class TestStatisticalAnalysisClient:
                         "fullName": "Test Player",
                         "stats": [
                             {
-                                "appliedStats": {
+                                "id": "002025",  # Season stats ID
+                                "averages": {
                                     "0": 25.5,  # Points
-                                    "1": 8.2,  # Rebounds
-                                    "2": 6.1,  # Assists
-                                    "3": 1.8,  # Steals
-                                    "4": 0.9,  # Blocks
+                                    "6": 8.2,  # Rebounds
+                                    "3": 6.1,  # Assists
+                                    "2": 1.8,  # Steals
+                                    "1": 0.9,  # Blocks
+                                    "17": 2.5,  # 3PM
+                                    "11": 2.1,  # Turnovers
+                                    "40": 35.0,  # Minutes
+                                    "19": 0.485,  # FG%
+                                    "20": 0.850,  # FT%
                                 },
-                                "appliedTotal": 45.8,
+                                "stats": {
+                                    "42": 50,  # Games played
+                                },
+                                "appliedAverage": 45.8,
                             }
                         ],
                     }
@@ -114,7 +123,7 @@ class TestStatisticalAnalysisClient:
         with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
             mock_request.return_value = mock_response
 
-            with pytest.raises(ValueError, match="Player 12345 not found"):
+            with pytest.raises(ValueError, match="Player not found"):
                 await client.get_player_stats(12345)
 
     @pytest.mark.asyncio
