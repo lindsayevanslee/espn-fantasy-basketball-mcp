@@ -438,6 +438,49 @@ async def get_trending_players(
     return [player.model_dump() for player in trending]
 
 
+@mcp.tool()
+async def get_roster_schedule(
+    team_id: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+) -> dict:
+    """Get game schedule summary for all players on your fantasy roster.
+
+    This helps you see how many games each of your players has in the upcoming week(s),
+    which is crucial for setting your lineup and making roster decisions.
+
+    Args:
+        team_id: Your fantasy team ID (optional, uses ESPN_TEAM_ID env var)
+        start_date: Start date in YYYY-MM-DD format (optional, defaults to today)
+        end_date: End date in YYYY-MM-DD format (optional, defaults to 7 days from start)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        Dictionary with schedule summary including games per player and total games
+    """
+    from datetime import datetime, timedelta
+
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    team_id = _get_team_id(team_id)
+
+    # Default dates if not provided
+    if not start_date:
+        start_date = datetime.now().strftime("%Y-%m-%d")
+    if not end_date:
+        end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime("%Y-%m-%d")
+
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    schedule_summary = await client.get_roster_schedule_summary(team_id, start_date, end_date)
+    return schedule_summary.model_dump()
+
+
 if __name__ == "__main__":
     # Run the server
     mcp.run(transport="stdio")

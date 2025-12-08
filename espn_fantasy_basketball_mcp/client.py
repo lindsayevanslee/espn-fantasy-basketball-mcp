@@ -16,9 +16,12 @@ from .models import (
     PlayerComparison,
     PlayerDraftInfo,
     PlayerPoolEntry,
+    PlayerSchedule,
+    PlayerScheduleGame,
     PlayerStats,
     Roster,
     RosterEntry,
+    RosterScheduleSummary,
     Team,
     TeamDraftSummary,
     TradeAnalysis,
@@ -1201,3 +1204,163 @@ class ESPNFantasyBasketballClient:
         trending_players.sort(key=lambda x: abs(x.add_percentage - x.drop_percentage), reverse=True)
 
         return trending_players
+
+    async def get_player_schedule(
+        self, player_id: int, nba_team_id: int, start_date: str, end_date: str
+    ) -> PlayerSchedule:
+        """Get schedule for a specific player.
+
+        Args:
+            player_id: ESPN player ID
+            nba_team_id: NBA team ID (proTeamId from player data)
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+
+        Returns:
+            PlayerSchedule with games and summary
+
+        Raises:
+            ValueError: If dates are invalid
+        """
+        # Validate inputs
+        self._validate_positive_int(player_id, "player_id")
+        import re
+        from datetime import datetime
+
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_date):
+            raise ValueError(f"Invalid start_date format: {start_date}. Must be YYYY-MM-DD.")
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", end_date):
+            raise ValueError(f"Invalid end_date format: {end_date}. Must be YYYY-MM-DD.")
+
+        # Get NBA team schedule from ESPN API
+        # We need to get all games for this team and filter by date range
+        url = f"{self.NBA_BASE_URL}/teams/{nba_team_id}/schedule"
+        params = {"season": self.year}
+
+        try:
+            data = await self._make_request(url, params)
+        except httpx.HTTPError as e:
+            logger.warning(f"Failed to get schedule for NBA team {nba_team_id}: {e}")
+            # Return empty schedule if API fails
+            return PlayerSchedule(
+                playerId=player_id,
+                playerName="Unknown Player",
+                teamAbbreviation="UNK",
+                games=[],
+                gamesThisWeek=0,
+                gamesNextWeek=0,
+            )
+
+        # Parse schedule data
+        games = []
+        team_abbrev = data.get("team", {}).get("abbreviation", "UNK")
+        player_name = f"Player {player_id}"  # We'll need to get this from elsewhere
+
+        events = data.get("events", [])
+        start_dt = datetime.fromisoformat(start_date)
+        end_dt = datetime.fromisoformat(end_date)
+
+        for event in events:
+            game_date_str = event.get("date", "")[:10]  # Get just YYYY-MM-DD part
+            try:
+                game_dt = datetime.fromisoformat(game_date_str)
+            except ValueError:
+                continue
+
+            # Filter by date range
+            if start_dt <= game_dt <= end_dt:
+                competitions = event.get("competitions", [{}])[0]
+                competitors = competitions.get("competitors", [])
+
+                # Determine opponent and home/away status
+                opponent = ""
+                is_home = False
+
+                for comp in competitors:
+                    comp_team = comp.get("team", {})
+                    comp_team_id = comp_team.get("id")
+                    if str(comp_team_id) == str(nba_team_id):
+                        # This is the player's team
+                        is_home = comp.get("homeAway") == "home"
+                    else:
+                        # This is the opponent
+                        opponent = comp_team.get("abbreviation", "UNK")
+
+                game = PlayerScheduleGame(
+                    date=game_date_str,
+                    opponent=opponent,
+                    is_home=is_home,
+                    game_id=event.get("id"),
+                )
+                games.append(game)
+
+        # Calculate games this week and next week
+        # For simplicity, count all games in the range as "this week"
+        games_this_week = len(games)
+        games_next_week = 0  # Would need additional date range to calculate
+
+        return PlayerSchedule(
+            playerId=player_id,
+            playerName=player_name,
+            teamAbbreviation=team_abbrev,
+            games=games,
+            gamesThisWeek=games_this_week,
+            gamesNextWeek=games_next_week,
+        )
+
+    async def get_roster_schedule_summary(
+        self, team_id: int, start_date: str, end_date: str
+    ) -> RosterScheduleSummary:
+        """Get schedule summary for all players on a fantasy roster.
+
+        Args:
+            team_id: Fantasy team ID
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+
+        Returns:
+            RosterScheduleSummary with schedule data for all rostered players
+
+        Raises:
+            ValueError: If team_id or dates are invalid
+        """
+        # Validate inputs
+        self._validate_positive_int(team_id, "team_id")
+
+        # Get the roster first
+        roster = await self.get_team_roster(team_id)
+
+        player_schedules = []
+        total_games = 0
+
+        # Get schedule for each player on the roster
+        for entry in roster.entries:
+            player = entry.playerPoolEntry.player
+            nba_team_id = player.proTeamId
+
+            if not nba_team_id:
+                # Player doesn't have NBA team (e.g., injured reserve, not assigned)
+                continue
+
+            try:
+                schedule = await self.get_player_schedule(
+                    player.id, nba_team_id, start_date, end_date
+                )
+                # Update player name with actual name from roster
+                schedule.playerName = player.fullName
+                player_schedules.append(schedule)
+                total_games += schedule.gamesThisWeek
+            except Exception as e:
+                logger.warning(f"Failed to get schedule for player {player.fullName}: {e}")
+                continue
+
+        # Calculate average
+        avg_games = total_games / len(player_schedules) if player_schedules else 0.0
+
+        return RosterScheduleSummary(
+            teamId=team_id,
+            scoringPeriod=0,  # Would need to determine current scoring period
+            playerSchedules=player_schedules,
+            totalGamesThisWeek=total_games,
+            averageGamesPerPlayer=round(avg_games, 2),
+        )

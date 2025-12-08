@@ -171,6 +171,36 @@ class NBAGame(BaseModel):
     competitions: list[NBACompetition]
 
 
+class PlayerScheduleGame(BaseModel):
+    """A single game in a player's schedule."""
+
+    date: str  # YYYY-MM-DD format
+    opponent: str  # Opponent team abbreviation
+    is_home: bool  # True if home game, False if away
+    game_id: str | None = None
+
+
+class PlayerSchedule(BaseModel):
+    """Schedule information for a player."""
+
+    playerId: int
+    playerName: str
+    teamAbbreviation: str  # NBA team abbreviation
+    games: list[PlayerScheduleGame]
+    gamesThisWeek: int  # Number of games in current scoring period
+    gamesNextWeek: int  # Number of games in next scoring period
+
+
+class RosterScheduleSummary(BaseModel):
+    """Schedule summary for an entire fantasy roster."""
+
+    teamId: int
+    scoringPeriod: int
+    playerSchedules: list[PlayerSchedule]
+    totalGamesThisWeek: int
+    averageGamesPerPlayer: float
+
+
 # Draft-related models
 class DraftPick(BaseModel):
     id: int
