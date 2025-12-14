@@ -139,7 +139,8 @@ class MatchupTeam(BaseModel):
     totalPoints: float | None = None
     totalProjectedPoints: float | None = None
     gamesPlayed: int | None = None
-    cumulativeScore: dict[str, Any] | None = None
+    cumulativeScore: dict[str, Any] | None = None  # Original stat IDs (e.g., "0", "1", "3")
+    categoryScores: dict[str, float] | None = None  # Human-readable category names (e.g., "points", "rebounds", "assists")
 
 
 class Matchup(BaseModel):
@@ -147,6 +148,18 @@ class Matchup(BaseModel):
     matchupPeriodId: int
     home: MatchupTeam | None = None
     away: MatchupTeam | None = None
+    winner: str | None = None
+    playoff: bool | None = None
+
+
+class CurrentMatchup(BaseModel):
+    """Complete current matchup information including rosters and scores."""
+    matchupId: int
+    scoringPeriod: int
+    yourTeam: MatchupTeam
+    opponentTeam: MatchupTeam
+    yourRoster: Roster
+    opponentRoster: Roster
     winner: str | None = None
     playoff: bool | None = None
 

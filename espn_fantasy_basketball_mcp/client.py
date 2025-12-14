@@ -7,6 +7,7 @@ import httpx
 
 from .models import (
     AcquisitionSettings,
+    CurrentMatchup,
     DraftPick,
     DraftRecommendation,
     DraftStatus,
@@ -452,12 +453,16 @@ class ESPNFantasyBasketballClient:
         
         return stats_data if stats_data else None
 
-    async def get_free_agents(self, size: int = 50, position_id: int | None = None) -> list[Player]:
+    async def get_free_agents(
+        self, size: int = 50, position_id: int | None = None, slim: bool = False
+    ) -> list[Player]:
         """Get free agents/waiver wire players.
 
         Args:
             size: Number of players to return (max 50)
             position_id: Filter by position ID (optional)
+            slim: If True, return only essential fields (id, name, position, ownership).
+                  If False, include full season stats and per-game averages.
 
         Raises:
             ValueError: If size or position_id is invalid
@@ -505,45 +510,46 @@ class ESPNFantasyBasketballClient:
             percent_owned = ownership_data.get("percentOwned", 0)
             percent_change = ownership_data.get("percentChange", 0)
             
-            # Parse stats - ESPN returns stats as a list of stat objects by period
-            stats_data = {}
-            player_stats_list = player_info.get("stats", [])
-            
-            if player_stats_list and len(player_stats_list) > 0:
-                # Find the current season stats (id starts with "00" for actuals)
-                for stat_set in player_stats_list:
-                    stat_id = str(stat_set.get("id", ""))
-                    
-                    # "00YYYY" = season actuals, "10YYYY" = projections
-                    if stat_id.startswith("00"):
-                        # Get averages if available, otherwise use totals
-                        averages = stat_set.get("averages", {})
-                        totals = stat_set.get("stats", {})
+            # Parse stats only if not in slim mode
+            stats_data = None
+            if not slim:
+                player_stats_list = player_info.get("stats", [])
+                
+                if player_stats_list and len(player_stats_list) > 0:
+                    # Find the current season stats (id starts with "00" for actuals)
+                    for stat_set in player_stats_list:
+                        stat_id = str(stat_set.get("id", ""))
                         
-                        # Use averages preferentially (per-game stats)
-                        source = averages if averages else totals
-                        
-                        # ESPN stat ID mapping for basketball:
-                        # 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB, 13=FG%, 14=FT%, 17=3PM, 11=TO, 40=MIN
-                        stats_data = {
-                            "points": round(source.get("0", 0), 1),
-                            "blocks": round(source.get("1", 0), 1),
-                            "steals": round(source.get("2", 0), 1),
-                            "assists": round(source.get("3", 0), 1),
-                            "rebounds": round(source.get("6", 0), 1),
-                            "fg_pct": round(source.get("19", 0) * 100, 1) if source.get("19") else None,  # FG%
-                            "ft_pct": round(source.get("20", 0) * 100, 1) if source.get("20") else None,  # FT%
-                            "threes": round(source.get("17", 0), 1),
-                            "turnovers": round(source.get("11", 0), 1),
-                            "minutes": round(source.get("40", 0), 1),
-                            "games_played": stat_set.get("stats", {}).get("42", 0),
-                        }
-                        
-                        # Also grab fantasy points average if available
-                        if "appliedAverage" in stat_set:
-                            stats_data["fantasy_avg"] = round(stat_set["appliedAverage"], 1)
-                        
-                        break  # Found season stats, stop looking
+                        # "00YYYY" = season actuals, "10YYYY" = projections
+                        if stat_id.startswith("00"):
+                            # Get averages if available, otherwise use totals
+                            averages = stat_set.get("averages", {})
+                            totals = stat_set.get("stats", {})
+                            
+                            # Use averages preferentially (per-game stats)
+                            source = averages if averages else totals
+                            
+                            # ESPN stat ID mapping for basketball:
+                            # 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB, 13=FG%, 14=FT%, 17=3PM, 11=TO, 40=MIN
+                            stats_data = {
+                                "points": round(source.get("0", 0), 1),
+                                "blocks": round(source.get("1", 0), 1),
+                                "steals": round(source.get("2", 0), 1),
+                                "assists": round(source.get("3", 0), 1),
+                                "rebounds": round(source.get("6", 0), 1),
+                                "fg_pct": round(source.get("19", 0) * 100, 1) if source.get("19") else None,  # FG%
+                                "ft_pct": round(source.get("20", 0) * 100, 1) if source.get("20") else None,  # FT%
+                                "threes": round(source.get("17", 0), 1),
+                                "turnovers": round(source.get("11", 0), 1),
+                                "minutes": round(source.get("40", 0), 1),
+                                "games_played": stat_set.get("stats", {}).get("42", 0),
+                            }
+                            
+                            # Also grab fantasy points average if available
+                            if "appliedAverage" in stat_set:
+                                stats_data["fantasy_avg"] = round(stat_set["appliedAverage"], 1)
+                            
+                            break  # Found season stats, stop looking
             
             player = Player(
                 id=player_info["id"],
@@ -560,15 +566,33 @@ class ESPNFantasyBasketballClient:
                     "percentOwned": percent_owned,
                     "percentChange": percent_change,
                 },
-                stats=stats_data if stats_data else None,
+                stats=stats_data,
             )
             players.append(player)
 
         return players
 
 
-    async def get_matchups(self, scoring_period: int | None = None) -> list[Matchup]:
-        """Get matchups for the league."""
+    async def get_matchups(
+        self, scoring_period: int | None = None, team_id: int | None = None
+    ) -> list[Matchup]:
+        """Get matchups for the league.
+        
+        Args:
+            scoring_period: Specific scoring period (defaults to current week if not provided)
+            team_id: Filter to only return matchups for this team (optional)
+            
+        Returns:
+            List of Matchup objects
+        """
+        # Default to current scoring period if not provided
+        if scoring_period is None:
+            try:
+                league_settings = await self.get_league_settings()
+                scoring_period = league_settings.status.currentMatchupPeriod
+            except Exception as e:
+                logger.warning(f"Could not get current scoring period, returning all matchups: {e}")
+        
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         params = {"view": "mMatchup"}
 
@@ -576,31 +600,70 @@ class ESPNFantasyBasketballClient:
             params["scoringPeriodId"] = str(scoring_period)
 
         data = await self._make_request(url, params)
+        
+        # Get stat ID mapping for human-readable category names
+        stat_mapping = self._get_stat_id_mapping()
 
         matchups = []
         for schedule_item in data.get("schedule", []):
             if scoring_period is None or schedule_item.get("matchupPeriodId") == scoring_period:
+                # Filter by team_id if provided
+                home_team_id = schedule_item.get("home", {}).get("teamId")
+                away_team_id = schedule_item.get("away", {}).get("teamId")
+                
+                if team_id is not None:
+                    if home_team_id != team_id and away_team_id != team_id:
+                        continue  # Skip matchups not involving this team
+                
                 # Extract team info from home/away data
                 home_team = None
                 if schedule_item.get("home"):
                     home_data = schedule_item["home"]
+                    cumulative_score = home_data.get("cumulativeScore", {})
+                    
+                    # Convert stat IDs to human-readable category names
+                    # cumulativeScore has structure: {"scoreByStat": {"0": {"score": 409.0, ...}, ...}}
+                    category_scores = {}
+                    score_by_stat = cumulative_score.get("scoreByStat", {})
+                    if isinstance(score_by_stat, dict):
+                        for stat_id, stat_data in score_by_stat.items():
+                            if isinstance(stat_data, dict) and "score" in stat_data:
+                                score_value = stat_data["score"]
+                                category_name = stat_mapping.get(stat_id, f"stat_{stat_id}")
+                                category_scores[category_name] = score_value
+                    
                     home_team = MatchupTeam(
                         teamId=home_data.get("teamId"),
                         totalPoints=home_data.get("totalPoints"),
                         totalProjectedPoints=home_data.get("totalProjectedPoints"),
                         gamesPlayed=home_data.get("gamesPlayed"),
-                        cumulativeScore=home_data.get("cumulativeScore"),
+                        cumulativeScore=home_data.get("cumulativeScore"),  # Keep original for backward compatibility
+                        categoryScores=category_scores if category_scores else None,
                     )
 
                 away_team = None
                 if schedule_item.get("away"):
                     away_data = schedule_item["away"]
+                    cumulative_score = away_data.get("cumulativeScore", {})
+                    
+                    # Convert stat IDs to human-readable category names
+                    # cumulativeScore has structure: {"scoreByStat": {"0": {"score": 409.0, ...}, ...}}
+                    category_scores = {}
+                    score_by_stat = cumulative_score.get("scoreByStat", {})
+                    if isinstance(score_by_stat, dict):
+                        for stat_id, stat_data in score_by_stat.items():
+                            if isinstance(stat_data, dict) and "score" in stat_data:
+                                score_value = stat_data["score"]
+                                category_name = stat_mapping.get(stat_id, f"stat_{stat_id}")
+                                category_scores[category_name] = score_value
+                    
                     away_team = MatchupTeam(
                         teamId=away_data.get("teamId"),
                         totalPoints=away_data.get("totalPoints"),
                         totalProjectedPoints=away_data.get("totalProjectedPoints"),
                         gamesPlayed=away_data.get("gamesPlayed"),
-                        cumulativeScore=away_data.get("cumulativeScore"),
+                        cumulativeScore=away_data.get("cumulativeScore"),  # Keep original for backward compatibility
+                        categoryScores=category_scores if category_scores else None,
                     )
 
                 matchup = Matchup(
@@ -614,6 +677,66 @@ class ESPNFantasyBasketballClient:
                 matchups.append(matchup)
 
         return matchups
+
+    async def get_my_current_matchup(self, team_id: int) -> CurrentMatchup | None:
+        """Get complete current matchup information for a team.
+        
+        This combines multiple API calls into a single response:
+        - Current matchup (filtered by team_id)
+        - Your team's roster
+        - Opponent's roster
+        - Current category scores
+        - The week/scoring period
+        
+        Args:
+            team_id: Your team ID
+            
+        Returns:
+            CurrentMatchup object with all matchup data, or None if no current matchup found
+        """
+        # Get current scoring period
+        league_settings = await self.get_league_settings()
+        current_period = league_settings.status.currentMatchupPeriod
+        
+        # Get matchups for current period, filtered by team_id
+        matchups = await self.get_matchups(scoring_period=current_period, team_id=team_id)
+        
+        if not matchups:
+            logger.warning(f"No matchup found for team {team_id} in scoring period {current_period}")
+            return None
+        
+        # Should only be one matchup for a team in a given period
+        matchup = matchups[0]
+        
+        # Determine which team is "yours" and which is the opponent
+        if matchup.home and matchup.home.teamId == team_id:
+            your_team_data = matchup.home
+            opponent_team_data = matchup.away
+        elif matchup.away and matchup.away.teamId == team_id:
+            your_team_data = matchup.away
+            opponent_team_data = matchup.home
+        else:
+            logger.error(f"Team {team_id} not found in matchup {matchup.id}")
+            return None
+        
+        if not opponent_team_data or not opponent_team_data.teamId:
+            logger.error(f"No opponent found for matchup {matchup.id}")
+            return None
+        
+        # Get rosters for both teams
+        your_roster = await self.get_team_roster(team_id, scoring_period=current_period)
+        opponent_roster = await self.get_team_roster(opponent_team_data.teamId, scoring_period=current_period)
+        
+        return CurrentMatchup(
+            matchupId=matchup.id,
+            scoringPeriod=current_period,
+            yourTeam=your_team_data,
+            opponentTeam=opponent_team_data,
+            yourRoster=your_roster,
+            opponentRoster=opponent_roster,
+            winner=matchup.winner,
+            playoff=matchup.playoff,
+        )
 
     async def get_nba_schedule(self, date: str | None = None) -> list[NBAGame]:
         """Get NBA schedule.
@@ -1042,23 +1165,33 @@ class ESPNFantasyBasketballClient:
 
         return stats
 
+    @staticmethod
+    def _get_stat_id_mapping() -> dict[str, str]:
+        """Get mapping of ESPN stat IDs to human-readable category names.
+        
+        Returns:
+            Dictionary mapping stat ID strings to category names
+        """
+        return {
+            "0": "points",  # Points
+            "1": "rebounds",  # Rebounds (total rebounds)
+            "2": "assists",  # Assists
+            "3": "steals",  # Steals
+            "4": "blocks",  # Blocks
+            "6": "rebounds",  # Rebounds (alternative ID)
+            "11": "turnovers",  # Turnovers
+            "17": "threePointMade",  # 3PM
+            "19": "fieldGoalPercentage",  # FG%
+            "20": "freeThrowPercentage",  # FT%
+            "40": "minutes",  # Minutes
+            "gamesPlayed": "gamesPlayed",
+        }
+    
     def _parse_espn_stats(self, stat_data: dict[str, Any]) -> dict[str, Any]:
         """Parse ESPN's stat format into our standardized format."""
         # ESPN uses different stat IDs for different categories
         # This is a mapping of common ESPN stat IDs to our field names
-        stat_mapping = {
-            "0": "points",  # Points
-            "1": "rebounds",  # Rebounds
-            "2": "assists",  # Assists
-            "3": "steals",  # Steals
-            "4": "blocks",  # Blocks
-            "17": "threePointMade",  # 3PM
-            "19": "fieldGoalPercentage",  # FG%
-            "20": "freeThrowPercentage",  # FT%
-            "11": "turnovers",  # Turnovers
-            "40": "minutes",  # Minutes
-            "gamesPlayed": "gamesPlayed",
-        }
+        stat_mapping = self._get_stat_id_mapping()
 
         parsed_stats = {}
 
