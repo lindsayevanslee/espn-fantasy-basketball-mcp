@@ -255,3 +255,87 @@ class DraftRecommendation(BaseModel):
     reasoning: str
     priority: int  # 1-10, 10 being highest
     category_impact: dict[str, str] = {}  # How this player affects your categories
+
+
+# League Settings Models
+class ScoringItem(BaseModel):
+    """A single scoring category."""
+    statId: int
+    points: float
+    isReverseItem: bool = False
+    pointsOverrides: dict[str, Any] = {}
+
+
+class ScoringSettings(BaseModel):
+    """League scoring configuration."""
+    scoringType: str  # "H2H_CATEGORY", "H2H_POINTS", "ROTO"
+    scoringItems: list[ScoringItem]
+    playerRankType: str | None = None
+    matchupTieRule: str | None = None
+    allowOutOfPositionScoring: bool = False
+
+
+class ScheduleSettings(BaseModel):
+    """League schedule configuration."""
+    matchupPeriodCount: int
+    matchupPeriodLength: int
+    matchupPeriods: dict[str, list[int]]  # Maps matchup period to scoring periods
+    periodTypeId: int
+    playoffTeamCount: int
+    playoffMatchupPeriodLength: int
+    playoffSeedingRule: str | None = None
+
+
+class RosterSettings(BaseModel):
+    """League roster configuration."""
+    lineupSlotCounts: dict[str, int]  # Maps slot ID to count
+    positionLimits: dict[str, int]  # Maps position ID to max count (-1 = unlimited)
+    lineupLocktimeType: str  # When lineups lock
+    rosterLocktimeType: str | None = None
+    isBenchUnlimited: bool = False
+    moveLimit: int = -1  # -1 = unlimited
+
+
+class AcquisitionSettings(BaseModel):
+    """League acquisition/waiver configuration."""
+    acquisitionType: str  # "WAIVERS_TRADITIONAL", "FREE_AGENT", etc.
+    waiverHours: int
+    waiverProcessDays: list[str]  # Days waivers process (e.g., ["SUNDAY"])
+    waiverProcessHour: int  # Hour (0-23) waivers process
+    matchupAcquisitionLimit: float  # Max acquisitions per matchup
+    matchupLimitPerScoringPeriod: bool
+    acquisitionLimit: int = -1  # Season limit (-1 = unlimited)
+    minimumBid: int = 0
+
+
+class TradeSettings(BaseModel):
+    """League trade configuration."""
+    deadlineDate: int | None = None  # Timestamp
+    vetoVotesRequired: int
+    revisionHours: int  # Hours to revise trade
+    max: int = -1  # Max trades per season (-1 = unlimited)
+    allowOutOfUniverse: bool = False
+
+
+class LeagueStatus(BaseModel):
+    """Current league status."""
+    currentMatchupPeriod: int
+    latestScoringPeriod: int
+    firstScoringPeriod: int
+    finalScoringPeriod: int
+    isActive: bool
+    transactionScoringPeriod: int | None = None
+
+
+class LeagueSettings(BaseModel):
+    """Complete league settings."""
+    leagueId: int
+    leagueName: str
+    seasonId: int
+    size: int  # Number of teams
+    scoringSettings: ScoringSettings
+    scheduleSettings: ScheduleSettings
+    rosterSettings: RosterSettings
+    acquisitionSettings: AcquisitionSettings
+    tradeSettings: TradeSettings
+    status: LeagueStatus

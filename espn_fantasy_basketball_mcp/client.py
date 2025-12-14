@@ -6,9 +6,12 @@ from typing import Any
 import httpx
 
 from .models import (
+    AcquisitionSettings,
     DraftPick,
     DraftRecommendation,
     DraftStatus,
+    LeagueSettings,
+    LeagueStatus,
     Matchup,
     MatchupTeam,
     NBAGame,
@@ -22,9 +25,14 @@ from .models import (
     Roster,
     RosterEntry,
     RosterScheduleSummary,
+    RosterSettings,
+    ScheduleSettings,
+    ScoringItem,
+    ScoringSettings,
     Team,
     TeamDraftSummary,
     TradeAnalysis,
+    TradeSettings,
     TrendingPlayer,
 )
 
@@ -140,6 +148,114 @@ class ESPNFantasyBasketballClient:
             teams.append(team)
 
         return teams
+
+    async def get_league_settings(self) -> LeagueSettings:
+        """Get league settings including schedule, roster, scoring, and acquisition settings.
+
+        Returns:
+            LeagueSettings object with all league configuration
+
+        Raises:
+            ValueError: If league not found or settings unavailable
+        """
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        params = {"view": "mSettings"}
+
+        data = await self._make_request(url, params)
+
+        if "settings" not in data:
+            raise ValueError("Settings not found in API response")
+
+        settings_data = data["settings"]
+        status_data = data.get("status", {})
+
+        # Parse scoring settings
+        scoring_data = settings_data.get("scoringSettings", {})
+        scoring_items = [
+            ScoringItem(
+                statId=item.get("statId", 0),
+                points=item.get("points", 0.0),
+                isReverseItem=item.get("isReverseItem", False),
+                pointsOverrides=item.get("pointsOverrides", {}),
+            )
+            for item in scoring_data.get("scoringItems", [])
+        ]
+        scoring_settings = ScoringSettings(
+            scoringType=scoring_data.get("scoringType", "H2H_CATEGORY"),
+            scoringItems=scoring_items,
+            playerRankType=scoring_data.get("playerRankType"),
+            matchupTieRule=scoring_data.get("matchupTieRule"),
+            allowOutOfPositionScoring=scoring_data.get("allowOutOfPositionScoring", False),
+        )
+
+        # Parse schedule settings
+        schedule_data = settings_data.get("scheduleSettings", {})
+        schedule_settings = ScheduleSettings(
+            matchupPeriodCount=schedule_data.get("matchupPeriodCount", 0),
+            matchupPeriodLength=schedule_data.get("matchupPeriodLength", 1),
+            matchupPeriods=schedule_data.get("matchupPeriods", {}),
+            periodTypeId=schedule_data.get("periodTypeId", 2),
+            playoffTeamCount=schedule_data.get("playoffTeamCount", 0),
+            playoffMatchupPeriodLength=schedule_data.get("playoffMatchupPeriodLength", 1),
+            playoffSeedingRule=schedule_data.get("playoffSeedingRule"),
+        )
+
+        # Parse roster settings
+        roster_data = settings_data.get("rosterSettings", {})
+        roster_settings = RosterSettings(
+            lineupSlotCounts={str(k): v for k, v in roster_data.get("lineupSlotCounts", {}).items()},
+            positionLimits={str(k): v for k, v in roster_data.get("positionLimits", {}).items()},
+            lineupLocktimeType=roster_data.get("lineupLocktimeType", "FIRSTGAME_WEEKLY"),
+            rosterLocktimeType=roster_data.get("rosterLocktimeType"),
+            isBenchUnlimited=roster_data.get("isBenchUnlimited", False),
+            moveLimit=roster_data.get("moveLimit", -1),
+        )
+
+        # Parse acquisition settings
+        acquisition_data = settings_data.get("acquisitionSettings", {})
+        acquisition_settings = AcquisitionSettings(
+            acquisitionType=acquisition_data.get("acquisitionType", "WAIVERS_TRADITIONAL"),
+            waiverHours=acquisition_data.get("waiverHours", 24),
+            waiverProcessDays=acquisition_data.get("waiverProcessDays", []),
+            waiverProcessHour=acquisition_data.get("waiverProcessHour", 0),
+            matchupAcquisitionLimit=acquisition_data.get("matchupAcquisitionLimit", 0.0),
+            matchupLimitPerScoringPeriod=acquisition_data.get("matchupLimitPerScoringPeriod", False),
+            acquisitionLimit=acquisition_data.get("acquisitionLimit", -1),
+            minimumBid=acquisition_data.get("minimumBid", 0),
+        )
+
+        # Parse trade settings
+        trade_data = settings_data.get("tradeSettings", {})
+        trade_settings = TradeSettings(
+            deadlineDate=trade_data.get("deadlineDate"),
+            vetoVotesRequired=trade_data.get("vetoVotesRequired", 0),
+            revisionHours=trade_data.get("revisionHours", 24),
+            max=trade_data.get("max", -1),
+            allowOutOfUniverse=trade_data.get("allowOutOfUniverse", False),
+        )
+
+        # Parse status
+        status = LeagueStatus(
+            currentMatchupPeriod=status_data.get("currentMatchupPeriod", 0),
+            latestScoringPeriod=status_data.get("latestScoringPeriod", 0),
+            firstScoringPeriod=status_data.get("firstScoringPeriod", 1),
+            finalScoringPeriod=status_data.get("finalScoringPeriod", 0),
+            isActive=status_data.get("isActive", False),
+            transactionScoringPeriod=status_data.get("transactionScoringPeriod"),
+        )
+
+        return LeagueSettings(
+            leagueId=data.get("id", self.league_id),
+            leagueName=settings_data.get("name", ""),
+            seasonId=data.get("seasonId", self.year),
+            size=settings_data.get("size", 0),
+            scoringSettings=scoring_settings,
+            scheduleSettings=schedule_settings,
+            rosterSettings=roster_settings,
+            acquisitionSettings=acquisition_settings,
+            tradeSettings=trade_settings,
+            status=status,
+        )
 
     async def get_team_roster(self, team_id: int, scoring_period: int | None = None) -> Roster:
         """Get roster for a specific team with player stats included.

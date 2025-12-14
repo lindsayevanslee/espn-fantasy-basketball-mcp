@@ -85,6 +85,43 @@ async def get_league_teams(
 
 
 @mcp.tool()
+async def get_league_settings(
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+) -> dict:
+    """Get league settings including schedule, roster, scoring, and acquisition configuration.
+
+    This provides important information for making recommendations:
+    - Week boundaries and matchup periods
+    - Lineup lock times and position limits
+    - Waiver processing schedule and acquisition limits
+    - Trade deadline and veto rules
+    - Scoring categories and settings
+
+    Args:
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        Dictionary with league settings including:
+        - scheduleSettings: Week boundaries, matchup periods, playoff settings
+        - rosterSettings: Lineup slots, position limits, lock times
+        - acquisitionSettings: Waiver schedule, acquisition limits
+        - tradeSettings: Trade deadline, veto rules
+        - scoringSettings: Scoring categories and type
+        - status: Current matchup period, scoring periods
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    settings = await client.get_league_settings()
+    return settings.model_dump()
+
+
+@mcp.tool()
 async def get_team_roster(
     team_id: int | None = None,
     league_id: int | None = None,
