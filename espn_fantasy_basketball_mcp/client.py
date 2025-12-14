@@ -1612,7 +1612,7 @@ class ESPNFantasyBasketballClient:
         # Validate inputs
         self._validate_positive_int(player_id, "player_id")
         import re
-        from datetime import datetime
+        from datetime import datetime, timedelta
 
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", start_date):
             raise ValueError(f"Invalid start_date format: {start_date}. Must be YYYY-MM-DD.")
