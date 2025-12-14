@@ -1182,6 +1182,10 @@ class ESPNFantasyBasketballClient:
             "4": "offensiveRebounds",  # Offensive Rebounds (less common in matchups)
             "6": "rebounds",  # Rebounds (total rebounds)
             "11": "turnovers",  # Turnovers
+            "13": "fieldGoalsMade",  # Field Goals Made
+            "14": "fieldGoalsAttempted",  # Field Goals Attempted
+            "15": "freeThrowsMade",  # Free Throws Made
+            "16": "freeThrowsAttempted",  # Free Throws Attempted
             "17": "threePointMade",  # 3PM
             "19": "fieldGoalPercentage",  # FG%
             "20": "freeThrowPercentage",  # FT%
