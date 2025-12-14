@@ -1321,34 +1321,92 @@ class ESPNFantasyBasketballClient:
 
         return trending_players
 
+    async def _get_season_start_date(self):
+        """Get the NBA season start date by querying the NBA schedule API.
+        
+        Queries a team's schedule to find the first game of the season,
+        which is more reliable than querying scoreboard for specific dates.
+        
+        Returns:
+            datetime object representing the first game date of the season, or None if not found
+        """
+        from datetime import datetime
+        
+        try:
+            # Query any team's schedule to get all games for the season
+            # Using a common team (Lakers = 13) to get season schedule
+            url = f"{self.NBA_BASE_URL}/teams/13/schedule"
+            params = {"season": self.year}
+            
+            data = await self._make_request(url, params)
+            events = data.get("events", [])
+            
+            if not events:
+                return None
+            
+            # Find the earliest game date
+            earliest_date = None
+            for event in events:
+                date_str = event.get("date", "")
+                if not date_str:
+                    continue
+                
+                try:
+                    # Parse the date (format: "2025-10-15T02:00Z")
+                    game_date_str = date_str[:10]  # Extract YYYY-MM-DD
+                    game_date = datetime.fromisoformat(game_date_str)
+                    
+                    if earliest_date is None or game_date < earliest_date:
+                        earliest_date = game_date
+                except (ValueError, TypeError):
+                    continue
+            
+            return earliest_date
+        except Exception as e:
+            logger.warning(f"Could not determine season start date from API: {e}")
+            return None
+    
     async def _get_scoring_period_dates(
         self, scoring_period: int
     ) -> tuple[str | None, str | None]:
-        """Get date range for a specific scoring period.
+        """Get date range for a specific scoring period by querying NBA schedule.
         
-        Since ESPN doesn't directly expose scoring period dates, we estimate based on:
-        - NBA season typically starts in mid-October
-        - Scoring periods align with calendar weeks (Monday-Sunday)
-        - Each scoring period is approximately 7 days
+        Determines the season start date from the NBA schedule API, then calculates
+        scoring period dates based on week boundaries (Monday-Sunday).
         
         Args:
             scoring_period: Scoring period number
             
         Returns:
-            Tuple of (start_date, end_date) in YYYY-MM-DD format, or (None, None) if estimation fails
+            Tuple of (start_date, end_date) in YYYY-MM-DD format, or (None, None) if not found
         """
         from datetime import datetime, timedelta
         
-        # Estimate date range based on scoring period
-        # Based on user validation: Week 8 = Dec 8-14 (Monday-Sunday)
-        # Working backwards: Dec 8 - (7 weeks * 7 days) = Oct 20
-        # So Week 1 should start around Oct 20
-        # Adjusting season start to match: Oct 20, 2025 is a Monday
-        season_start = datetime(self.year - 1, 10, 20)  # Adjusted to match Week 8 = Dec 8-14
-        estimated_start = season_start + timedelta(days=(scoring_period - 1) * 7)
-        estimated_end = estimated_start + timedelta(days=6)  # Week ends 6 days later (Sunday)
+        # Get league settings to determine week start day
+        try:
+            league_settings = await self.get_league_settings()
+            week_start_day = self._infer_week_start_day(league_settings)
+        except Exception:
+            week_start_day = 0  # Default to Monday
         
-        return estimated_start.strftime('%Y-%m-%d'), estimated_end.strftime('%Y-%m-%d')
+        # Get season start date from NBA schedule API
+        first_game_date = await self._get_season_start_date()
+        
+        if not first_game_date:
+            # Fallback: estimate based on typical season start
+            logger.warning("Could not get season start from API, using estimate")
+            first_game_date = datetime(self.year - 1, 10, 15)
+        
+        # Find the Monday of the week containing the first game
+        # This becomes the start of scoring period 1
+        days_since_week_start = (first_game_date.weekday() - week_start_day) % 7
+        scoring_period_1_start = first_game_date - timedelta(days=days_since_week_start)
+        
+        # Calculate the start date for the requested scoring period
+        scoring_period_start = scoring_period_1_start + timedelta(days=(scoring_period - 1) * 7)
+        scoring_period_end = scoring_period_start + timedelta(days=6)  # Week ends 6 days later
+        
+        return scoring_period_start.strftime('%Y-%m-%d'), scoring_period_end.strftime('%Y-%m-%d')
     
     def _infer_week_start_day(self, league_settings: LeagueSettings | None) -> int:
         """Infer week start day from league settings.
