@@ -371,6 +371,61 @@ class ESPNFantasyBasketballClient:
         logger.warning(f"Team with ID {team_id} not found in league {self.league_id}")
         raise ValueError("Team not found in this league")
 
+    def _make_roster_slim(self, roster: Roster) -> Roster:
+        """Create a slim version of a roster with stats removed.
+        
+        Args:
+            roster: Full roster object
+            
+        Returns:
+            New Roster object with player stats set to None
+        """
+        from espn_fantasy_basketball_mcp.models import Player, PlayerPoolEntry, RosterEntry
+        
+        slim_entries = []
+        for entry in roster.entries:
+            # Create slim player (without stats)
+            slim_player = Player(
+                id=entry.playerPoolEntry.player.id,
+                fullName=entry.playerPoolEntry.player.fullName,
+                firstName=entry.playerPoolEntry.player.firstName,
+                lastName=entry.playerPoolEntry.player.lastName,
+                jersey=entry.playerPoolEntry.player.jersey,
+                proTeamId=entry.playerPoolEntry.player.proTeamId,
+                defaultPositionId=entry.playerPoolEntry.player.defaultPositionId,
+                eligibleSlots=entry.playerPoolEntry.player.eligibleSlots,
+                injured=entry.playerPoolEntry.player.injured,
+                injuryStatus=entry.playerPoolEntry.player.injuryStatus,
+                stats=None,  # Remove stats
+                ownership=entry.playerPoolEntry.player.ownership,
+                active=entry.playerPoolEntry.player.active,
+                droppable=entry.playerPoolEntry.player.droppable,
+            )
+            
+            # Create slim player pool entry
+            slim_player_pool_entry = PlayerPoolEntry(
+                id=entry.playerPoolEntry.id,
+                player=slim_player,
+                onTeamId=entry.playerPoolEntry.onTeamId,
+                keeperValue=entry.playerPoolEntry.keeperValue,
+                keeperValueFuture=entry.playerPoolEntry.keeperValueFuture,
+                lineupLocked=entry.playerPoolEntry.lineupLocked,
+            )
+            
+            # Create slim roster entry
+            slim_entry = RosterEntry(
+                playerId=entry.playerId,
+                playerPoolEntry=slim_player_pool_entry,
+                lineupSlotId=entry.lineupSlotId,
+                acquisitionDate=entry.acquisitionDate,
+                acquisitionType=entry.acquisitionType,
+                injuryStatus=entry.injuryStatus,
+            )
+            
+            slim_entries.append(slim_entry)
+        
+        return Roster(teamId=roster.teamId, entries=slim_entries)
+
     def _parse_player_stats(self, stats_list: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Parse ESPN stats array into a clean stats dictionary."""
         if not stats_list:
@@ -454,15 +509,15 @@ class ESPNFantasyBasketballClient:
         return stats_data if stats_data else None
 
     async def get_free_agents(
-        self, size: int = 50, position_id: int | None = None, slim: bool = False
+        self, size: int = 50, position_id: int | None = None, verbose: bool = False
     ) -> list[Player]:
         """Get free agents/waiver wire players.
 
         Args:
             size: Number of players to return (max 50)
             position_id: Filter by position ID (optional)
-            slim: If True, return only essential fields (id, name, position, ownership).
-                  If False, include full season stats and per-game averages.
+            verbose: If True, include full season stats and per-game averages.
+                     If False, return only essential fields (id, name, position, ownership) (default False).
 
         Raises:
             ValueError: If size or position_id is invalid
@@ -510,9 +565,9 @@ class ESPNFantasyBasketballClient:
             percent_owned = ownership_data.get("percentOwned", 0)
             percent_change = ownership_data.get("percentChange", 0)
             
-            # Parse stats only if not in slim mode
+            # Parse stats only if verbose mode
             stats_data = None
-            if not slim:
+            if verbose:
                 player_stats_list = player_info.get("stats", [])
                 
                 if player_stats_list and len(player_stats_list) > 0:
@@ -678,7 +733,7 @@ class ESPNFantasyBasketballClient:
 
         return matchups
 
-    async def get_my_current_matchup(self, team_id: int) -> CurrentMatchup | None:
+    async def get_my_current_matchup(self, team_id: int, verbose: bool = False) -> CurrentMatchup | None:
         """Get complete current matchup information for a team.
         
         This combines multiple API calls into a single response:
@@ -690,6 +745,8 @@ class ESPNFantasyBasketballClient:
         
         Args:
             team_id: Your team ID
+            verbose: If True, include full player stats in rosters.
+                     If False, omit player stats from rosters (keeps only lineup info) (default False)
             
         Returns:
             CurrentMatchup object with all matchup data, or None if no current matchup found
@@ -726,6 +783,11 @@ class ESPNFantasyBasketballClient:
         # Get rosters for both teams
         your_roster = await self.get_team_roster(team_id, scoring_period=current_period)
         opponent_roster = await self.get_team_roster(opponent_team_data.teamId, scoring_period=current_period)
+        
+        # Apply slim roster if not verbose
+        if not verbose:
+            your_roster = self._make_roster_slim(your_roster)
+            opponent_roster = self._make_roster_slim(opponent_roster)
         
         return CurrentMatchup(
             matchupId=matchup.id,

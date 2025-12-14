@@ -156,7 +156,7 @@ async def get_free_agents(
     year: int | None = None,
     size: int = 50,
     position_id: int | None = None,
-    slim: bool = False,
+    verbose: bool = False,
     espn_s2: str | None = None,
     swid: str | None = None,
 ) -> list[dict]:
@@ -167,18 +167,18 @@ async def get_free_agents(
         year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         size: Number of players to return (max 50, default 50)
         position_id: Filter by position ID (optional)
-        slim: If True, return only essential fields (id, name, position, ownership).
-              If False, include full season stats and per-game averages (default False)
+        verbose: If True, include full season stats and per-game averages.
+                 If False, return only essential fields (id, name, position, ownership) (default False).
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         List of available free agent player dictionaries.
-        When slim=True, stats field will be None to reduce response size.
+        When verbose=False, stats field will be None to reduce response size.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    players = await client.get_free_agents(size, position_id, slim)
+    players = await client.get_free_agents(size, position_id, verbose)
     return [player.model_dump() for player in players]
 
 
@@ -226,6 +226,7 @@ async def get_my_current_matchup(
     team_id: int | None = None,
     league_id: int | None = None,
     year: int | None = None,
+    verbose: bool = False,
     espn_s2: str | None = None,
     swid: str | None = None,
 ) -> dict | None:
@@ -243,6 +244,8 @@ async def get_my_current_matchup(
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        verbose: If True, include full player stats in rosters.
+                 If False, omit player stats from rosters (keeps only lineup info like name, position, injury status) (default False).
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -252,8 +255,8 @@ async def get_my_current_matchup(
         - scoringPeriod: Current scoring period/week
         - yourTeam: Your team's matchup data (scores, games played)
         - opponentTeam: Opponent's matchup data (scores, games played)
-        - yourRoster: Your team's roster for this week
-        - opponentRoster: Opponent's roster for this week
+        - yourRoster: Your team's roster for this week (stats omitted if verbose=False)
+        - opponentRoster: Opponent's roster for this week (stats omitted if verbose=False)
         - winner: Winner determination (if available)
         - playoff: Whether this is a playoff matchup
     """
@@ -263,7 +266,7 @@ async def get_my_current_matchup(
         raise ValueError("team_id is required. Provide it as a parameter or set ESPN_TEAM_ID env var.")
     
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    matchup = await client.get_my_current_matchup(team_id)
+    matchup = await client.get_my_current_matchup(team_id, verbose)
     
     if matchup is None:
         return None
