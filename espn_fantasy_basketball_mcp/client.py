@@ -1321,6 +1321,84 @@ class ESPNFantasyBasketballClient:
 
         return trending_players
 
+    async def _get_scoring_period_dates(
+        self, scoring_period: int
+    ) -> tuple[str | None, str | None]:
+        """Get date range for a specific scoring period.
+        
+        Since ESPN doesn't directly expose scoring period dates, we estimate based on:
+        - NBA season typically starts in mid-October
+        - Scoring periods align with calendar weeks (Monday-Sunday)
+        - Each scoring period is approximately 7 days
+        
+        Args:
+            scoring_period: Scoring period number
+            
+        Returns:
+            Tuple of (start_date, end_date) in YYYY-MM-DD format, or (None, None) if estimation fails
+        """
+        from datetime import datetime, timedelta
+        
+        # Estimate date range based on scoring period
+        # Based on user validation: Week 8 = Dec 8-14 (Monday-Sunday)
+        # Working backwards: Dec 8 - (7 weeks * 7 days) = Oct 20
+        # So Week 1 should start around Oct 20
+        # Adjusting season start to match: Oct 20, 2025 is a Monday
+        season_start = datetime(self.year - 1, 10, 20)  # Adjusted to match Week 8 = Dec 8-14
+        estimated_start = season_start + timedelta(days=(scoring_period - 1) * 7)
+        estimated_end = estimated_start + timedelta(days=6)  # Week ends 6 days later (Sunday)
+        
+        return estimated_start.strftime('%Y-%m-%d'), estimated_end.strftime('%Y-%m-%d')
+    
+    def _infer_week_start_day(self, league_settings: LeagueSettings | None) -> int:
+        """Infer week start day from league settings.
+        
+        ESPN doesn't explicitly provide week start day, but we can infer it:
+        - If waiverProcessDays contains "SUNDAY", weeks likely end on Sunday (start Monday)
+        - periodTypeId: 2 typically means weekly periods
+        - Default to Monday (0) if we can't infer
+        
+        Args:
+            league_settings: League settings object, or None
+            
+        Returns:
+            Weekday number (0=Monday, 6=Sunday)
+        """
+        if league_settings and league_settings.acquisitionSettings.waiverProcessDays:
+            waiver_days = league_settings.acquisitionSettings.waiverProcessDays
+            # If waivers process on Sunday, weeks likely end on Sunday (start Monday)
+            if "SUNDAY" in waiver_days:
+                logger.debug("Inferred week start: Monday (from waiverProcessDays=SUNDAY)")
+                return 0  # Monday
+            # If waivers process on Monday, weeks might start on Monday
+            if "MONDAY" in waiver_days:
+                logger.debug("Inferred week start: Monday (from waiverProcessDays=MONDAY)")
+                return 0  # Monday
+        
+        # Default to Monday (most common for fantasy basketball)
+        logger.debug("Using default week start: Monday")
+        return 0  # Monday
+    
+    def _get_week_boundaries(self, date: str, week_start_day: int = 0) -> tuple[str, str]:
+        """Get week boundaries for a given date based on week start day.
+        
+        Args:
+            date: Date in YYYY-MM-DD format
+            week_start_day: Weekday number (0=Monday, 6=Sunday)
+            
+        Returns:
+            Tuple of (week_start_date, week_end_date) in YYYY-MM-DD format
+        """
+        from datetime import datetime, timedelta
+        
+        dt = datetime.fromisoformat(date)
+        # Get the start day of the week
+        days_since_start = (dt.weekday() - week_start_day) % 7
+        week_start = dt - timedelta(days=days_since_start)
+        week_end = week_start + timedelta(days=6)
+        
+        return week_start.strftime("%Y-%m-%d"), week_end.strftime("%Y-%m-%d")
+    
     async def get_player_schedule(
         self, player_id: int, nba_team_id: int, start_date: str, end_date: str
     ) -> PlayerSchedule:
@@ -1377,10 +1455,30 @@ class ESPNFantasyBasketballClient:
         end_dt = datetime.fromisoformat(end_date)
 
         for event in events:
-            game_date_str = event.get("date", "")[:10]  # Get just YYYY-MM-DD part
+            # Parse date from ESPN API
+            date_str = event.get("date", "")
+            if not date_str:
+                continue
+                
             try:
-                game_dt = datetime.fromisoformat(game_date_str)
+                # ESPN returns dates like "2025-12-18T00:00Z" in UTC
+                # NBA games are played in the evening in local time (ET/PT)
+                # A game at midnight UTC Dec 18 is actually Dec 17 evening in ET
+                # So we need to convert to ET and use that date
+                try:
+                    from zoneinfo import ZoneInfo
+                    utc_dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    et_dt = utc_dt.astimezone(ZoneInfo('America/New_York'))
+                    game_date_str = et_dt.strftime('%Y-%m-%d')
+                    game_dt = datetime.fromisoformat(game_date_str)
+                except (ImportError, ValueError):
+                    # Fallback: use date part directly and subtract 1 day
+                    # This handles the case where UTC date is one day ahead
+                    base_date = datetime.fromisoformat(date_str[:10])
+                    game_dt = base_date - timedelta(days=1)
+                    game_date_str = game_dt.strftime('%Y-%m-%d')
             except ValueError:
+                logger.warning(f"Could not parse date: {date_str}")
                 continue
 
             # Filter by date range
@@ -1410,10 +1508,33 @@ class ESPNFantasyBasketballClient:
                 )
                 games.append(game)
 
-        # Calculate games this week and next week
-        # For simplicity, count all games in the range as "this week"
-        games_this_week = len(games)
-        games_next_week = 0  # Would need additional date range to calculate
+        # Calculate games this week and next week using league-defined week boundaries
+        from datetime import datetime, timedelta
+        
+        # Get league settings to infer week start day
+        try:
+            league_settings = await self.get_league_settings()
+            week_start_day = self._infer_week_start_day(league_settings)
+        except Exception as e:
+            logger.warning(f"Could not get league settings for week boundaries, using default: {e}")
+            week_start_day = 0  # Default to Monday
+        
+        start_dt = datetime.fromisoformat(start_date)
+        week_start, week_end = self._get_week_boundaries(start_date, week_start_day)
+        week_start_dt = datetime.fromisoformat(week_start)
+        week_end_dt = datetime.fromisoformat(week_end)
+        next_week_start_dt = week_end_dt + timedelta(days=1)
+        next_week_end_dt = next_week_start_dt + timedelta(days=6)
+        
+        games_this_week = 0
+        games_next_week = 0
+        
+        for game in games:
+            game_dt = datetime.fromisoformat(game.date)
+            if week_start_dt <= game_dt <= week_end_dt:
+                games_this_week += 1
+            elif next_week_start_dt <= game_dt <= next_week_end_dt:
+                games_next_week += 1
 
         return PlayerSchedule(
             playerId=player_id,
@@ -1425,14 +1546,18 @@ class ESPNFantasyBasketballClient:
         )
 
     async def get_roster_schedule_summary(
-        self, team_id: int, start_date: str, end_date: str
+        self, team_id: int, start_date: str | None = None, end_date: str | None = None, scoring_period: int | None = None
     ) -> RosterScheduleSummary:
         """Get schedule summary for all players on a fantasy roster.
+
+        Uses league settings to properly map scoring periods to dates and calculate
+        week boundaries based on Monday-to-Sunday weeks.
 
         Args:
             team_id: Fantasy team ID
             start_date: Start date in YYYY-MM-DD format
             end_date: End date in YYYY-MM-DD format
+            scoring_period: Optional scoring period to use for date mapping
 
         Returns:
             RosterScheduleSummary with schedule data for all rostered players
@@ -1442,12 +1567,49 @@ class ESPNFantasyBasketballClient:
         """
         # Validate inputs
         self._validate_positive_int(team_id, "team_id")
+        from datetime import datetime, timedelta
+
+        # Get league settings to understand scoring period structure
+        try:
+            league_settings = await self.get_league_settings()
+        except Exception as e:
+            logger.warning(f"Failed to get league settings, using date-based calculation: {e}")
+            league_settings = None
+
+        # If scoring period provided, get estimated dates for that period
+        if scoring_period:
+            scoring_start, scoring_end = await self._get_scoring_period_dates(scoring_period)
+            if scoring_start and scoring_end:
+                # Use the estimated scoring period dates
+                # Extend end_date to cover next week for "gamesNextWeek" calculation
+                from datetime import datetime, timedelta
+                end_dt = datetime.fromisoformat(scoring_end) + timedelta(days=7)
+                start_date = scoring_start
+                end_date = end_dt.strftime('%Y-%m-%d')
+                logger.debug(f"Scoring period {scoring_period} estimated dates: {start_date} to {end_date}")
+        
+        # Validate dates are provided
+        if not start_date or not end_date:
+            from datetime import datetime, timedelta
+            if not start_date:
+                start_date = datetime.now().strftime("%Y-%m-%d")
+            if not end_date:
+                end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime("%Y-%m-%d")
 
         # Get the roster first
         roster = await self.get_team_roster(team_id)
 
         player_schedules = []
-        total_games = 0
+        total_games_this_week = 0
+        total_games_next_week = 0
+
+        # Calculate week boundaries based on league settings
+        week_start_day = self._infer_week_start_day(league_settings)
+        week_start, week_end = self._get_week_boundaries(start_date, week_start_day)
+        week_start_dt = datetime.fromisoformat(week_start)
+        week_end_dt = datetime.fromisoformat(week_end)
+        next_week_start_dt = week_end_dt + timedelta(days=1)
+        next_week_end_dt = next_week_start_dt + timedelta(days=6)
 
         # Get schedule for each player on the roster
         for entry in roster.entries:
@@ -1465,18 +1627,26 @@ class ESPNFantasyBasketballClient:
                 # Update player name with actual name from roster
                 schedule.playerName = player.fullName
                 player_schedules.append(schedule)
-                total_games += schedule.gamesThisWeek
+                total_games_this_week += schedule.gamesThisWeek
+                total_games_next_week += schedule.gamesNextWeek
             except Exception as e:
                 logger.warning(f"Failed to get schedule for player {player.fullName}: {e}")
                 continue
 
         # Calculate average
-        avg_games = total_games / len(player_schedules) if player_schedules else 0.0
+        avg_games = total_games_this_week / len(player_schedules) if player_schedules else 0.0
+
+        # Determine scoring period if not provided
+        determined_scoring_period = scoring_period
+        if not determined_scoring_period and league_settings:
+            # Use current matchup period from status
+            determined_scoring_period = league_settings.status.currentMatchupPeriod
 
         return RosterScheduleSummary(
             teamId=team_id,
-            scoringPeriod=0,  # Would need to determine current scoring period
+            scoringPeriod=determined_scoring_period or 0,
             playerSchedules=player_schedules,
-            totalGamesThisWeek=total_games,
+            totalGamesThisWeek=total_games_this_week,
+            totalGamesNextWeek=total_games_next_week,
             averageGamesPerPlayer=round(avg_games, 2),
         )

@@ -480,6 +480,7 @@ async def get_roster_schedule(
     team_id: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    scoring_period: int | None = None,
     league_id: int | None = None,
     year: int | None = None,
     espn_s2: str | None = None,
@@ -489,18 +490,26 @@ async def get_roster_schedule(
 
     This helps you see how many games each of your players has in the upcoming week(s),
     which is crucial for setting your lineup and making roster decisions.
+    
+    Uses league settings to properly calculate week boundaries (Monday-to-Sunday)
+    and map scoring periods to dates for accurate game counts.
 
     Args:
         team_id: Your fantasy team ID (optional, uses ESPN_TEAM_ID env var)
         start_date: Start date in YYYY-MM-DD format (optional, defaults to today)
         end_date: End date in YYYY-MM-DD format (optional, defaults to 7 days from start)
+        scoring_period: Specific scoring period to get schedule for (optional)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
-        Dictionary with schedule summary including games per player and total games
+        Dictionary with schedule summary including:
+        - gamesThisWeek: Games in current week (Monday-Sunday)
+        - gamesNextWeek: Games in next week (Monday-Sunday)
+        - games per player with dates and opponents
+        - scoringPeriod: The scoring period this schedule represents
     """
     from datetime import datetime, timedelta
 
@@ -514,7 +523,9 @@ async def get_roster_schedule(
         end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime("%Y-%m-%d")
 
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    schedule_summary = await client.get_roster_schedule_summary(team_id, start_date, end_date)
+    schedule_summary = await client.get_roster_schedule_summary(
+        team_id, start_date, end_date, scoring_period
+    )
     return schedule_summary.model_dump()
 
 

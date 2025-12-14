@@ -198,6 +198,7 @@ class RosterScheduleSummary(BaseModel):
     scoringPeriod: int
     playerSchedules: list[PlayerSchedule]
     totalGamesThisWeek: int
+    totalGamesNextWeek: int = 0
     averageGamesPerPlayer: float
 
 
