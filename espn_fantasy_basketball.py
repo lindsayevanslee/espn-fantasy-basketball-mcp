@@ -193,11 +193,13 @@ async def get_matchups(
 ) -> list[dict]:
     """Get matchups/schedule for an ESPN Fantasy Basketball league.
 
+    Defaults to current scoring period and your team (from ESPN_TEAM_ID env var) if not specified.
+
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         scoring_period: Specific scoring period to get matchups for (optional, defaults to current week)
-        team_id: Filter to only return matchups for this team (optional, uses ESPN_TEAM_ID env var)
+        team_id: Filter to only return matchups for this team (optional, defaults to ESPN_TEAM_ID env var)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -207,7 +209,8 @@ async def get_matchups(
         human-readable names (categoryScores) for easier interpretation.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
-    team_id = _get_team_id(team_id) if team_id is None else team_id
+    # Default to team_id from environment if not provided
+    team_id = _get_team_id(team_id)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     
     # Convert scoring_period to int if it's a string (MCP client may pass strings)
@@ -579,6 +582,8 @@ async def get_roster_schedule(
 
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
+    if not team_id:
+        raise ValueError("team_id is required. Provide it as a parameter or set ESPN_TEAM_ID env var.")
 
     # Default dates if not provided
     if not start_date:

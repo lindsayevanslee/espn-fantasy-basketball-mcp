@@ -1169,16 +1169,18 @@ class ESPNFantasyBasketballClient:
     def _get_stat_id_mapping() -> dict[str, str]:
         """Get mapping of ESPN stat IDs to human-readable category names.
         
+        ESPN stat ID mapping: 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB
+        
         Returns:
             Dictionary mapping stat ID strings to category names
         """
         return {
             "0": "points",  # Points
-            "1": "rebounds",  # Rebounds (total rebounds)
-            "2": "assists",  # Assists
-            "3": "steals",  # Steals
-            "4": "blocks",  # Blocks
-            "6": "rebounds",  # Rebounds (alternative ID)
+            "1": "blocks",  # Blocks
+            "2": "steals",  # Steals
+            "3": "assists",  # Assists
+            "4": "offensiveRebounds",  # Offensive Rebounds (less common in matchups)
+            "6": "rebounds",  # Rebounds (total rebounds)
             "11": "turnovers",  # Turnovers
             "17": "threePointMade",  # 3PM
             "19": "fieldGoalPercentage",  # FG%
