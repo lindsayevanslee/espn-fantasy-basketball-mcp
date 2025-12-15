@@ -1344,25 +1344,11 @@ class ESPNFantasyBasketballClient:
         }
     
     @staticmethod
-    def _get_position_id_mapping() -> dict[int, str]:
-        """Get mapping of ESPN position IDs to human-readable position names.
-        
-        Returns:
-            Dictionary mapping position ID integers to position names
-        """
-        return {
-            0: "PG",  # Point Guard
-            1: "SG",  # Shooting Guard
-            2: "SF",  # Small Forward
-            3: "PF",  # Power Forward
-            4: "C",   # Center
-            5: "G",   # Guard (PG or SG)
-            6: "F",   # Forward (SF or PF)
-        }
-    
-    @staticmethod
     def _get_lineup_slot_id_mapping() -> dict[int, str]:
         """Get mapping of ESPN lineup slot IDs to human-readable slot names.
+        
+        This includes both position slots (0-6) and special slots (7, 11-13).
+        Position IDs and lineup slot IDs use the same values for positions.
         
         Returns:
             Dictionary mapping slot ID integers to slot names
@@ -1373,13 +1359,27 @@ class ESPNFantasyBasketballClient:
             2: "SF",   # Small Forward
             3: "PF",   # Power Forward
             4: "C",    # Center
-            5: "G",    # Guard
-            6: "F",    # Forward
+            5: "G",    # Guard (PG or SG)
+            6: "F",    # Forward (SF or PF)
             7: "UTIL", # Utility
-            11: "BENCH", # Bench
-            12: "IR",  # Injured Reserve
-            13: "BE",  # Bench (alternate)
+            11: "UTIL", # Utility (alternate)
+            12: "BENCH", # Bench
+            13: "IR",  # Injured Reserve
         }
+    
+    @staticmethod
+    def _get_position_id_mapping() -> dict[int, str]:
+        """Get mapping of ESPN position IDs to human-readable position names.
+        
+        Position IDs are a subset of lineup slot IDs (0-6 only).
+        Uses the same mapping as lineup slots for consistency.
+        
+        Returns:
+            Dictionary mapping position ID integers to position names
+        """
+        slot_mapping = ESPNFantasyBasketballClient._get_lineup_slot_id_mapping()
+        # Return only position-related slots (0-6)
+        return {k: v for k, v in slot_mapping.items() if k <= 6}
     
     def _get_scoring_stat_ids(self, league_settings: LeagueSettings | None = None) -> set[int]:
         """Get set of stat IDs that are scoring categories for this league.
