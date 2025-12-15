@@ -102,7 +102,9 @@ class Player(BaseModel):
     jersey: str | None = None
     proTeamId: int | None = None
     defaultPositionId: int
+    defaultPosition: str | None = None  # Human-readable position name (e.g., "PG", "SG")
     eligibleSlots: list[int] | None = None
+    eligibleSlotNames: list[str] | None = None  # Human-readable slot names (e.g., ["PG", "SG", "G"])
     injured: bool | None = None
     injuryStatus: str | None = None
     stats: dict[str, Any] | None = None
@@ -124,6 +126,7 @@ class RosterEntry(BaseModel):
     playerId: int
     playerPoolEntry: PlayerPoolEntry
     lineupSlotId: int
+    lineupSlotName: str | None = None  # Human-readable slot name (e.g., "PG", "BENCH", "IR")
     acquisitionDate: int | None = None
     acquisitionType: str | None = None
     injuryStatus: str | None = None
@@ -139,8 +142,9 @@ class MatchupTeam(BaseModel):
     totalPoints: float | None = None
     totalProjectedPoints: float | None = None
     gamesPlayed: int | None = None
-    cumulativeScore: dict[str, Any] | None = None  # Original stat IDs (e.g., "0", "1", "3")
-    categoryScores: dict[str, float] | None = None  # Human-readable category names (e.g., "points", "rebounds", "assists")
+    cumulativeScore: dict[str, Any] | None = None  # Original stat IDs (deprecated, use categoryScores instead)
+    categoryScores: dict[str, float] | None = None  # Scoring categories only (human-readable names)
+    componentStats: dict[str, float] | None = None  # Component stats (FGM, FGA, FTM, FTA) that aren't scoring categories
 
 
 class Matchup(BaseModel):

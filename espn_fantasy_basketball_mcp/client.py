@@ -354,10 +354,16 @@ class ESPNFantasyBasketballClient:
                         lineupLocked=entry["playerPoolEntry"].get("lineupLocked"),
                     )
 
+                    # Map lineup slot ID to name
+                    slot_mapping = self._get_lineup_slot_id_mapping()
+                    lineup_slot_id = entry["lineupSlotId"]
+                    lineup_slot_name = slot_mapping.get(lineup_slot_id, f"SLOT_{lineup_slot_id}")
+                    
                     roster_entry = RosterEntry(
                         playerId=entry["playerId"],
                         playerPoolEntry=player_pool_entry,
-                        lineupSlotId=entry["lineupSlotId"],
+                        lineupSlotId=lineup_slot_id,
+                        lineupSlotName=lineup_slot_name,
                         acquisitionDate=entry.get("acquisitionDate"),
                         acquisitionType=entry.get("acquisitionType"),
                         injuryStatus=injury_status,
@@ -385,6 +391,7 @@ class ESPNFantasyBasketballClient:
         slim_entries = []
         for entry in roster.entries:
             # Create slim player (without stats)
+            # Preserve position/slot mappings from original player
             slim_player = Player(
                 id=entry.playerPoolEntry.player.id,
                 fullName=entry.playerPoolEntry.player.fullName,
@@ -393,7 +400,9 @@ class ESPNFantasyBasketballClient:
                 jersey=entry.playerPoolEntry.player.jersey,
                 proTeamId=entry.playerPoolEntry.player.proTeamId,
                 defaultPositionId=entry.playerPoolEntry.player.defaultPositionId,
+                defaultPosition=entry.playerPoolEntry.player.defaultPosition,
                 eligibleSlots=entry.playerPoolEntry.player.eligibleSlots,
+                eligibleSlotNames=entry.playerPoolEntry.player.eligibleSlotNames,
                 injured=entry.playerPoolEntry.player.injured,
                 injuryStatus=entry.playerPoolEntry.player.injuryStatus,
                 stats=None,  # Remove stats
@@ -417,6 +426,7 @@ class ESPNFantasyBasketballClient:
                 playerId=entry.playerId,
                 playerPoolEntry=slim_player_pool_entry,
                 lineupSlotId=entry.lineupSlotId,
+                lineupSlotName=entry.lineupSlotName,  # Preserve slot name
                 acquisitionDate=entry.acquisitionDate,
                 acquisitionType=entry.acquisitionType,
                 injuryStatus=entry.injuryStatus,
@@ -606,6 +616,17 @@ class ESPNFantasyBasketballClient:
                             
                             break  # Found season stats, stop looking
             
+            # Map position and slot IDs to names
+            position_mapping = self._get_position_id_mapping()
+            slot_mapping = self._get_lineup_slot_id_mapping()
+            default_position_id = player_info["defaultPositionId"]
+            default_position = position_mapping.get(default_position_id)
+            
+            eligible_slots = player_info.get("eligibleSlots")
+            eligible_slot_names = None
+            if eligible_slots:
+                eligible_slot_names = [slot_mapping.get(slot_id, f"SLOT_{slot_id}") for slot_id in eligible_slots]
+            
             player = Player(
                 id=player_info["id"],
                 fullName=player_info["fullName"],
@@ -613,8 +634,10 @@ class ESPNFantasyBasketballClient:
                 lastName=player_info.get("lastName"),
                 jersey=player_info.get("jersey"),
                 proTeamId=player_info.get("proTeamId"),
-                defaultPositionId=player_info["defaultPositionId"],
-                eligibleSlots=player_info.get("eligibleSlots"),
+                defaultPositionId=default_position_id,
+                defaultPosition=default_position,
+                eligibleSlots=eligible_slots,
+                eligibleSlotNames=eligible_slot_names,
                 injured=player_info.get("injured", False),
                 injuryStatus=player_info.get("injuryStatus"),
                 ownership={
@@ -646,7 +669,10 @@ class ESPNFantasyBasketballClient:
                 league_settings = await self.get_league_settings()
                 scoring_period = league_settings.status.currentMatchupPeriod
             except Exception as e:
-                logger.warning(f"Could not get current scoring period, returning all matchups: {e}")
+                logger.warning(f"Could not get current scoring period from league settings: {e}")
+                # Try to get it from the API response as fallback
+                # We'll fetch matchups without filtering first, then extract the current period
+                scoring_period = None  # Will be determined from API response
         
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         params = {"view": "mMatchup"}
@@ -656,12 +682,49 @@ class ESPNFantasyBasketballClient:
 
         data = await self._make_request(url, params)
         
+        # If scoring_period is still None, try to determine it from the API response
+        if scoring_period is None:
+            # Find the most recent matchup period that has completed or is in progress
+            schedule = data.get("schedule", [])
+            if schedule:
+                # Get all unique matchup periods, sorted descending
+                matchup_periods = sorted(
+                    set(item.get("matchupPeriodId") for item in schedule if item.get("matchupPeriodId")),
+                    reverse=True
+                )
+                if matchup_periods:
+                    # Use the most recent matchup period as fallback
+                    scoring_period = matchup_periods[0]
+                    logger.info(f"Determined current scoring period from API response: {scoring_period}")
+                else:
+                    # If we can't determine it, raise an error rather than returning all matchups
+                    raise ValueError(
+                        "Could not determine current scoring period. "
+                        "Please provide scoring_period parameter explicitly."
+                    )
+            else:
+                # No schedule data available
+                raise ValueError(
+                    "Could not determine current scoring period. "
+                    "Please provide scoring_period parameter explicitly."
+                )
+        
         # Get stat ID mapping for human-readable category names
         stat_mapping = self._get_stat_id_mapping()
+        
+        # Get league settings to determine scoring categories
+        league_settings = None
+        scoring_stat_ids = set()
+        try:
+            league_settings = await self.get_league_settings()
+            scoring_stat_ids = self._get_scoring_stat_ids(league_settings)
+        except Exception as e:
+            logger.warning(f"Could not get league settings for scoring category filtering: {e}")
 
         matchups = []
         for schedule_item in data.get("schedule", []):
-            if scoring_period is None or schedule_item.get("matchupPeriodId") == scoring_period:
+            # Now that scoring_period is guaranteed to be set, filter by it
+            if schedule_item.get("matchupPeriodId") == scoring_period:
                 # Filter by team_id if provided
                 home_team_id = schedule_item.get("home", {}).get("teamId")
                 away_team_id = schedule_item.get("away", {}).get("teamId")
@@ -678,22 +741,28 @@ class ESPNFantasyBasketballClient:
                     
                     # Convert stat IDs to human-readable category names
                     # cumulativeScore has structure: {"scoreByStat": {"0": {"score": 409.0, ...}, ...}}
-                    category_scores = {}
+                    all_category_scores = {}
                     score_by_stat = cumulative_score.get("scoreByStat", {})
                     if isinstance(score_by_stat, dict):
                         for stat_id, stat_data in score_by_stat.items():
                             if isinstance(stat_data, dict) and "score" in stat_data:
                                 score_value = stat_data["score"]
                                 category_name = stat_mapping.get(stat_id, f"stat_{stat_id}")
-                                category_scores[category_name] = score_value
+                                all_category_scores[category_name] = score_value
+                    
+                    # Separate scoring categories from component stats
+                    scoring_categories, component_stats = self._filter_category_scores(
+                        all_category_scores, scoring_stat_ids, stat_mapping
+                    )
                     
                     home_team = MatchupTeam(
                         teamId=home_data.get("teamId"),
                         totalPoints=home_data.get("totalPoints"),
                         totalProjectedPoints=home_data.get("totalProjectedPoints"),
                         gamesPlayed=home_data.get("gamesPlayed"),
-                        cumulativeScore=home_data.get("cumulativeScore"),  # Keep original for backward compatibility
-                        categoryScores=category_scores if category_scores else None,
+                        cumulativeScore=None,  # Removed - use categoryScores instead
+                        categoryScores=scoring_categories if scoring_categories else None,
+                        componentStats=component_stats if component_stats else None,
                     )
 
                 away_team = None
@@ -703,22 +772,28 @@ class ESPNFantasyBasketballClient:
                     
                     # Convert stat IDs to human-readable category names
                     # cumulativeScore has structure: {"scoreByStat": {"0": {"score": 409.0, ...}, ...}}
-                    category_scores = {}
+                    all_category_scores = {}
                     score_by_stat = cumulative_score.get("scoreByStat", {})
                     if isinstance(score_by_stat, dict):
                         for stat_id, stat_data in score_by_stat.items():
                             if isinstance(stat_data, dict) and "score" in stat_data:
                                 score_value = stat_data["score"]
                                 category_name = stat_mapping.get(stat_id, f"stat_{stat_id}")
-                                category_scores[category_name] = score_value
+                                all_category_scores[category_name] = score_value
+                    
+                    # Separate scoring categories from component stats
+                    scoring_categories, component_stats = self._filter_category_scores(
+                        all_category_scores, scoring_stat_ids, stat_mapping
+                    )
                     
                     away_team = MatchupTeam(
                         teamId=away_data.get("teamId"),
                         totalPoints=away_data.get("totalPoints"),
                         totalProjectedPoints=away_data.get("totalProjectedPoints"),
                         gamesPlayed=away_data.get("gamesPlayed"),
-                        cumulativeScore=away_data.get("cumulativeScore"),  # Keep original for backward compatibility
-                        categoryScores=category_scores if category_scores else None,
+                        cumulativeScore=None,  # Removed - use categoryScores instead
+                        categoryScores=scoring_categories if scoring_categories else None,
+                        componentStats=component_stats if component_stats else None,
                     )
 
                 matchup = Matchup(
@@ -909,13 +984,26 @@ class ESPNFantasyBasketballClient:
             if player_id in drafted_players:
                 continue
 
+            # Map position and slot IDs to names
+            position_mapping = self._get_position_id_mapping()
+            slot_mapping = self._get_lineup_slot_id_mapping()
+            default_position_id = player_data["defaultPositionId"]
+            default_position = position_mapping.get(default_position_id)
+            
+            eligible_slots = player_data.get("eligibleSlots")
+            eligible_slot_names = None
+            if eligible_slots:
+                eligible_slot_names = [slot_mapping.get(slot_id, f"SLOT_{slot_id}") for slot_id in eligible_slots]
+            
             player = Player(
                 id=player_id,
                 fullName=player_data.get("fullName", ""),
                 firstName=player_data.get("firstName", ""),
                 lastName=player_data.get("lastName", ""),
-                defaultPositionId=player_data["defaultPositionId"],
-                eligibleSlots=player_data.get("eligibleSlots"),
+                defaultPositionId=default_position_id,
+                defaultPosition=default_position,
+                eligibleSlots=eligible_slots,
+                eligibleSlotNames=eligible_slot_names,
                 proTeamId=player_data.get("proTeamId"),
                 active=player_data.get("active", True),
                 injured=player_data.get("injured", False),
@@ -1255,6 +1343,105 @@ class ESPNFantasyBasketballClient:
             "gamesPlayed": "gamesPlayed",
         }
     
+    @staticmethod
+    def _get_position_id_mapping() -> dict[int, str]:
+        """Get mapping of ESPN position IDs to human-readable position names.
+        
+        Returns:
+            Dictionary mapping position ID integers to position names
+        """
+        return {
+            0: "PG",  # Point Guard
+            1: "SG",  # Shooting Guard
+            2: "SF",  # Small Forward
+            3: "PF",  # Power Forward
+            4: "C",   # Center
+            5: "G",   # Guard (PG or SG)
+            6: "F",   # Forward (SF or PF)
+        }
+    
+    @staticmethod
+    def _get_lineup_slot_id_mapping() -> dict[int, str]:
+        """Get mapping of ESPN lineup slot IDs to human-readable slot names.
+        
+        Returns:
+            Dictionary mapping slot ID integers to slot names
+        """
+        return {
+            0: "PG",   # Point Guard
+            1: "SG",   # Shooting Guard
+            2: "SF",   # Small Forward
+            3: "PF",   # Power Forward
+            4: "C",    # Center
+            5: "G",    # Guard
+            6: "F",    # Forward
+            7: "UTIL", # Utility
+            11: "BENCH", # Bench
+            12: "IR",  # Injured Reserve
+            13: "BE",  # Bench (alternate)
+        }
+    
+    def _get_scoring_stat_ids(self, league_settings: LeagueSettings | None = None) -> set[int]:
+        """Get set of stat IDs that are scoring categories for this league.
+        
+        Args:
+            league_settings: LeagueSettings object (optional, will fetch if not provided)
+            
+        Returns:
+            Set of stat ID integers that are scoring categories
+        """
+        if league_settings is None:
+            # Return empty set if we can't determine scoring categories
+            # This will include all stats in categoryScores
+            return set()
+        
+        scoring_stat_ids = set()
+        for scoring_item in league_settings.scoringSettings.scoringItems:
+            scoring_stat_ids.add(scoring_item.statId)
+        
+        return scoring_stat_ids
+    
+    def _filter_category_scores(
+        self, 
+        category_scores: dict[str, float], 
+        scoring_stat_ids: set[int],
+        stat_mapping: dict[str, str]
+    ) -> tuple[dict[str, float], dict[str, float]]:
+        """Separate category scores into scoring categories and component stats.
+        
+        Args:
+            category_scores: Dictionary of category name -> score value
+            scoring_stat_ids: Set of stat IDs that are scoring categories
+            stat_mapping: Mapping of stat ID strings to category names
+            
+        Returns:
+            Tuple of (scoring_categories, component_stats) dictionaries
+        """
+        scoring_categories = {}
+        component_stats = {}
+        
+        # Reverse mapping: category name -> stat ID
+        reverse_mapping = {v: k for k, v in stat_mapping.items()}
+        
+        for category_name, score_value in category_scores.items():
+            stat_id_str = reverse_mapping.get(category_name)
+            if stat_id_str:
+                try:
+                    stat_id_int = int(stat_id_str)
+                    if stat_id_int in scoring_stat_ids:
+                        scoring_categories[category_name] = score_value
+                    else:
+                        # Component stats (FGM, FGA, FTM, FTA, etc.)
+                        component_stats[category_name] = score_value
+                except (ValueError, TypeError):
+                    # If we can't determine, include in scoring categories
+                    scoring_categories[category_name] = score_value
+            else:
+                # Unknown category, include in scoring categories
+                scoring_categories[category_name] = score_value
+        
+        return scoring_categories, component_stats
+    
     def _parse_espn_stats(self, stat_data: dict[str, Any]) -> dict[str, Any]:
         """Parse ESPN's stat format into our standardized format."""
         # ESPN uses different stat IDs for different categories
@@ -1487,10 +1674,16 @@ class ESPNFantasyBasketballClient:
                 continue
 
             # Create Player object
+            # Map position ID to name
+            position_mapping = self._get_position_id_mapping()
+            default_position_id = player_info["defaultPositionId"]
+            default_position = position_mapping.get(default_position_id)
+            
             player = Player(
                 id=player_info["id"],
                 fullName=player_info.get("fullName", ""),
-                defaultPositionId=player_info["defaultPositionId"],
+                defaultPositionId=default_position_id,
+                defaultPosition=default_position,
             )
 
             # Determine reason for trending
@@ -1731,11 +1924,23 @@ class ESPNFantasyBasketballClient:
                     game_date_str = et_dt.strftime('%Y-%m-%d')
                     game_dt = datetime.fromisoformat(game_date_str)
                 except (ImportError, ValueError):
-                    # Fallback: use date part directly and subtract 1 day
-                    # This handles the case where UTC date is one day ahead
-                    base_date = datetime.fromisoformat(date_str[:10])
-                    game_dt = base_date - timedelta(days=1)
-                    game_date_str = game_dt.strftime('%Y-%m-%d')
+                    # Fallback: parse UTC datetime and check if we need to adjust
+                    # Only subtract 1 day if the UTC time is before ~5 AM (midnight ET)
+                    # This handles games that occur late at night ET but are the next day UTC
+                    try:
+                        utc_dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        # If UTC time is before 5 AM, the game is likely the previous day in ET
+                        # Otherwise, use the UTC date as-is
+                        if utc_dt.hour < 5:
+                            game_dt = utc_dt - timedelta(days=1)
+                        else:
+                            game_dt = utc_dt
+                        game_date_str = game_dt.strftime('%Y-%m-%d')
+                    except (ValueError, AttributeError):
+                        # Last resort: use date part directly without timezone conversion
+                        # ESPN's game dates are typically stored in local time anyway
+                        game_date_str = date_str[:10]
+                        game_dt = datetime.fromisoformat(game_date_str)
             except ValueError:
                 logger.warning(f"Could not parse date: {date_str}")
                 continue
