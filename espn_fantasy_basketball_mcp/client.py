@@ -826,15 +826,17 @@ class ESPNFantasyBasketballClient:
         Returns:
             CurrentMatchup object with all matchup data, or None if no current matchup found
         """
-        # Get current scoring period
+        # Get current matchup period and latest scoring period
         league_settings = await self.get_league_settings()
-        current_period = league_settings.status.currentMatchupPeriod
+        current_matchup_period = league_settings.status.currentMatchupPeriod
+        current_scoring_period = league_settings.status.latestScoringPeriod
         
-        # Get matchups for current period, filtered by team_id
-        matchups = await self.get_matchups(scoring_period=current_period, team_id=team_id)
+        # Get matchups for current matchup period, filtered by team_id
+        # Note: get_matchups filters by matchupPeriodId, not scoringPeriodId
+        matchups = await self.get_matchups(scoring_period=current_matchup_period, team_id=team_id)
         
         if not matchups:
-            logger.warning(f"No matchup found for team {team_id} in scoring period {current_period}")
+            logger.warning(f"No matchup found for team {team_id} in matchup period {current_matchup_period}")
             return None
         
         # Should only be one matchup for a team in a given period
@@ -855,9 +857,10 @@ class ESPNFantasyBasketballClient:
             logger.error(f"No opponent found for matchup {matchup.id}")
             return None
         
-        # Get rosters for both teams
-        your_roster = await self.get_team_roster(team_id, scoring_period=current_period)
-        opponent_roster = await self.get_team_roster(opponent_team_data.teamId, scoring_period=current_period)
+        # Get rosters for both teams using the actual scoring period
+        # get_team_roster expects scoringPeriodId, not matchupPeriodId
+        your_roster = await self.get_team_roster(team_id, scoring_period=current_scoring_period)
+        opponent_roster = await self.get_team_roster(opponent_team_data.teamId, scoring_period=current_scoring_period)
         
         # Apply slim roster if not verbose
         if not verbose:
@@ -866,7 +869,7 @@ class ESPNFantasyBasketballClient:
         
         return CurrentMatchup(
             matchupId=matchup.id,
-            scoringPeriod=current_period,
+            scoringPeriod=current_scoring_period,
             yourTeam=your_team_data,
             opponentTeam=opponent_team_data,
             yourRoster=your_roster,
