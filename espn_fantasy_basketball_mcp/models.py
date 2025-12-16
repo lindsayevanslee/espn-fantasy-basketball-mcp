@@ -101,6 +101,8 @@ class Player(BaseModel):
     lastName: str | None = None
     jersey: str | None = None
     proTeamId: int | None = None
+    proTeamAbbrev: str | None = None  # NBA team abbreviation (e.g., "MIN", "LAL")
+    proTeamName: str | None = None  # NBA team full name (e.g., "Timberwolves", "Lakers")
     defaultPositionId: int
     defaultPosition: str | None = None  # Human-readable position name (e.g., "PG", "SG")
     eligibleSlots: list[int] | None = None
@@ -122,6 +124,13 @@ class PlayerPoolEntry(BaseModel):
     lineupLocked: bool | None = None
 
 
+class TodaysGame(BaseModel):
+    """Information about a player's game today."""
+    opponent: str | None = None  # Opponent team abbreviation (e.g., "DET")
+    time: str | None = None  # Game time (e.g., "6:00 PM")
+    home: bool | None = None  # True if home game, False if away
+
+
 class RosterEntry(BaseModel):
     playerId: int
     playerPoolEntry: PlayerPoolEntry
@@ -130,6 +139,7 @@ class RosterEntry(BaseModel):
     acquisitionDate: int | None = None
     acquisitionType: str | None = None
     injuryStatus: str | None = None
+    todaysGame: TodaysGame | None = None  # Today's game info if player has a game
 
 
 class Roster(BaseModel):
@@ -139,6 +149,7 @@ class Roster(BaseModel):
 
 class MatchupTeam(BaseModel):
     teamId: int | None = None
+    teamName: str | None = None  # Fantasy team name (e.g., "John's Squad")
     totalPoints: float | None = None
     totalProjectedPoints: float | None = None
     gamesPlayed: int | None = None

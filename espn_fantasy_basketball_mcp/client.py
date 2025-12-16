@@ -32,6 +32,7 @@ from .models import (
     ScoringSettings,
     Team,
     TeamDraftSummary,
+    TodaysGame,
     TradeAnalysis,
     TradeSettings,
     TrendingPlayer,
@@ -299,6 +300,19 @@ class ESPNFantasyBasketballClient:
 
         data = await self._make_request(url, params, headers)
 
+        # Fetch today's NBA schedule once for all players (optimization)
+        # Don't pass date parameter - API defaults to today's games
+        todays_games_cache = {}
+        team_id_to_abbrev = {}  # Maps proTeamId to abbreviation for teams playing today
+        try:
+            url_nba = f"{self.NBA_BASE_URL}/scoreboard"
+            # Don't pass dates parameter - API defaults to today's games in ET timezone
+            params_nba = {}
+            nba_data = await self._make_request(url_nba, params_nba)
+            todays_games_cache, team_id_to_abbrev = self._parse_todays_games(nba_data)
+        except Exception as e:
+            logger.debug(f"Could not fetch today's NBA schedule: {e}")
+
         for team_data in data.get("teams", []):
             if team_data["id"] == team_id:
                 roster_entries = []
@@ -329,15 +343,43 @@ class ESPNFantasyBasketballClient:
                     # Parse player stats
                     stats_data = self._parse_player_stats(player_data.get("stats", []))
                     
+                    pro_team_id = player_data.get("proTeamId")
+                    # Use whatever the API returns directly, or fallback to mapping
+                    pro_team_abbrev = player_data.get("proTeamAbbrev")
+                    if not pro_team_abbrev:
+                        # Try mapping from today's games first (if team is playing today)
+                        if pro_team_id and pro_team_id in team_id_to_abbrev:
+                            pro_team_abbrev = team_id_to_abbrev[pro_team_id]
+                        # Fallback to static mapping if still not found
+                        elif pro_team_id:
+                            pro_team_id_mapping = self._get_pro_team_id_to_abbrev()
+                            pro_team_abbrev = pro_team_id_mapping.get(pro_team_id)
+                    pro_team_name = player_data.get("proTeamName")
+                    
+                    # Map position and slot IDs to names
+                    position_mapping = self._get_position_id_mapping()
+                    slot_mapping = self._get_lineup_slot_id_mapping()
+                    default_position_id = player_data["defaultPositionId"]
+                    default_position = position_mapping.get(default_position_id)
+                    
+                    eligible_slots = player_data.get("eligibleSlots")
+                    eligible_slot_names = None
+                    if eligible_slots:
+                        eligible_slot_names = [slot_mapping.get(slot_id, f"SLOT_{slot_id}") for slot_id in eligible_slots]
+                    
                     player = Player(
                         id=player_data["id"],
                         fullName=player_data.get("fullName", ""),
                         firstName=player_data.get("firstName", ""),
                         lastName=player_data.get("lastName", ""),
                         jersey=player_data.get("jersey"),
-                        proTeamId=player_data.get("proTeamId"),
-                        defaultPositionId=player_data["defaultPositionId"],
-                        eligibleSlots=player_data.get("eligibleSlots"),
+                        proTeamId=pro_team_id,
+                        proTeamAbbrev=pro_team_abbrev,
+                        proTeamName=pro_team_name,
+                        defaultPositionId=default_position_id,
+                        defaultPosition=default_position,
+                        eligibleSlots=eligible_slots,
+                        eligibleSlotNames=eligible_slot_names,
                         injured=player_data.get("injured", False),
                         injuryStatus=injury_status,
                         active=player_data.get("active"),
@@ -359,6 +401,10 @@ class ESPNFantasyBasketballClient:
                     lineup_slot_id = entry["lineupSlotId"]
                     lineup_slot_name = slot_mapping.get(lineup_slot_id, f"SLOT_{lineup_slot_id}")
                     
+                    # Get today's game info for this player from cache
+                    # Lookup by abbreviation (which we've populated above)
+                    todays_game = todays_games_cache.get(pro_team_abbrev) if pro_team_abbrev else None
+                    
                     roster_entry = RosterEntry(
                         playerId=entry["playerId"],
                         playerPoolEntry=player_pool_entry,
@@ -367,6 +413,7 @@ class ESPNFantasyBasketballClient:
                         acquisitionDate=entry.get("acquisitionDate"),
                         acquisitionType=entry.get("acquisitionType"),
                         injuryStatus=injury_status,
+                        todaysGame=todays_game,
                     )
 
                     roster_entries.append(roster_entry)
@@ -399,6 +446,8 @@ class ESPNFantasyBasketballClient:
                 lastName=entry.playerPoolEntry.player.lastName,
                 jersey=entry.playerPoolEntry.player.jersey,
                 proTeamId=entry.playerPoolEntry.player.proTeamId,
+                proTeamAbbrev=entry.playerPoolEntry.player.proTeamAbbrev,  # Preserve team mapping
+                proTeamName=entry.playerPoolEntry.player.proTeamName,  # Preserve team mapping
                 defaultPositionId=entry.playerPoolEntry.player.defaultPositionId,
                 defaultPosition=entry.playerPoolEntry.player.defaultPosition,
                 eligibleSlots=entry.playerPoolEntry.player.eligibleSlots,
@@ -616,6 +665,11 @@ class ESPNFantasyBasketballClient:
                             
                             break  # Found season stats, stop looking
             
+            # Use whatever the API returns directly
+            pro_team_id = player_info.get("proTeamId")
+            pro_team_abbrev = player_info.get("proTeamAbbrev")
+            pro_team_name = player_info.get("proTeamName")
+            
             # Map position and slot IDs to names
             position_mapping = self._get_position_id_mapping()
             slot_mapping = self._get_lineup_slot_id_mapping()
@@ -633,7 +687,9 @@ class ESPNFantasyBasketballClient:
                 firstName=player_info.get("firstName"),
                 lastName=player_info.get("lastName"),
                 jersey=player_info.get("jersey"),
-                proTeamId=player_info.get("proTeamId"),
+                proTeamId=pro_team_id,
+                proTeamAbbrev=pro_team_abbrev,
+                proTeamName=pro_team_name,
                 defaultPositionId=default_position_id,
                 defaultPosition=default_position,
                 eligibleSlots=eligible_slots,
@@ -721,6 +777,14 @@ class ESPNFantasyBasketballClient:
         except Exception as e:
             logger.warning(f"Could not get league settings for scoring category filtering: {e}")
 
+        # Get team names mapping
+        team_names = {}
+        try:
+            teams = await self.get_league_teams()
+            team_names = {team.id: team.name for team in teams}
+        except Exception as e:
+            logger.warning(f"Could not get team names: {e}")
+
         matchups = []
         for schedule_item in data.get("schedule", []):
             # Now that scoring_period is guaranteed to be set, filter by it
@@ -755,8 +819,10 @@ class ESPNFantasyBasketballClient:
                         all_category_scores, scoring_stat_ids, stat_mapping
                     )
                     
+                    home_team_id = home_data.get("teamId")
                     home_team = MatchupTeam(
-                        teamId=home_data.get("teamId"),
+                        teamId=home_team_id,
+                        teamName=team_names.get(home_team_id) if home_team_id else None,
                         totalPoints=home_data.get("totalPoints"),
                         totalProjectedPoints=home_data.get("totalProjectedPoints"),
                         gamesPlayed=home_data.get("gamesPlayed"),
@@ -786,8 +852,10 @@ class ESPNFantasyBasketballClient:
                         all_category_scores, scoring_stat_ids, stat_mapping
                     )
                     
+                    away_team_id = away_data.get("teamId")
                     away_team = MatchupTeam(
-                        teamId=away_data.get("teamId"),
+                        teamId=away_team_id,
+                        teamName=team_names.get(away_team_id) if away_team_id else None,
                         totalPoints=away_data.get("totalPoints"),
                         totalProjectedPoints=away_data.get("totalProjectedPoints"),
                         gamesPlayed=away_data.get("gamesPlayed"),
@@ -882,22 +950,35 @@ class ESPNFantasyBasketballClient:
         """Get NBA schedule.
 
         Args:
-            date: Date in YYYY-MM-DD format (optional, defaults to today)
+            date: Date in YYYY-MM-DD format (optional, defaults to today).
+                  The API accepts dates in YYYYMMDD format (no dashes) via the 'date' parameter.
 
         Returns:
             List of NBA games, or empty list if API fails
         """
-        # Validate date format if provided
-        if date:
-            import re
-            if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
-                raise ValueError(f"Invalid date format: {date}. Must be YYYY-MM-DD.")
-
         url = f"{self.NBA_BASE_URL}/scoreboard"
         params = {}
 
         if date:
-            params["dates"] = date
+            # Validate and convert date format
+            import re
+            from datetime import datetime
+            
+            # Accept YYYY-MM-DD format
+            if re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+                # Convert to YYYYMMDD format (no dashes) for API
+                date_obj = datetime.strptime(date, "%Y-%m-%d")
+                date_formatted = date_obj.strftime("%Y%m%d")
+                # Use 'date' parameter (not 'dates') with YYYYMMDD format
+                params["date"] = date_formatted
+            elif re.match(r'^\d{8}$', date):
+                # Already in YYYYMMDD format
+                params["date"] = date
+            else:
+                raise ValueError(f"Invalid date format: {date}. Must be YYYY-MM-DD or YYYYMMDD.")
+        else:
+            # Don't pass date parameter - API defaults to today's games
+            pass
 
         try:
             data = await self._make_request(url, params)
@@ -911,6 +992,23 @@ class ESPNFantasyBasketballClient:
 
             return games
         except httpx.HTTPError as e:
+            # If explicit date fails, try without date parameter (defaults to today)
+            if date and "400" in str(e):
+                logger.debug(f"NBA API rejected explicit date {date}, trying without date parameter")
+                try:
+                    # Try without date parameter - API defaults to today
+                    data = await self._make_request(url, {})
+                    games = []
+                    for event in data.get("events", []):
+                        game = NBAGame(
+                            id=event["id"], date=event["date"], competitions=event["competitions"]
+                        )
+                        games.append(game)
+                    logger.warning(f"NBA API doesn't accept explicit dates. Returned today's games instead of {date}")
+                    return games
+                except Exception:
+                    pass
+            
             # Log specific HTTP errors but return empty list
             logger.warning(f"NBA API request failed with HTTP error: {e}")
             return []
@@ -987,6 +1085,12 @@ class ESPNFantasyBasketballClient:
             if player_id in drafted_players:
                 continue
 
+            # Map NBA team ID to name/abbreviation
+            pro_team_id = player_data.get("proTeamId")
+            # Use whatever the API returns directly, or None if not available
+            pro_team_abbrev = player_data.get("proTeamAbbrev")
+            pro_team_name = player_data.get("proTeamName")
+            
             # Map position and slot IDs to names
             position_mapping = self._get_position_id_mapping()
             slot_mapping = self._get_lineup_slot_id_mapping()
@@ -1007,7 +1111,9 @@ class ESPNFantasyBasketballClient:
                 defaultPosition=default_position,
                 eligibleSlots=eligible_slots,
                 eligibleSlotNames=eligible_slot_names,
-                proTeamId=player_data.get("proTeamId"),
+                proTeamId=pro_team_id,
+                proTeamAbbrev=pro_team_abbrev,
+                proTeamName=pro_team_name,
                 active=player_data.get("active", True),
                 injured=player_data.get("injured", False),
                 injuryStatus=player_data.get("injuryStatus"),
@@ -1371,18 +1477,206 @@ class ESPNFantasyBasketballClient:
         }
     
     @staticmethod
+    def _normalize_nba_abbrev(nba_abbrev: str) -> str:
+        """Normalize NBA API abbreviation to ESPN Fantasy abbreviation.
+        
+        The NBA API uses slightly different abbreviations than ESPN Fantasy:
+        - NBA API: "GS" -> ESPN Fantasy: "GSW"
+        - NBA API: "WSH" -> ESPN Fantasy: "WAS"
+        - NBA API: "UTAH" -> ESPN Fantasy: "UTA"
+        
+        Args:
+            nba_abbrev: Abbreviation from NBA API
+            
+        Returns:
+            Normalized abbreviation matching ESPN Fantasy format
+        """
+        normalization_map = {
+            "GS": "GSW",    # Golden State Warriors
+            "WSH": "WAS",   # Washington Wizards
+            "UTAH": "UTA",  # Utah Jazz
+        }
+        return normalization_map.get(nba_abbrev, nba_abbrev)
+    
+    def _parse_todays_games(self, nba_data: dict[str, Any]) -> tuple[dict[str, TodaysGame], dict[int, str]]:
+        """Parse today's NBA schedule and return mappings.
+        
+        Args:
+            nba_data: Raw NBA schedule API response
+            
+        Returns:
+            Tuple of:
+            - Dictionary mapping team abbreviation (ESPN Fantasy format) to TodaysGame object
+            - Dictionary mapping ESPN proTeamId to team abbreviation (for teams playing today)
+        """
+        games_map = {}
+        team_id_to_abbrev = {}  # Maps ESPN proTeamId to abbreviation
+        
+        # Build reverse mapping: NBA API abbrev -> ESPN proTeamId
+        # This helps us map NBA API team IDs to ESPN proTeamId
+        nba_abbrev_to_espn_id = {}
+        espn_mapping = self._get_pro_team_id_to_abbrev()
+        for espn_id, espn_abbrev in espn_mapping.items():
+            # Also map normalized versions
+            nba_abbrev_to_espn_id[espn_abbrev] = espn_id
+        
+        try:
+            for event in nba_data.get("events", []):
+                competitions = event.get("competitions", [])
+                if not competitions:
+                    continue
+                    
+                competition = competitions[0]  # Usually one competition per event
+                competitors = competition.get("competitors", [])
+                if len(competitors) != 2:
+                    continue
+                
+                home_team_abbr_nba = None
+                away_team_abbr_nba = None
+                home_team_id_nba = None
+                away_team_id_nba = None
+                
+                for comp in competitors:
+                    team_obj = comp.get("team", {})
+                    team_abbr_nba = team_obj.get("abbreviation", "")
+                    team_id_nba = team_obj.get("id") or comp.get("id")
+                    
+                    if comp.get("homeAway") == "home":
+                        home_team_abbr_nba = team_abbr_nba
+                        if team_id_nba:
+                            home_team_id_nba = int(team_id_nba)
+                    else:
+                        away_team_abbr_nba = team_abbr_nba
+                        if team_id_nba:
+                            away_team_id_nba = int(team_id_nba)
+                
+                if not home_team_abbr_nba or not away_team_abbr_nba:
+                    continue
+                
+                # Normalize abbreviations to ESPN Fantasy format
+                home_team_abbr = self._normalize_nba_abbrev(home_team_abbr_nba)
+                away_team_abbr = self._normalize_nba_abbrev(away_team_abbr_nba)
+                
+                # Extract game time
+                game_time = None
+                date_str = event.get("date", "")
+                try:
+                    from datetime import datetime, timedelta
+                    from zoneinfo import ZoneInfo
+                    utc_dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    et_dt = utc_dt.astimezone(ZoneInfo('America/New_York'))
+                    # Format time (%-I doesn't work on all platforms, use I and strip leading zero)
+                    hour = et_dt.strftime('%I').lstrip('0') or '12'
+                    minute = et_dt.strftime('%M')
+                    am_pm = et_dt.strftime('%p')
+                    game_time = f"{hour}:{minute} {am_pm}"  # e.g., "6:00 PM"
+                except Exception:
+                    try:
+                        # Fallback: parse UTC datetime
+                        from datetime import timedelta
+                        utc_dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        if utc_dt.hour < 5:
+                            game_dt = utc_dt - timedelta(days=1)
+                        else:
+                            game_dt = utc_dt
+                        hour = game_dt.strftime('%I').lstrip('0') or '12'
+                        minute = game_dt.strftime('%M')
+                        am_pm = game_dt.strftime('%p')
+                        game_time = f"{hour}:{minute} {am_pm}"
+                    except Exception:
+                        pass
+                
+                # Create TodaysGame for both teams (using normalized ESPN Fantasy abbreviations)
+                games_map[home_team_abbr] = TodaysGame(
+                    opponent=away_team_abbr,
+                    time=game_time,
+                    home=True
+                )
+                games_map[away_team_abbr] = TodaysGame(
+                    opponent=home_team_abbr,
+                    time=game_time,
+                    home=False
+                )
+                
+                # Map NBA API team IDs to ESPN proTeamId using abbreviation lookup
+                if home_team_id_nba and home_team_abbr in nba_abbrev_to_espn_id:
+                    espn_id = nba_abbrev_to_espn_id[home_team_abbr]
+                    team_id_to_abbrev[espn_id] = home_team_abbr
+                if away_team_id_nba and away_team_abbr in nba_abbrev_to_espn_id:
+                    espn_id = nba_abbrev_to_espn_id[away_team_abbr]
+                    team_id_to_abbrev[espn_id] = away_team_abbr
+        except Exception as e:
+            logger.debug(f"Error parsing today's games: {e}")
+        
+        return games_map, team_id_to_abbrev
+    
+    @staticmethod
+    def _get_pro_team_id_to_abbrev() -> dict[int, str]:
+        """Get mapping of ESPN Fantasy proTeamId to team abbreviation.
+        
+        This mapping is based on ESPN Fantasy Basketball's proTeamId system.
+        Note: ESPN Fantasy uses different team IDs than the NBA API, but the
+        abbreviations are consistent (with a few exceptions like GSW vs GS).
+        
+        Returns:
+            Dictionary mapping ESPN Fantasy proTeamId to team abbreviation
+        """
+        # ESPN Fantasy proTeamId to abbreviation mapping
+        # Based on exploration of ESPN Fantasy API and NBA API comparison
+        return {
+            1: "ATL",  # Atlanta Hawks
+            2: "BOS",  # Boston Celtics
+            3: "BKN",  # Brooklyn Nets (ESPN ID 3, NBA API ID 17)
+            4: "CHA",  # Charlotte Hornets (ESPN ID 4, NBA API ID 30)
+            5: "CHI",  # Chicago Bulls (ESPN ID 5, NBA API ID 4)
+            6: "DAL",  # Dallas Mavericks
+            7: "DEN",  # Denver Nuggets
+            8: "DET",  # Detroit Pistons
+            9: "CLE",  # Cleveland Cavaliers
+            10: "GSW",  # Golden State Warriors (ESPN abbrev GSW, NBA API abbrev GS)
+            11: "HOU",  # Houston Rockets (ESPN ID 11, NBA API ID 10)
+            12: "IND",  # Indiana Pacers (ESPN ID 12, NBA API ID 11)
+            13: "LAC",  # LA Clippers (ESPN ID 13, NBA API ID 12)
+            14: "MIA",  # Miami Heat
+            15: "LAL",  # Los Angeles Lakers
+            16: "MIN",  # Minnesota Timberwolves
+            17: "MIL",  # Milwaukee Bucks (ESPN ID 17, NBA API ID 15)
+            18: "MEM",  # Memphis Grizzlies
+            19: "NO",   # New Orleans Pelicans (ESPN ID 19, NBA API ID 3)
+            20: "NY",   # New York Knicks (ESPN ID 20, NBA API ID 18)
+            21: "OKC",  # Oklahoma City Thunder (ESPN ID 21, NBA API ID 25)
+            22: "ORL",  # Orlando Magic (ESPN ID 22, NBA API ID 19)
+            23: "PHI",  # Philadelphia 76ers (ESPN ID 23, NBA API ID 20)
+            24: "PHX",  # Phoenix Suns (ESPN ID 24, NBA API ID 21)
+            25: "POR",  # Portland Trail Blazers (ESPN ID 25, NBA API ID 22)
+            26: "SAC",  # Sacramento Kings (ESPN ID 26, NBA API ID 23)
+            27: "SA",   # San Antonio Spurs (ESPN ID 27, NBA API ID 24)
+            28: "TOR",  # Toronto Raptors
+            29: "UTA",  # Utah Jazz (ESPN abbrev UTA, NBA API abbrev UTAH)
+            30: "WAS",  # Washington Wizards (ESPN abbrev WAS, NBA API abbrev WSH)
+        }
+    
+    @staticmethod
     def _get_position_id_mapping() -> dict[int, str]:
         """Get mapping of ESPN position IDs to human-readable position names.
         
-        Position IDs are a subset of lineup slot IDs (0-6 only).
-        Uses the same mapping as lineup slots for consistency.
+        ESPN uses 1-based indexing for defaultPositionId:
+        1=PG, 2=SG, 3=SF, 4=PF, 5=C
+        
+        Note: eligibleSlots uses 0-based indexing (0=PG, 1=SG, etc.)
         
         Returns:
             Dictionary mapping position ID integers to position names
         """
-        slot_mapping = ESPNFantasyBasketballClient._get_lineup_slot_id_mapping()
-        # Return only position-related slots (0-6)
-        return {k: v for k, v in slot_mapping.items() if k <= 6}
+        return {
+            1: "PG",  # Point Guard
+            2: "SG",  # Shooting Guard
+            3: "SF",  # Small Forward
+            4: "PF",  # Power Forward
+            5: "C",   # Center
+            6: "G",   # Guard (PG or SG)
+            7: "F",   # Forward (SF or PF)
+        }
     
     def _get_scoring_stat_ids(self, league_settings: LeagueSettings | None = None) -> set[int]:
         """Get set of stat IDs that are scoring categories for this league.
@@ -1677,6 +1971,11 @@ class ESPNFantasyBasketballClient:
                 continue
 
             # Create Player object
+            # Use whatever the API returns directly
+            pro_team_id = player_info.get("proTeamId")
+            pro_team_abbrev = player_info.get("proTeamAbbrev")
+            pro_team_name = player_info.get("proTeamName")
+            
             # Map position ID to name
             position_mapping = self._get_position_id_mapping()
             default_position_id = player_info["defaultPositionId"]
@@ -1685,6 +1984,9 @@ class ESPNFantasyBasketballClient:
             player = Player(
                 id=player_info["id"],
                 fullName=player_info.get("fullName", ""),
+                proTeamId=pro_team_id,
+                proTeamAbbrev=pro_team_abbrev,
+                proTeamName=pro_team_name,
                 defaultPositionId=default_position_id,
                 defaultPosition=default_position,
             )
