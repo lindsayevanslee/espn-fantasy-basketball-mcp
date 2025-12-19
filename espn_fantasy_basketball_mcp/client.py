@@ -344,16 +344,12 @@ class ESPNFantasyBasketballClient:
                     stats_data = self._parse_player_stats(player_data.get("stats", []))
                     
                     pro_team_id = player_data.get("proTeamId")
-                    # Use whatever the API returns directly, or fallback to mapping
-                    pro_team_abbrev = player_data.get("proTeamAbbrev")
-                    if not pro_team_abbrev:
-                        # Try mapping from today's games first (if team is playing today)
-                        if pro_team_id and pro_team_id in team_id_to_abbrev:
-                            pro_team_abbrev = team_id_to_abbrev[pro_team_id]
-                        # Fallback to static mapping if still not found
-                        elif pro_team_id:
-                            pro_team_id_mapping = self._get_pro_team_id_to_abbrev()
-                            pro_team_abbrev = pro_team_id_mapping.get(pro_team_id)
+                    # Use consistent fallback logic for team abbreviation
+                    pro_team_abbrev = self._resolve_pro_team_abbrev(
+                        pro_team_id,
+                        player_data.get("proTeamAbbrev"),
+                        team_id_to_abbrev
+                    )
                     pro_team_name = player_data.get("proTeamName")
                     
                     # Map position and slot IDs to names
@@ -665,9 +661,12 @@ class ESPNFantasyBasketballClient:
                             
                             break  # Found season stats, stop looking
             
-            # Use whatever the API returns directly
+            # Use consistent fallback logic for team abbreviation
             pro_team_id = player_info.get("proTeamId")
-            pro_team_abbrev = player_info.get("proTeamAbbrev")
+            pro_team_abbrev = self._resolve_pro_team_abbrev(
+                pro_team_id,
+                player_info.get("proTeamAbbrev")
+            )
             pro_team_name = player_info.get("proTeamName")
             
             # Map position and slot IDs to names
@@ -1085,10 +1084,12 @@ class ESPNFantasyBasketballClient:
             if player_id in drafted_players:
                 continue
 
-            # Map NBA team ID to name/abbreviation
+            # Use consistent fallback logic for team abbreviation
             pro_team_id = player_data.get("proTeamId")
-            # Use whatever the API returns directly, or None if not available
-            pro_team_abbrev = player_data.get("proTeamAbbrev")
+            pro_team_abbrev = self._resolve_pro_team_abbrev(
+                pro_team_id,
+                player_data.get("proTeamAbbrev")
+            )
             pro_team_name = player_data.get("proTeamName")
             
             # Map position and slot IDs to names
@@ -1615,46 +1616,84 @@ class ESPNFantasyBasketballClient:
         """Get mapping of ESPN Fantasy proTeamId to team abbreviation.
         
         This mapping is based on ESPN Fantasy Basketball's proTeamId system.
+        It was manually validated by checking which players map to which codes and checking against the ESPN Fantasy UI.
         Note: ESPN Fantasy uses different team IDs than the NBA API, but the
         abbreviations are consistent (with a few exceptions like GSW vs GS).
         
         Returns:
             Dictionary mapping ESPN Fantasy proTeamId to team abbreviation
         """
-        # ESPN Fantasy proTeamId to abbreviation mapping
-        # Based on exploration of ESPN Fantasy API and NBA API comparison
+
         return {
             1: "ATL",  # Atlanta Hawks
             2: "BOS",  # Boston Celtics
-            3: "BKN",  # Brooklyn Nets (ESPN ID 3, NBA API ID 17)
-            4: "CHA",  # Charlotte Hornets (ESPN ID 4, NBA API ID 30)
-            5: "CHI",  # Chicago Bulls (ESPN ID 5, NBA API ID 4)
+            3: "NO",  # Brooklyn Nets 
+            4: "CHI",  # Chicago Bulls 
+            5: "CLE",  # Cleveland Cavaliers 
             6: "DAL",  # Dallas Mavericks
             7: "DEN",  # Denver Nuggets
             8: "DET",  # Detroit Pistons
-            9: "CLE",  # Cleveland Cavaliers
-            10: "GSW",  # Golden State Warriors (ESPN abbrev GSW, NBA API abbrev GS)
-            11: "HOU",  # Houston Rockets (ESPN ID 11, NBA API ID 10)
-            12: "IND",  # Indiana Pacers (ESPN ID 12, NBA API ID 11)
-            13: "LAC",  # LA Clippers (ESPN ID 13, NBA API ID 12)
-            14: "MIA",  # Miami Heat
-            15: "LAL",  # Los Angeles Lakers
+            9: "GS",  # Golden State Warriors 
+            10: "HOU",  # Houston Rockets 
+            11: "IND",  # Indiana Pacers 
+            12: "LAC",  # LA Clippers 
+            13: "LAL",  # Los Angeles Lakers 
+            14: "MIA",  # Miami Heat 
+            15: "MIL",  # Milwaukee Bucks
             16: "MIN",  # Minnesota Timberwolves
-            17: "MIL",  # Milwaukee Bucks (ESPN ID 17, NBA API ID 15)
-            18: "MEM",  # Memphis Grizzlies
-            19: "NO",   # New Orleans Pelicans (ESPN ID 19, NBA API ID 3)
-            20: "NY",   # New York Knicks (ESPN ID 20, NBA API ID 18)
-            21: "OKC",  # Oklahoma City Thunder (ESPN ID 21, NBA API ID 25)
-            22: "ORL",  # Orlando Magic (ESPN ID 22, NBA API ID 19)
-            23: "PHI",  # Philadelphia 76ers (ESPN ID 23, NBA API ID 20)
-            24: "PHX",  # Phoenix Suns (ESPN ID 24, NBA API ID 21)
-            25: "POR",  # Portland Trail Blazers (ESPN ID 25, NBA API ID 22)
-            26: "SAC",  # Sacramento Kings (ESPN ID 26, NBA API ID 23)
-            27: "SA",   # San Antonio Spurs (ESPN ID 27, NBA API ID 24)
+            17: "BKN",  # Brooklyn Nets 
+            18: "NY",  # New York Knicks
+            19: "ORL",   # Orlando Magic 
+            20: "PHI",   # Philadelphia 76ers 
+            21: "PHX",  # Phoenix Suns 
+            22: "POR",  # Portland Trail Blazers 
+            23: "SAC",  # Sacramento Kings 
+            24: "SA",  # San Antonio Spurs 
+            25: "OKC",  # Oklahoma City Thunder 
+            26: "UTAH",  # Utah Jazz 
+            27: "WAS",   # Washington Wizards 
             28: "TOR",  # Toronto Raptors
-            29: "UTA",  # Utah Jazz (ESPN abbrev UTA, NBA API abbrev UTAH)
-            30: "WAS",  # Washington Wizards (ESPN abbrev WAS, NBA API abbrev WSH)
+            29: "MEM",  # Memphis Grizzlies 
+            30: "CHA",  # Charlotte Hornets 
         }
+    
+    def _resolve_pro_team_abbrev(
+        self, 
+        pro_team_id: int | None, 
+        api_pro_team_abbrev: str | None = None,
+        team_id_to_abbrev: dict[int, str] | None = None
+    ) -> str | None:
+        """Resolve proTeamAbbrev with consistent fallback logic.
+        
+        This ensures consistent team abbreviation resolution across all player sources.
+        Priority:
+        1. Use API-provided abbreviation if available
+        2. Use team_id_to_abbrev mapping (from today's games) if available
+        3. Use static mapping from proTeamId
+        
+        Args:
+            pro_team_id: ESPN Fantasy proTeamId
+            api_pro_team_abbrev: Abbreviation returned by API (if any)
+            team_id_to_abbrev: Optional mapping from today's games (proTeamId -> abbrev)
+            
+        Returns:
+            Team abbreviation or None if proTeamId is invalid
+        """
+        # Use API value if available
+        if api_pro_team_abbrev:
+            return api_pro_team_abbrev
+        
+        # If no proTeamId, can't resolve
+        if not pro_team_id:
+            return None
+        
+        # Try today's games mapping first (if provided)
+        if team_id_to_abbrev and pro_team_id in team_id_to_abbrev:
+            return team_id_to_abbrev[pro_team_id]
+        
+        # Fallback to static mapping
+        pro_team_id_mapping = self._get_pro_team_id_to_abbrev()
+        return pro_team_id_mapping.get(pro_team_id)
     
     @staticmethod
     def _get_position_id_mapping() -> dict[int, str]:
@@ -1971,9 +2010,12 @@ class ESPNFantasyBasketballClient:
                 continue
 
             # Create Player object
-            # Use whatever the API returns directly
+            # Use consistent fallback logic for team abbreviation
             pro_team_id = player_info.get("proTeamId")
-            pro_team_abbrev = player_info.get("proTeamAbbrev")
+            pro_team_abbrev = self._resolve_pro_team_abbrev(
+                pro_team_id,
+                player_info.get("proTeamAbbrev")
+            )
             pro_team_name = player_info.get("proTeamName")
             
             # Map position ID to name
