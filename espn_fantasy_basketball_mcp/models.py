@@ -290,6 +290,7 @@ class DraftRecommendation(BaseModel):
 class ScoringItem(BaseModel):
     """A single scoring category."""
     statId: int
+    categoryName: str | None = None  # Human-readable category name (e.g., "points", "rebounds", "assists")
     points: float
     isReverseItem: bool = False
     pointsOverrides: dict[str, Any] = {}

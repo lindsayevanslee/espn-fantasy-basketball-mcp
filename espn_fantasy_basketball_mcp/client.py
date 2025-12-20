@@ -173,15 +173,22 @@ class ESPNFantasyBasketballClient:
 
         # Parse scoring settings
         scoring_data = settings_data.get("scoringSettings", {})
-        scoring_items = [
-            ScoringItem(
-                statId=item.get("statId", 0),
-                points=item.get("points", 0.0),
-                isReverseItem=item.get("isReverseItem", False),
-                pointsOverrides=item.get("pointsOverrides", {}),
+        # Get stat ID mapping for human-readable category names
+        stat_mapping = self._get_stat_id_mapping()
+        scoring_items = []
+        for item in scoring_data.get("scoringItems", []):
+            stat_id = item.get("statId", 0)
+            # Map stat ID to human-readable category name
+            category_name = stat_mapping.get(str(stat_id), f"stat_{stat_id}")
+            scoring_items.append(
+                ScoringItem(
+                    statId=stat_id,
+                    categoryName=category_name,
+                    points=item.get("points", 0.0),
+                    isReverseItem=item.get("isReverseItem", False),
+                    pointsOverrides=item.get("pointsOverrides", {}),
+                )
             )
-            for item in scoring_data.get("scoringItems", [])
-        ]
         scoring_settings = ScoringSettings(
             scoringType=scoring_data.get("scoringType", "H2H_CATEGORY"),
             scoringItems=scoring_items,
