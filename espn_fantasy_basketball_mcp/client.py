@@ -247,14 +247,15 @@ class ESPNFantasyBasketballClient:
         deadline_date = trade_data.get("deadlineDate")
         deadline_date_iso = None
         if deadline_date:
-            # Convert epoch timestamp (milliseconds) to ISO 8601 datetime string with timezone
+            # Convert epoch timestamp (milliseconds) to ISO 8601 datetime string in ET timezone
             from datetime import datetime, timezone
             try:
                 # ESPN uses milliseconds, so divide by 1000
-                # Use UTC timezone for consistency (ESPN timestamps are typically UTC)
                 dt = datetime.fromtimestamp(deadline_date / 1000, tz=timezone.utc)
-                # Format as ISO 8601 with timezone: YYYY-MM-DDTHH:MM:SS+00:00
-                deadline_date_iso = dt.isoformat()
+                # Convert to ET (matching acquisitionDateISO and game time conversions)
+                from zoneinfo import ZoneInfo
+                et_dt = dt.astimezone(ZoneInfo('America/New_York'))
+                deadline_date_iso = et_dt.isoformat()
             except (ValueError, OSError) as e:
                 logger.warning(f"Could not parse deadline date {deadline_date}: {e}")
         trade_settings = TradeSettings(
@@ -431,12 +432,28 @@ class ESPNFantasyBasketballClient:
                     # Lookup by abbreviation (which we've populated above)
                     todays_game = todays_games_cache.get(pro_team_abbrev) if pro_team_abbrev else None
                     
+                    # Convert acquisitionDate to ISO format if present
+                    acquisition_date = entry.get("acquisitionDate")
+                    acquisition_date_iso = None
+                    if acquisition_date:
+                        from datetime import datetime, timezone
+                        try:
+                            # ESPN uses milliseconds, so divide by 1000
+                            dt = datetime.fromtimestamp(acquisition_date / 1000, tz=timezone.utc)
+                            # Convert to ET (matching game time conversions)
+                            from zoneinfo import ZoneInfo
+                            et_dt = dt.astimezone(ZoneInfo('America/New_York'))
+                            acquisition_date_iso = et_dt.isoformat()
+                        except (ValueError, OSError) as e:
+                            logger.warning(f"Could not parse acquisition date {acquisition_date}: {e}")
+                    
                     roster_entry = RosterEntry(
                         playerId=entry["playerId"],
                         playerPoolEntry=player_pool_entry,
                         lineupSlotId=lineup_slot_id,
                         lineupSlotName=lineup_slot_name,
-                        acquisitionDate=entry.get("acquisitionDate"),
+                        acquisitionDate=acquisition_date,
+                        acquisitionDateISO=acquisition_date_iso,
                         acquisitionType=entry.get("acquisitionType"),
                         injuryStatus=injury_status,
                         todaysGame=todays_game,
@@ -503,6 +520,7 @@ class ESPNFantasyBasketballClient:
                 lineupSlotId=entry.lineupSlotId,
                 lineupSlotName=entry.lineupSlotName,  # Preserve slot name
                 acquisitionDate=entry.acquisitionDate,
+                acquisitionDateISO=entry.acquisitionDateISO,  # Preserve ISO date
                 acquisitionType=entry.acquisitionType,
                 injuryStatus=entry.injuryStatus,
             )
@@ -1619,32 +1637,25 @@ class ESPNFantasyBasketballClient:
                 home_team_abbr = self._normalize_nba_abbrev(home_team_abbr_nba)
                 away_team_abbr = self._normalize_nba_abbrev(away_team_abbr_nba)
                 
-                # Extract game time
+                # Extract game time and ISO datetime
                 game_time = None
+                game_time_iso = None
                 date_str = event.get("date", "")
-                try:
-                    from datetime import datetime, timedelta
-                    from zoneinfo import ZoneInfo
-                    utc_dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                    et_dt = utc_dt.astimezone(ZoneInfo('America/New_York'))
-                    # Format time (%-I doesn't work on all platforms, use I and strip leading zero)
-                    hour = et_dt.strftime('%I').lstrip('0') or '12'
-                    minute = et_dt.strftime('%M')
-                    am_pm = et_dt.strftime('%p')
-                    game_time = f"{hour}:{minute} {am_pm}"  # e.g., "6:00 PM"
-                except Exception:
+                if date_str:
                     try:
-                        # Fallback: parse UTC datetime
-                        from datetime import timedelta
+                        from datetime import datetime
+                        from zoneinfo import ZoneInfo
+                        # Parse UTC datetime
                         utc_dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                        if utc_dt.hour < 5:
-                            game_dt = utc_dt - timedelta(days=1)
-                        else:
-                            game_dt = utc_dt
-                        hour = game_dt.strftime('%I').lstrip('0') or '12'
-                        minute = game_dt.strftime('%M')
-                        am_pm = game_dt.strftime('%p')
-                        game_time = f"{hour}:{minute} {am_pm}"
+                        # Convert to ET timezone
+                        et_dt = utc_dt.astimezone(ZoneInfo('America/New_York'))
+                        # Format human-readable time
+                        hour = et_dt.strftime('%I').lstrip('0') or '12'
+                        minute = et_dt.strftime('%M')
+                        am_pm = et_dt.strftime('%p')
+                        game_time = f"{hour}:{minute} {am_pm}"  # e.g., "6:00 PM"
+                        # Format ISO datetime (already in ET timezone)
+                        game_time_iso = et_dt.isoformat()  # e.g., "2026-02-28T18:00:00-05:00"
                     except Exception:
                         pass
                 
@@ -1652,11 +1663,13 @@ class ESPNFantasyBasketballClient:
                 games_map[home_team_abbr] = TodaysGame(
                     opponent=away_team_abbr,
                     time=game_time,
+                    timeISO=game_time_iso,
                     home=True
                 )
                 games_map[away_team_abbr] = TodaysGame(
                     opponent=home_team_abbr,
                     time=game_time,
+                    timeISO=game_time_iso,
                     home=False
                 )
                 

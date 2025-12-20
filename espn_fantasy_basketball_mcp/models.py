@@ -128,6 +128,7 @@ class TodaysGame(BaseModel):
     """Information about a player's game today."""
     opponent: str | None = None  # Opponent team abbreviation (e.g., "DET")
     time: str | None = None  # Game time (e.g., "6:00 PM")
+    timeISO: str | None = None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T18:00:00-05:00")
     home: bool | None = None  # True if home game, False if away
 
 
@@ -136,7 +137,8 @@ class RosterEntry(BaseModel):
     playerPoolEntry: PlayerPoolEntry
     lineupSlotId: int
     lineupSlotName: str | None = None  # Human-readable slot name (e.g., "PG", "BENCH", "IR")
-    acquisitionDate: int | None = None
+    acquisitionDate: int | None = None  # Epoch timestamp in milliseconds
+    acquisitionDateISO: str | None = None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T23:00:00-05:00")
     acquisitionType: str | None = None
     injuryStatus: str | None = None
     todaysGame: TodaysGame | None = None  # Today's game info if player has a game
