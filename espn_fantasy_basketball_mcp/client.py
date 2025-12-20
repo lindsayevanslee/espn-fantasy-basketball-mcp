@@ -1,6 +1,7 @@
 """ESPN Fantasy Basketball API client."""
 
 import logging
+import os
 from typing import Any
 
 import httpx
@@ -91,6 +92,41 @@ class ESPNFantasyBasketballClient:
         """
         if value is not None and (not isinstance(value, int) or value <= 0):
             raise ValueError(f"Invalid {name}: {value}. Must be a positive integer.")
+
+    @staticmethod
+    def _get_timezone() -> str:
+        """Get timezone from MY_TIMEZONE environment variable.
+
+        Returns:
+            Timezone string (defaults to 'America/New_York' if not set)
+        """
+        return os.getenv("MY_TIMEZONE", "America/New_York")
+
+    def _convert_utc_to_timezone_iso(self, utc_date_str: str) -> str:
+        """Convert UTC date string to ISO format in the configured timezone.
+
+        Args:
+            utc_date_str: UTC date string (e.g., "2025-01-15T20:00:00Z")
+
+        Returns:
+            ISO formatted datetime string in the configured timezone, or original string if conversion fails
+        """
+        if not utc_date_str:
+            return utc_date_str
+        
+        try:
+            from datetime import datetime, timezone
+            from zoneinfo import ZoneInfo
+            # Parse UTC datetime (API returns format like "2025-01-15T20:00:00Z")
+            utc_dt = datetime.fromisoformat(utc_date_str.replace('Z', '+00:00'))
+            # Convert to timezone specified by MY_TIMEZONE
+            tz_dt = utc_dt.astimezone(ZoneInfo(self._get_timezone()))
+            # Format as ISO datetime string
+            return tz_dt.isoformat()
+        except (ValueError, OSError) as e:
+            logger.warning(f"Could not parse date {utc_date_str}: {e}")
+            # Fallback to original date string
+            return utc_date_str
 
     async def _make_request(self, url: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
         """Make HTTP request to ESPN API.
@@ -254,7 +290,7 @@ class ESPNFantasyBasketballClient:
                 dt = datetime.fromtimestamp(deadline_date / 1000, tz=timezone.utc)
                 # Convert to ET (matching acquisitionDateISO and game time conversions)
                 from zoneinfo import ZoneInfo
-                et_dt = dt.astimezone(ZoneInfo('America/New_York'))
+                et_dt = dt.astimezone(ZoneInfo(self._get_timezone()))
                 deadline_date_iso = et_dt.isoformat()
             except (ValueError, OSError) as e:
                 logger.warning(f"Could not parse deadline date {deadline_date}: {e}")
@@ -442,7 +478,7 @@ class ESPNFantasyBasketballClient:
                             dt = datetime.fromtimestamp(acquisition_date / 1000, tz=timezone.utc)
                             # Convert to ET (matching game time conversions)
                             from zoneinfo import ZoneInfo
-                            et_dt = dt.astimezone(ZoneInfo('America/New_York'))
+                            et_dt = dt.astimezone(ZoneInfo(self._get_timezone()))
                             acquisition_date_iso = et_dt.isoformat()
                         except (ValueError, OSError) as e:
                             logger.warning(f"Could not parse acquisition date {acquisition_date}: {e}")
@@ -1033,8 +1069,12 @@ class ESPNFantasyBasketballClient:
 
             games = []
             for event in data.get("events", []):
+                # Convert UTC date to timezone specified by MY_TIMEZONE
+                date_str = event.get("date", "")
+                date_iso = self._convert_utc_to_timezone_iso(date_str)
+                
                 game = NBAGame(
-                    id=event["id"], date=event["date"], competitions=event["competitions"]
+                    id=event["id"], date=date_iso, competitions=event["competitions"]
                 )
                 games.append(game)
 
@@ -1048,8 +1088,12 @@ class ESPNFantasyBasketballClient:
                     data = await self._make_request(url, {})
                     games = []
                     for event in data.get("events", []):
+                        # Convert UTC date to timezone specified by MY_TIMEZONE
+                        date_str = event.get("date", "")
+                        date_iso = self._convert_utc_to_timezone_iso(date_str)
+                        
                         game = NBAGame(
-                            id=event["id"], date=event["date"], competitions=event["competitions"]
+                            id=event["id"], date=date_iso, competitions=event["competitions"]
                         )
                         games.append(game)
                     logger.warning(f"NBA API doesn't accept explicit dates. Returned today's games instead of {date}")
@@ -1648,7 +1692,7 @@ class ESPNFantasyBasketballClient:
                         # Parse UTC datetime
                         utc_dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
                         # Convert to ET timezone
-                        et_dt = utc_dt.astimezone(ZoneInfo('America/New_York'))
+                        et_dt = utc_dt.astimezone(ZoneInfo(self._get_timezone()))
                         # Format human-readable time
                         hour = et_dt.strftime('%I').lstrip('0') or '12'
                         minute = et_dt.strftime('%M')
@@ -2340,7 +2384,7 @@ class ESPNFantasyBasketballClient:
                 try:
                     from zoneinfo import ZoneInfo
                     utc_dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                    et_dt = utc_dt.astimezone(ZoneInfo('America/New_York'))
+                    et_dt = utc_dt.astimezone(ZoneInfo(self._get_timezone()))
                     game_date_str = et_dt.strftime('%Y-%m-%d')
                     game_dt = datetime.fromisoformat(game_date_str)
                 except (ImportError, ValueError):
