@@ -319,6 +319,7 @@ class ScheduleSettings(BaseModel):
 class RosterSettings(BaseModel):
     """League roster configuration."""
     lineupSlotCounts: dict[str, int]  # Maps slot ID to count
+    lineupSlotNames: dict[str, str] | None = None  # Maps slot ID to human-readable slot name (e.g., "0" -> "PG", "12" -> "BENCH")
     positionLimits: dict[str, int]  # Maps position ID to max count (-1 = unlimited)
     lineupLocktimeType: str  # When lineups lock
     rosterLocktimeType: str | None = None

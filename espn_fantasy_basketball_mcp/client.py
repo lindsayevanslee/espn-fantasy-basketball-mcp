@@ -211,8 +211,17 @@ class ESPNFantasyBasketballClient:
 
         # Parse roster settings
         roster_data = settings_data.get("rosterSettings", {})
+        # Get slot ID mapping for human-readable slot names
+        slot_mapping = self._get_lineup_slot_id_mapping()
+        lineup_slot_counts = {str(k): v for k, v in roster_data.get("lineupSlotCounts", {}).items()}
+        # Map slot IDs to human-readable names
+        lineup_slot_names = {
+            slot_id: slot_mapping.get(int(slot_id), f"SLOT_{slot_id}")
+            for slot_id in lineup_slot_counts.keys()
+        }
         roster_settings = RosterSettings(
-            lineupSlotCounts={str(k): v for k, v in roster_data.get("lineupSlotCounts", {}).items()},
+            lineupSlotCounts=lineup_slot_counts,
+            lineupSlotNames=lineup_slot_names if lineup_slot_names else None,
             positionLimits={str(k): v for k, v in roster_data.get("positionLimits", {}).items()},
             lineupLocktimeType=roster_data.get("lineupLocktimeType", "FIRSTGAME_WEEKLY"),
             rosterLocktimeType=roster_data.get("rosterLocktimeType"),
