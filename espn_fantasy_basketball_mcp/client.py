@@ -932,6 +932,7 @@ class ESPNFantasyBasketballClient:
             return None
         
         # Get rosters for both teams using the actual scoring period
+        # Reuse get_team_roster to avoid duplicating roster fetching logic
         # get_team_roster expects scoringPeriodId, not matchupPeriodId
         your_roster = await self.get_team_roster(team_id, scoring_period=current_scoring_period)
         opponent_roster = await self.get_team_roster(opponent_team_data.teamId, scoring_period=current_scoring_period)
@@ -1261,18 +1262,37 @@ class ESPNFantasyBasketballClient:
             "recommendation": f"You have ${team_summary.remainingBudget} for {13 - team_summary.playersCount} more players",
         }
 
-    async def get_player_stats(self, player_id: int, timeframe: str = "season") -> PlayerStats:
-        """Get comprehensive player statistics for specified timeframe.
+    async def get_player_stats(
+        self, 
+        player_id: int | list[int], 
+        timeframe: str = "season"
+    ) -> PlayerStats | list[PlayerStats]:
+        """Get comprehensive player statistics for one or more players.
+        
+        Can be called with a single player ID (returns PlayerStats) or a list of 
+        player IDs (returns list[PlayerStats]). Using a list is more efficient as 
+        it makes a single API request for all players.
 
         Args:
-            player_id: ESPN player ID
+            player_id: ESPN player ID (int) or list of player IDs (list[int])
             timeframe: One of "season", "projections", "last_7", "last_15", "last_30"
 
+        Returns:
+            PlayerStats if single ID provided, list[PlayerStats] if list provided
+
         Raises:
-            ValueError: If player_id or timeframe is invalid, or player not found
+            ValueError: If player_id or timeframe is invalid, or player(s) not found
         """
-        # Validate inputs
-        self._validate_positive_int(player_id, "player_id")
+        # Normalize to list for processing
+        is_single = isinstance(player_id, int)
+        player_ids = [player_id] if is_single else player_id
+        
+        if not player_ids:
+            raise ValueError("player_id cannot be empty")
+        
+        # Validate all player IDs
+        for pid in player_ids:
+            self._validate_positive_int(pid, "player_id")
 
         # Map timeframe to ESPN stat period ID prefix
         timeframe_map = {
@@ -1289,10 +1309,10 @@ class ESPNFantasyBasketballClient:
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         stat_period = timeframe_map[timeframe]
 
-        # Build filter to request specific player with stats
+        # Build filter to request players with stats
         filter_dict = {
             "players": {
-                "filterIds": {"value": [player_id]},
+                "filterIds": {"value": player_ids},
                 "filterStatsForTopScoringPeriodIds": {
                     "value": 5,
                     "additionalValue": [stat_period]
@@ -1306,42 +1326,53 @@ class ESPNFantasyBasketballClient:
 
         data = await self._make_request(url, params, headers)
 
-        # Find the player in the response
-        player_data = None
+        # Process all players returned in the response
+        results = []
+        found_player_ids = set()
+        
         for player_entry in data.get("players", []):
-            if player_entry.get("player", {}).get("id") == player_id:
-                player_data = player_entry
-                break
-        
-        if not player_data:
-            logger.warning(f"Player with ID {player_id} not found")
-            raise ValueError("Player not found")
+            player_info = player_entry.get("player", {})
+            pid = player_info.get("id")
+            
+            if pid not in player_ids:
+                continue  # Skip players not in our requested list
+            
+            found_player_ids.add(pid)
+            
+            # Parse stats for the requested timeframe
+            stats_dict = self._parse_player_stats_for_timeframe(
+                player_info.get("stats", []), 
+                timeframe
+            )
 
-        player_info = player_data.get("player", {})
+            results.append(PlayerStats(
+                playerId=pid,
+                playerName=player_info.get("fullName", "Unknown Player"),
+                timeframe=timeframe,
+                gamesPlayed=stats_dict.get("gamesPlayed"),
+                minutes=stats_dict.get("minutes"),
+                points=stats_dict.get("points"),
+                rebounds=stats_dict.get("rebounds"),
+                assists=stats_dict.get("assists"),
+                steals=stats_dict.get("steals"),
+                blocks=stats_dict.get("blocks"),
+                threePointMade=stats_dict.get("threes"),
+                turnovers=stats_dict.get("turnovers"),
+                fieldGoalPercentage=stats_dict.get("fg_pct"),
+                freeThrowPercentage=stats_dict.get("ft_pct"),
+                fantasyPoints=stats_dict.get("fantasyAvg"),
+            ))
         
-        # Parse stats for the requested timeframe
-        stats_dict = self._parse_player_stats_for_timeframe(
-            player_info.get("stats", []), 
-            timeframe
-        )
-
-        return PlayerStats(
-            playerId=player_id,
-            playerName=player_info.get("fullName", "Unknown Player"),
-            timeframe=timeframe,
-            gamesPlayed=stats_dict.get("gamesPlayed"),
-            minutes=stats_dict.get("minutes"),
-            points=stats_dict.get("points"),
-            rebounds=stats_dict.get("rebounds"),
-            assists=stats_dict.get("assists"),
-            steals=stats_dict.get("steals"),
-            blocks=stats_dict.get("blocks"),
-            threePointMade=stats_dict.get("threes"),
-            turnovers=stats_dict.get("turnovers"),
-            fieldGoalPercentage=stats_dict.get("fg_pct"),
-            freeThrowPercentage=stats_dict.get("ft_pct"),
-            fantasyPoints=stats_dict.get("fantasyAvg"),
-        )
+        # Log warning for any players not found
+        missing_ids = set(player_ids) - found_player_ids
+        if missing_ids:
+            logger.warning(f"Players with IDs {missing_ids} not found in API response")
+        
+        if not results:
+            raise ValueError("No players found")
+        
+        # Return single PlayerStats if single ID was provided, otherwise return list
+        return results[0] if is_single else results
 
     def _parse_player_stats_for_timeframe(
         self, stats_list: list[dict[str, Any]], timeframe: str
@@ -1831,15 +1862,14 @@ class ESPNFantasyBasketballClient:
                 "turnovers",
             ]
 
-        # Get stats for all players
-        players_stats = []
-        for player_id in player_ids:
-            try:
-                stats = await self.get_player_stats(player_id)
-                players_stats.append(stats)
-            except ValueError:
-                # Player not found, skip
-                continue
+        # Get stats for all players in a single API call
+        try:
+            players_stats = await self.get_player_stats(player_ids)
+            # Ensure we got a list (should always be the case when passing a list)
+            if not isinstance(players_stats, list):
+                players_stats = [players_stats]
+        except ValueError:
+            players_stats = []
 
         if len(players_stats) < 2:
             raise ValueError("Need at least 2 valid players to compare")

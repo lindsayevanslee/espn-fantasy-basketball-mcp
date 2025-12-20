@@ -435,17 +435,21 @@ async def get_available_players(
 
 @mcp.tool()
 async def get_player_stats(
-    player_id: int,
+    player_id: int | list[int],
     league_id: int | None = None,
     year: int | None = None,
     timeframe: str = "season",
     espn_s2: str | None = None,
     swid: str | None = None,
-) -> dict:
-    """Get comprehensive player statistics for specified timeframe.
+) -> dict | list[dict]:
+    """Get comprehensive player statistics for one or more players.
+    
+    Can be called with a single player ID (returns dict) or a list of player IDs 
+    (returns list[dict]). Using a list is more efficient as it makes a single 
+    API request for all players.
 
     Args:
-        player_id: ESPN player ID
+        player_id: ESPN player ID (int) or list of player IDs (list[int])
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         timeframe: Time period - "season", "projections", "last_7", "last_30"
@@ -453,12 +457,18 @@ async def get_player_stats(
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
-        Dictionary with comprehensive player statistics across all categories
+        Dictionary with player statistics if single ID provided, 
+        list of dictionaries if list provided
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     stats = await client.get_player_stats(player_id, timeframe)
-    return stats.model_dump()
+    
+    # Return single dict or list of dicts based on input type
+    if isinstance(player_id, int):
+        return stats.model_dump()
+    else:
+        return [s.model_dump() for s in stats]
 
 
 @mcp.tool()
