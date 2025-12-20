@@ -79,7 +79,8 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
         "ESPN_LEAGUE_ID": "your_league_id",
         "ESPN_TEAM_ID": "your_team_id",
         "ESPN_S2": "your_espn_s2_cookie",
-        "ESPN_SWID": "your_swid_cookie"
+        "ESPN_SWID": "your_swid_cookie",
+        "MY_TIMEZONE": "America/Chicago"
       }
     }
   }
@@ -90,6 +91,19 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 ```bash
 chmod 600 ~/Library/Application\ Support/Claude/claude_desktop_config.json
 ```
+
+### Environment Variables
+
+The following environment variables can be configured:
+
+- **ESPN_LEAGUE_ID**: Your ESPN Fantasy Basketball league ID (required)
+- **ESPN_TEAM_ID**: Your team ID within the league (optional, but recommended for draft tools)
+- **ESPN_YEAR**: Season year (optional, defaults to 2025)
+- **ESPN_S2**: ESPN authentication cookie for private leagues (required for private leagues)
+- **ESPN_SWID**: ESPN SWID cookie for private leagues (required for private leagues)
+- **MY_TIMEZONE**: Timezone for date/time conversions (optional, defaults to `America/New_York`)
+
+The `MY_TIMEZONE` variable controls how dates and times are converted from UTC in API responses. All ISO datetime strings (such as game times, acquisition dates, and trade deadlines) will be converted to this timezone. Use standard IANA timezone names (e.g., `America/Los_Angeles`, `America/Chicago`, `Europe/London`). If not set, the default is `America/New_York`.
 
 ## Draft Tools Usage
 
