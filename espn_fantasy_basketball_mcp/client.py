@@ -244,8 +244,22 @@ class ESPNFantasyBasketballClient:
 
         # Parse trade settings
         trade_data = settings_data.get("tradeSettings", {})
+        deadline_date = trade_data.get("deadlineDate")
+        deadline_date_iso = None
+        if deadline_date:
+            # Convert epoch timestamp (milliseconds) to ISO 8601 datetime string with timezone
+            from datetime import datetime, timezone
+            try:
+                # ESPN uses milliseconds, so divide by 1000
+                # Use UTC timezone for consistency (ESPN timestamps are typically UTC)
+                dt = datetime.fromtimestamp(deadline_date / 1000, tz=timezone.utc)
+                # Format as ISO 8601 with timezone: YYYY-MM-DDTHH:MM:SS+00:00
+                deadline_date_iso = dt.isoformat()
+            except (ValueError, OSError) as e:
+                logger.warning(f"Could not parse deadline date {deadline_date}: {e}")
         trade_settings = TradeSettings(
-            deadlineDate=trade_data.get("deadlineDate"),
+            deadlineDate=deadline_date,
+            deadlineDateISO=deadline_date_iso,
             vetoVotesRequired=trade_data.get("vetoVotesRequired", 0),
             revisionHours=trade_data.get("revisionHours", 24),
             max=trade_data.get("max", -1),

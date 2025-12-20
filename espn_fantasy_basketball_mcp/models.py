@@ -341,7 +341,8 @@ class AcquisitionSettings(BaseModel):
 
 class TradeSettings(BaseModel):
     """League trade configuration."""
-    deadlineDate: int | None = None  # Timestamp
+    deadlineDate: int | None = None  # Epoch timestamp in milliseconds
+    deadlineDateISO: str | None = None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T23:00:00-05:00")
     vetoVotesRequired: int
     revisionHours: int  # Hours to revise trade
     max: int = -1  # Max trades per season (-1 = unlimited)
