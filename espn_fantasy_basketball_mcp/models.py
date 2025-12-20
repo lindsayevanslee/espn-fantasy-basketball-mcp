@@ -88,6 +88,21 @@ class Team(BaseModel):
     record: TeamRecord | None = None
 
 
+class TeamSeasonStats(BaseModel):
+    """Team statistics aggregated across the entire season."""
+    
+    teamId: int
+    teamName: str | None = None
+    categoryScores: dict[str, float]  # Season totals for each scoring category
+    componentStats: dict[str, float] | None = None  # Component stats (FGM, FGA, FTM, FTA) totals
+    totalGamesPlayed: int | None = None  # Total games played across all matchups
+    matchupWins: int | None = None  # Number of matchup wins
+    matchupLosses: int | None = None  # Number of matchup losses
+    matchupTies: int | None = None  # Number of matchup ties
+    winPercentage: float | None = None  # Win percentage (wins / (wins + losses + ties))
+    gamesBack: float | None = None  # Games behind the league leader
+
+
 class PlayerOwnership(BaseModel):
     percentOwned: float | None = None
     percentChange: float | None = None

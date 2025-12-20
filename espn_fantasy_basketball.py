@@ -151,6 +151,45 @@ async def get_team_roster(
 
 
 @mcp.tool()
+async def get_team_season_stats(
+    team_id: int | None = None,
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+) -> dict:
+    """Get team statistics aggregated across the entire season.
+
+    This aggregates stats from all matchups in the season for a specific team.
+
+    Args:
+        team_id: Team ID to get season stats for (optional, uses ESPN_TEAM_ID env var)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        Dictionary with team season statistics including:
+        - categoryScores: Season totals for each scoring category
+        - componentStats: Component stats totals (FGM, FGA, FTM, FTA, etc.)
+        - totalGamesPlayed: Total games played across all matchups
+        - matchupWins: Number of matchup wins
+        - matchupLosses: Number of matchup losses
+        - matchupTies: Number of matchup ties
+        - winPercentage: Win percentage (wins / (wins + losses + ties))
+        - gamesBack: Games behind the league leader
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError("team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable.")
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    stats = await client.get_team_season_stats(team_id)
+    return stats.model_dump()
+
+
+@mcp.tool()
 async def get_free_agents(
     league_id: int | None = None,
     year: int | None = None,

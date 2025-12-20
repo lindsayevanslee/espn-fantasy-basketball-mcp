@@ -33,6 +33,7 @@ from .models import (
     ScoringSettings,
     Team,
     TeamDraftSummary,
+    TeamSeasonStats,
     TodaysGame,
     TradeAnalysis,
     TradeSettings,
@@ -1019,7 +1020,7 @@ class ESPNFantasyBasketballClient:
             your_roster = self._make_roster_slim(your_roster)
             opponent_roster = self._make_roster_slim(opponent_roster)
         
-        return CurrentMatchup(
+            return CurrentMatchup(
             matchupId=matchup.id,
             scoringPeriod=current_scoring_period,
             yourTeam=your_team_data,
@@ -1028,6 +1029,257 @@ class ESPNFantasyBasketballClient:
             opponentRoster=opponent_roster,
             winner=matchup.winner,
             playoff=matchup.playoff,
+        )
+
+    async def get_team_season_stats(self, team_id: int) -> TeamSeasonStats:
+        """Get team statistics aggregated across the entire season.
+        
+        This aggregates stats from all matchups in the season for a specific team.
+        
+        Args:
+            team_id: Team ID to get season stats for
+            
+        Returns:
+            TeamSeasonStats object with aggregated season statistics
+            
+        Raises:
+            ValueError: If team_id is invalid or team not found
+        """
+        # Validate input
+        self._validate_positive_int(team_id, "team_id")
+        
+        # Get league settings to determine scoring categories
+        league_settings = await self.get_league_settings()
+        stat_mapping = self._get_stat_id_mapping()
+        scoring_stat_ids = self._get_scoring_stat_ids(league_settings)
+        
+        # Get all matchups for the season (no scoring_period filter)
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        params = {"view": "mMatchup"}
+        
+        data = await self._make_request(url, params)
+        
+        # Get team name
+        team_name = None
+        try:
+            teams = await self.get_league_teams()
+            team = next((t for t in teams if t.id == team_id), None)
+            if team:
+                team_name = team.name
+        except Exception as e:
+            logger.warning(f"Could not get team name: {e}")
+        
+        # Get team record from API (more reliable than calculating from matchups)
+        matchup_wins = None
+        matchup_losses = None
+        matchup_ties = 0  # Start at 0, will count from matchups
+        
+        try:
+            teams = await self.get_league_teams()
+            team = next((t for t in teams if t.id == team_id), None)
+            if team and team.record and team.record.overall:
+                matchup_wins = team.record.overall.wins
+                matchup_losses = team.record.overall.losses
+        except Exception as e:
+            logger.warning(f"Could not get team record from API: {e}")
+        
+        # Track records for all teams to calculate games back
+        team_records: dict[int, dict[str, int]] = {}  # team_id -> {wins, losses, ties}
+        
+        # Aggregate stats across all matchups
+        # Track component stats separately for percentage calculations
+        aggregated_category_scores: dict[str, float] = {}
+        aggregated_component_stats: dict[str, float] = {}
+        total_games_played = 0
+        
+        # Track totals for percentage calculations
+        field_goals_made = 0.0
+        field_goals_attempted = 0.0
+        free_throws_made = 0.0
+        free_throws_attempted = 0.0
+        
+        for schedule_item in data.get("schedule", []):
+            home_data = schedule_item.get("home", {})
+            away_data = schedule_item.get("away", {})
+            
+            # Check if this matchup involves our team
+            home_team_id = home_data.get("teamId")
+            away_team_id = away_data.get("teamId")
+            
+            if home_team_id != team_id and away_team_id != team_id:
+                continue  # Skip matchups not involving this team
+            
+            # Determine which team data to use
+            team_data = home_data if home_team_id == team_id else away_data
+            
+            # Aggregate category scores and component stats
+            if team_data.get("cumulativeScore"):
+                cumulative_score = team_data.get("cumulativeScore", {})
+                score_by_stat = cumulative_score.get("scoreByStat", {})
+                if isinstance(score_by_stat, dict):
+                    for stat_id, stat_data in score_by_stat.items():
+                        if isinstance(stat_data, dict) and "score" in stat_data:
+                            score_value = stat_data["score"]
+                            category_name = stat_mapping.get(stat_id, f"stat_{stat_id}")
+                            
+                            # Track component stats for percentage calculations
+                            if stat_id == "13":  # Field Goals Made
+                                field_goals_made += score_value
+                            elif stat_id == "14":  # Field Goals Attempted
+                                field_goals_attempted += score_value
+                            elif stat_id == "15":  # Free Throws Made
+                                free_throws_made += score_value
+                            elif stat_id == "16":  # Free Throws Attempted
+                                free_throws_attempted += score_value
+                            
+                            # Points (stat ID 0) should always be in categoryScores
+                            # Separate scoring categories from component stats
+                            stat_id_int = int(stat_id) if stat_id.isdigit() else None
+                            if stat_id == "0" or (stat_id_int and stat_id_int in scoring_stat_ids):
+                                # This is a scoring category (including points) - aggregate it
+                                if category_name not in aggregated_category_scores:
+                                    aggregated_category_scores[category_name] = 0.0
+                                aggregated_category_scores[category_name] += score_value
+                            else:
+                                # This is a component stat - aggregate it
+                                if category_name not in aggregated_component_stats:
+                                    aggregated_component_stats[category_name] = 0.0
+                                aggregated_component_stats[category_name] += score_value
+            
+            # Aggregate games played
+            games_played = team_data.get("gamesPlayed", 0)
+            if games_played:
+                total_games_played += games_played
+            
+            # Track records for all teams to calculate games back
+            winner = schedule_item.get("winner")
+            
+            # Initialize team records if not present
+            if home_team_id and home_team_id not in team_records:
+                team_records[home_team_id] = {"wins": 0, "losses": 0, "ties": 0}
+            if away_team_id and away_team_id not in team_records:
+                team_records[away_team_id] = {"wins": 0, "losses": 0, "ties": 0}
+            
+            # Determine winner and update records for games back calculation
+            if winner == "HOME":
+                if home_team_id:
+                    team_records[home_team_id]["wins"] += 1
+                if away_team_id:
+                    team_records[away_team_id]["losses"] += 1
+            elif winner == "AWAY":
+                if away_team_id:
+                    team_records[away_team_id]["wins"] += 1
+                if home_team_id:
+                    team_records[home_team_id]["losses"] += 1
+            else:
+                # No winner specified - could be a tie or incomplete matchup
+                # In category leagues, a tie means both teams won the same number of categories
+                # Check if both teams have category scores to determine if it's a completed tie
+                home_cumulative = home_data.get("cumulativeScore", {})
+                away_cumulative = away_data.get("cumulativeScore", {})
+                home_has_scores = bool(home_cumulative.get("scoreByStat"))
+                away_has_scores = bool(away_cumulative.get("scoreByStat"))
+                
+                # If both teams have scores but no winner, it's likely a tie
+                if home_has_scores and away_has_scores:
+                    if home_team_id:
+                        team_records[home_team_id]["ties"] += 1
+                    if away_team_id:
+                        team_records[away_team_id]["ties"] += 1
+                    # Count ties for requested team
+                    if home_team_id == team_id or away_team_id == team_id:
+                        matchup_ties += 1
+                else:
+                    # Incomplete matchup - don't count as tie
+                    # Check if we can determine winner from total points (fallback for points leagues)
+                    home_total = home_data.get("totalPoints")
+                    away_total = away_data.get("totalPoints")
+                    if home_total is not None and away_total is not None:
+                        if home_total == away_total:
+                            # Actual tie based on points
+                            if home_team_id:
+                                team_records[home_team_id]["ties"] += 1
+                            if away_team_id:
+                                team_records[away_team_id]["ties"] += 1
+                            if home_team_id == team_id or away_team_id == team_id:
+                                matchup_ties += 1
+                        elif home_total > away_total:
+                            if home_team_id:
+                                team_records[home_team_id]["wins"] += 1
+                            if away_team_id:
+                                team_records[away_team_id]["losses"] += 1
+                        else:
+                            if away_team_id:
+                                team_records[away_team_id]["wins"] += 1
+                            if home_team_id:
+                                team_records[home_team_id]["losses"] += 1
+        
+        # Calculate percentages from season totals
+        if field_goals_attempted > 0:
+            field_goal_percentage = field_goals_made / field_goals_attempted
+            aggregated_category_scores["fieldGoalPercentage"] = field_goal_percentage
+            # Remove from component stats if it was there
+            aggregated_component_stats.pop("fieldGoalPercentage", None)
+        
+        if free_throws_attempted > 0:
+            free_throw_percentage = free_throws_made / free_throws_attempted
+            aggregated_category_scores["freeThrowPercentage"] = free_throw_percentage
+            # Remove from component stats if it was there
+            aggregated_component_stats.pop("freeThrowPercentage", None)
+        
+        # Ensure points is in categoryScores, not componentStats
+        if "points" in aggregated_component_stats:
+            points_value = aggregated_component_stats.pop("points")
+            aggregated_category_scores["points"] = points_value
+        
+        # Calculate win percentage
+        win_percentage = None
+        if matchup_wins is not None and matchup_losses is not None:
+            total_matchups = matchup_wins + matchup_losses + (matchup_ties or 0)
+            if total_matchups > 0:
+                win_percentage = matchup_wins / total_matchups
+        
+        # Calculate games back using team records from API
+        games_back = None
+        if matchup_wins is not None and matchup_losses is not None:
+            try:
+                teams = await self.get_league_teams()
+                
+                # Find leader: most wins, then fewest losses
+                leader_wins = -1
+                leader_losses = float('inf')
+                
+                for team in teams:
+                    if team.record and team.record.overall:
+                        wins = team.record.overall.wins
+                        losses = team.record.overall.losses
+                        # Leader is team with most wins, or if tied, fewest losses
+                        if wins > leader_wins or (wins == leader_wins and losses < leader_losses):
+                            leader_wins = wins
+                            leader_losses = losses
+                
+                # Calculate games back for the requested team
+                if leader_wins >= 0:
+                    if matchup_wins == leader_wins and matchup_losses == leader_losses:
+                        # This team is tied for the lead
+                        games_back = 0.0
+                    else:
+                        # Games back = ((Leader's wins - Team's wins) + (Team's losses - Leader's losses)) / 2
+                        games_back = ((leader_wins - matchup_wins) + (matchup_losses - leader_losses)) / 2.0
+            except Exception as e:
+                logger.warning(f"Could not calculate games back: {e}")
+        
+        return TeamSeasonStats(
+            teamId=team_id,
+            teamName=team_name,
+            categoryScores=aggregated_category_scores,
+            componentStats=aggregated_component_stats if aggregated_component_stats else None,
+            totalGamesPlayed=total_games_played if total_games_played > 0 else None,
+            matchupWins=matchup_wins,
+            matchupLosses=matchup_losses,
+            matchupTies=matchup_ties if matchup_ties > 0 else None,
+            winPercentage=win_percentage,
+            gamesBack=games_back,
         )
 
     async def get_nba_schedule(self, date: str | None = None) -> list[NBAGame]:
