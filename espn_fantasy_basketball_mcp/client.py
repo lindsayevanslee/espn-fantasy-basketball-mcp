@@ -1247,12 +1247,12 @@ class ESPNFantasyBasketballClient:
             points_value = aggregated_component_stats.pop("points")
             aggregated_category_scores["points"] = points_value
         
-        # Calculate win percentage
+        # Calculate win percentage (excludes ties: W/(W+L))
         win_percentage = None
         if matchup_wins is not None and matchup_losses is not None:
-            total_matchups = matchup_wins + matchup_losses + (matchup_ties or 0)
-            if total_matchups > 0:
-                win_percentage = matchup_wins / total_matchups
+            total_decided_matchups = matchup_wins + matchup_losses
+            if total_decided_matchups > 0:
+                win_percentage = matchup_wins / total_decided_matchups
         
         # Calculate games back using team records from API
         games_back = None

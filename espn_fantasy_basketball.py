@@ -177,7 +177,7 @@ async def get_team_season_stats(
         - matchupWins: Number of matchup wins
         - matchupLosses: Number of matchup losses
         - matchupTies: Number of matchup ties
-        - winPercentage: Win percentage (wins / (wins + losses + ties))
+        - winPercentage: Win percentage (wins / (wins + losses), excludes ties)
         - gamesBack: Games behind the league leader
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)

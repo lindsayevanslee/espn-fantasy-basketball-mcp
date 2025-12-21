@@ -99,7 +99,7 @@ class TeamSeasonStats(BaseModel):
     matchupWins: int | None = None  # Number of matchup wins
     matchupLosses: int | None = None  # Number of matchup losses
     matchupTies: int | None = None  # Number of matchup ties
-    winPercentage: float | None = None  # Win percentage (wins / (wins + losses + ties))
+    winPercentage: float | None = None  # Win percentage (wins / (wins + losses), excludes ties)
     gamesBack: float | None = None  # Games behind the league leader
 
 
