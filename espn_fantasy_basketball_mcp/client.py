@@ -1053,6 +1053,9 @@ class ESPNFantasyBasketballClient:
         stat_mapping = self._get_stat_id_mapping()
         scoring_stat_ids = self._get_scoring_stat_ids(league_settings)
         
+        # Get current matchup period to exclude incomplete/current week data
+        current_matchup_period = league_settings.status.currentMatchupPeriod
+        
         # Get all matchups for the season (no scoring_period filter)
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         params = {"view": "mMatchup"}
@@ -1070,9 +1073,10 @@ class ESPNFantasyBasketballClient:
             logger.warning(f"Could not get team name: {e}")
         
         # Get team record from API (more reliable than calculating from matchups)
+        # This only includes completed matchups, not the current week
         matchup_wins = None
         matchup_losses = None
-        matchup_ties = 0  # Start at 0, will count from matchups
+        matchup_ties = 0  # Start at 0, will count from completed matchups only
         
         try:
             teams = await self.get_league_teams()
@@ -1160,6 +1164,31 @@ class ESPNFantasyBasketballClient:
             if away_team_id and away_team_id not in team_records:
                 team_records[away_team_id] = {"wins": 0, "losses": 0, "ties": 0}
             
+            # Get cumulativeScore data for both teams
+            home_cumulative = home_data.get("cumulativeScore", {})
+            away_cumulative = away_data.get("cumulativeScore", {})
+            
+            # Only count ties from completed matchups (exclude current matchup period)
+            # This matches the timeline used for wins/losses from team.record.overall
+            matchup_period_id = schedule_item.get("matchupPeriodId")
+            is_completed_matchup = matchup_period_id is not None and matchup_period_id < current_matchup_period
+            
+            if is_completed_matchup:
+                # Sum up cumulativeScore.ties for the requested team from completed matchups only
+                # cumulativeScore.ties indicates matchup-level ties (not category ties)
+                if home_team_id == team_id:
+                    home_matchup_ties = home_cumulative.get("ties", 0)
+                    if home_matchup_ties > 0:
+                        matchup_ties += home_matchup_ties
+                elif away_team_id == team_id:
+                    away_matchup_ties = away_cumulative.get("ties", 0)
+                    if away_matchup_ties > 0:
+                        matchup_ties += away_matchup_ties
+            
+            # Also track for games back calculation
+            home_category_wins = home_cumulative.get("wins", 0)
+            away_category_wins = away_cumulative.get("wins", 0)
+            
             # Determine winner and update records for games back calculation
             if winner == "HOME":
                 if home_team_id:
@@ -1171,48 +1200,34 @@ class ESPNFantasyBasketballClient:
                     team_records[away_team_id]["wins"] += 1
                 if home_team_id:
                     team_records[home_team_id]["losses"] += 1
+            elif home_category_wins == away_category_wins and home_category_wins > 0:
+                # Matchup tie: both teams won the same number of categories
+                if home_team_id:
+                    team_records[home_team_id]["ties"] += 1
+                if away_team_id:
+                    team_records[away_team_id]["ties"] += 1
             else:
-                # No winner specified - could be a tie or incomplete matchup
-                # In category leagues, a tie means both teams won the same number of categories
-                # Check if both teams have category scores to determine if it's a completed tie
-                home_cumulative = home_data.get("cumulativeScore", {})
-                away_cumulative = away_data.get("cumulativeScore", {})
-                home_has_scores = bool(home_cumulative.get("scoreByStat"))
-                away_has_scores = bool(away_cumulative.get("scoreByStat"))
-                
-                # If both teams have scores but no winner, it's likely a tie
-                if home_has_scores and away_has_scores:
-                    if home_team_id:
-                        team_records[home_team_id]["ties"] += 1
-                    if away_team_id:
-                        team_records[away_team_id]["ties"] += 1
-                    # Count ties for requested team
-                    if home_team_id == team_id or away_team_id == team_id:
-                        matchup_ties += 1
-                else:
-                    # Incomplete matchup - don't count as tie
-                    # Check if we can determine winner from total points (fallback for points leagues)
-                    home_total = home_data.get("totalPoints")
-                    away_total = away_data.get("totalPoints")
-                    if home_total is not None and away_total is not None:
-                        if home_total == away_total:
-                            # Actual tie based on points
-                            if home_team_id:
-                                team_records[home_team_id]["ties"] += 1
-                            if away_team_id:
-                                team_records[away_team_id]["ties"] += 1
-                            if home_team_id == team_id or away_team_id == team_id:
-                                matchup_ties += 1
-                        elif home_total > away_total:
-                            if home_team_id:
-                                team_records[home_team_id]["wins"] += 1
-                            if away_team_id:
-                                team_records[away_team_id]["losses"] += 1
-                        else:
-                            if away_team_id:
-                                team_records[away_team_id]["wins"] += 1
-                            if home_team_id:
-                                team_records[home_team_id]["losses"] += 1
+                # Incomplete matchup or no winner determined
+                # Fallback: check if we can determine winner from total points (points leagues)
+                home_total = home_data.get("totalPoints")
+                away_total = away_data.get("totalPoints")
+                if home_total is not None and away_total is not None:
+                    if home_total == away_total and home_total > 0:
+                        # Actual tie based on points
+                        if home_team_id:
+                            team_records[home_team_id]["ties"] += 1
+                        if away_team_id:
+                            team_records[away_team_id]["ties"] += 1
+                    elif home_total > away_total:
+                        if home_team_id:
+                            team_records[home_team_id]["wins"] += 1
+                        if away_team_id:
+                            team_records[away_team_id]["losses"] += 1
+                    elif away_total > home_total:
+                        if away_team_id:
+                            team_records[away_team_id]["wins"] += 1
+                        if home_team_id:
+                            team_records[home_team_id]["losses"] += 1
         
         # Calculate percentages from season totals
         if field_goals_attempted > 0:
