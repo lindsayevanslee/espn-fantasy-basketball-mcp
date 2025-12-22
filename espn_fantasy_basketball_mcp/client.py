@@ -884,71 +884,19 @@ class ESPNFantasyBasketballClient:
                     if home_team_id != team_id and away_team_id != team_id:
                         continue  # Skip matchups not involving this team
                 
-                # Extract team info from home/away data
+                # Extract team info from home/away data using helper method
                 home_team = None
                 if schedule_item.get("home"):
                     home_data = schedule_item["home"]
-                    cumulative_score = home_data.get("cumulativeScore", {})
-                    
-                    # Convert stat IDs to human-readable category names
-                    # cumulativeScore has structure: {"scoreByStat": {"0": {"score": 409.0, ...}, ...}}
-                    all_category_scores = {}
-                    score_by_stat = cumulative_score.get("scoreByStat", {})
-                    if isinstance(score_by_stat, dict):
-                        for stat_id, stat_data in score_by_stat.items():
-                            if isinstance(stat_data, dict) and "score" in stat_data:
-                                score_value = stat_data["score"]
-                                category_name = stat_mapping.get(stat_id, f"stat_{stat_id}")
-                                all_category_scores[category_name] = score_value
-                    
-                    # Separate scoring categories from component stats
-                    scoring_categories, component_stats = self._filter_category_scores(
-                        all_category_scores, scoring_stat_ids, stat_mapping
-                    )
-                    
-                    home_team_id = home_data.get("teamId")
-                    home_team = MatchupTeam(
-                        teamId=home_team_id,
-                        teamName=team_names.get(home_team_id) if home_team_id else None,
-                        totalPoints=home_data.get("totalPoints"),
-                        totalProjectedPoints=home_data.get("totalProjectedPoints"),
-                        gamesPlayed=home_data.get("gamesPlayed"),
-                        cumulativeScore=cumulative_score,  # Keep raw data for percentage calculations
-                        categoryScores=scoring_categories if scoring_categories else None,
-                        componentStats=component_stats if component_stats else None,
+                    home_team = self._parse_matchup_team_data(
+                        home_data, team_names, scoring_stat_ids, stat_mapping
                     )
 
                 away_team = None
                 if schedule_item.get("away"):
                     away_data = schedule_item["away"]
-                    cumulative_score = away_data.get("cumulativeScore", {})
-                    
-                    # Convert stat IDs to human-readable category names
-                    # cumulativeScore has structure: {"scoreByStat": {"0": {"score": 409.0, ...}, ...}}
-                    all_category_scores = {}
-                    score_by_stat = cumulative_score.get("scoreByStat", {})
-                    if isinstance(score_by_stat, dict):
-                        for stat_id, stat_data in score_by_stat.items():
-                            if isinstance(stat_data, dict) and "score" in stat_data:
-                                score_value = stat_data["score"]
-                                category_name = stat_mapping.get(stat_id, f"stat_{stat_id}")
-                                all_category_scores[category_name] = score_value
-                    
-                    # Separate scoring categories from component stats
-                    scoring_categories, component_stats = self._filter_category_scores(
-                        all_category_scores, scoring_stat_ids, stat_mapping
-                    )
-                    
-                    away_team_id = away_data.get("teamId")
-                    away_team = MatchupTeam(
-                        teamId=away_team_id,
-                        teamName=team_names.get(away_team_id) if away_team_id else None,
-                        totalPoints=away_data.get("totalPoints"),
-                        totalProjectedPoints=away_data.get("totalProjectedPoints"),
-                        gamesPlayed=away_data.get("gamesPlayed"),
-                        cumulativeScore=cumulative_score,  # Keep raw data for percentage calculations
-                        categoryScores=scoring_categories if scoring_categories else None,
-                        componentStats=component_stats if component_stats else None,
+                    away_team = self._parse_matchup_team_data(
+                        away_data, team_names, scoring_stat_ids, stat_mapping
                     )
 
                 matchup = Matchup(
@@ -962,6 +910,82 @@ class ESPNFantasyBasketballClient:
                 matchups.append(matchup)
 
         return matchups
+
+    def _parse_matchup_team_data(
+        self,
+        team_data: dict[str, Any],
+        team_names: dict[int, str],
+        scoring_stat_ids: set[int],
+        stat_mapping: dict[str, str],
+    ) -> MatchupTeam:
+        """Parse team data from matchup API response into MatchupTeam object.
+        
+        Args:
+            team_data: Raw team data from API (home or away)
+            team_names: Mapping of team_id -> team_name
+            scoring_stat_ids: Set of stat IDs that are scoring categories
+            stat_mapping: Mapping of stat ID strings to category names
+            
+        Returns:
+            MatchupTeam object with parsed data
+        """
+        cumulative_score = team_data.get("cumulativeScore", {})
+        
+        # Convert stat IDs to human-readable category names
+        # cumulativeScore has structure: {"scoreByStat": {"0": {"score": 409.0, ...}, ...}}
+        all_category_scores = {}
+        score_by_stat = cumulative_score.get("scoreByStat", {})
+        if isinstance(score_by_stat, dict):
+            for stat_id, stat_data in score_by_stat.items():
+                if isinstance(stat_data, dict) and "score" in stat_data:
+                    score_value = stat_data["score"]
+                    category_name = stat_mapping.get(stat_id, f"stat_{stat_id}")
+                    all_category_scores[category_name] = score_value
+        
+        # Separate scoring categories from component stats
+        scoring_categories, component_stats = self._filter_category_scores(
+            all_category_scores, scoring_stat_ids, stat_mapping
+        )
+        
+        team_id = team_data.get("teamId")
+        return MatchupTeam(
+            teamId=team_id,
+            teamName=team_names.get(team_id) if team_id else None,
+            totalPoints=team_data.get("totalPoints"),
+            totalProjectedPoints=team_data.get("totalProjectedPoints"),
+            gamesPlayed=team_data.get("gamesPlayed"),
+            cumulativeScore=cumulative_score,  # Keep raw data for percentage calculations
+            categoryScores=scoring_categories if scoring_categories else None,
+            componentStats=component_stats if component_stats else None,
+        )
+
+    def _determine_team_sides(
+        self, matchup: Matchup, team_id: int
+    ) -> tuple[MatchupTeam, MatchupTeam] | None:
+        """Determine which team is 'yours' and which is the opponent in a matchup.
+        
+        Args:
+            matchup: The matchup object
+            team_id: Your team ID
+            
+        Returns:
+            Tuple of (your_team_data, opponent_team_data) or None if team not found
+        """
+        if matchup.home and matchup.home.teamId == team_id:
+            your_team_data = matchup.home
+            opponent_team_data = matchup.away
+        elif matchup.away and matchup.away.teamId == team_id:
+            your_team_data = matchup.away
+            opponent_team_data = matchup.home
+        else:
+            logger.error(f"Team {team_id} not found in matchup {matchup.id}")
+            return None
+        
+        if not opponent_team_data or not opponent_team_data.teamId:
+            logger.error(f"No opponent found for matchup {matchup.id}")
+            return None
+        
+        return your_team_data, opponent_team_data
 
     async def get_my_current_matchup(self, team_id: int, verbose: bool = False) -> CurrentMatchup | None:
         """Get complete current matchup information for a team.
@@ -981,61 +1005,21 @@ class ESPNFantasyBasketballClient:
         Returns:
             CurrentMatchup object with all matchup data, or None if no current matchup found
         """
-        # Get current matchup period and latest scoring period
+        # Get current matchup period and delegate to get_matchup_for_period
         league_settings = await self.get_league_settings()
         current_matchup_period = league_settings.status.currentMatchupPeriod
-        current_scoring_period = league_settings.status.latestScoringPeriod
         
-        # Get matchups for current matchup period, filtered by team_id
-        # Note: get_matchups filters by matchupPeriodId, not scoringPeriodId
-        matchups = await self.get_matchups(scoring_period=current_matchup_period, team_id=team_id)
-        
-        if not matchups:
-            logger.warning(f"No matchup found for team {team_id} in matchup period {current_matchup_period}")
-            return None
-        
-        # Should only be one matchup for a team in a given period
-        matchup = matchups[0]
-        
-        # Determine which team is "yours" and which is the opponent
-        if matchup.home and matchup.home.teamId == team_id:
-            your_team_data = matchup.home
-            opponent_team_data = matchup.away
-        elif matchup.away and matchup.away.teamId == team_id:
-            your_team_data = matchup.away
-            opponent_team_data = matchup.home
-        else:
-            logger.error(f"Team {team_id} not found in matchup {matchup.id}")
-            return None
-        
-        if not opponent_team_data or not opponent_team_data.teamId:
-            logger.error(f"No opponent found for matchup {matchup.id}")
-            return None
-        
-        # Get rosters for both teams using the actual scoring period
-        # Reuse get_team_roster to avoid duplicating roster fetching logic
-        # get_team_roster expects scoringPeriodId, not matchupPeriodId
-        your_roster = await self.get_team_roster(team_id, scoring_period=current_scoring_period)
-        opponent_roster = await self.get_team_roster(opponent_team_data.teamId, scoring_period=current_scoring_period)
-        
-        # Apply slim roster if not verbose
-        if not verbose:
-            your_roster = self._make_roster_slim(your_roster)
-            opponent_roster = self._make_roster_slim(opponent_roster)
-        
-            return CurrentMatchup(
-            matchupId=matchup.id,
-            scoringPeriod=current_scoring_period,
-            yourTeam=your_team_data,
-            opponentTeam=opponent_team_data,
-            yourRoster=your_roster,
-            opponentRoster=opponent_roster,
-            winner=matchup.winner,
-            playoff=matchup.playoff,
+        # Delegate to get_matchup_for_period, passing league_settings to avoid duplicate call
+        return await self.get_matchup_for_period(
+            team_id, current_matchup_period, verbose, league_settings=league_settings
         )
 
     async def get_matchup_for_period(
-        self, team_id: int, matchup_period: int, verbose: bool = False
+        self,
+        team_id: int,
+        matchup_period: int,
+        verbose: bool = False,
+        league_settings: LeagueSettings | None = None,
     ) -> CurrentMatchup | None:
         """Get matchup information for a specific matchup period.
         
@@ -1043,12 +1027,14 @@ class ESPNFantasyBasketballClient:
             team_id: Your team ID
             matchup_period: Matchup period to get (e.g., 1, 2, 3...)
             verbose: If True, include full player stats in rosters (default False)
+            league_settings: Optional league settings to avoid duplicate API call
             
         Returns:
             CurrentMatchup object with matchup data, or None if not found
         """
-        # Get league settings to determine scoring period for this matchup period
-        league_settings = await self.get_league_settings()
+        # Get league settings if not provided
+        if league_settings is None:
+            league_settings = await self.get_league_settings()
         
         # Get matchups for the specified matchup period
         matchups = await self.get_matchups(scoring_period=matchup_period, team_id=team_id)
@@ -1061,19 +1047,10 @@ class ESPNFantasyBasketballClient:
         matchup = matchups[0]
         
         # Determine which team is "yours" and which is the opponent
-        if matchup.home and matchup.home.teamId == team_id:
-            your_team_data = matchup.home
-            opponent_team_data = matchup.away
-        elif matchup.away and matchup.away.teamId == team_id:
-            your_team_data = matchup.away
-            opponent_team_data = matchup.home
-        else:
-            logger.error(f"Team {team_id} not found in matchup {matchup.id}")
+        team_sides = self._determine_team_sides(matchup, team_id)
+        if not team_sides:
             return None
-        
-        if not opponent_team_data or not opponent_team_data.teamId:
-            logger.error(f"No opponent found for matchup {matchup.id}")
-            return None
+        your_team_data, opponent_team_data = team_sides
         
         # For future matchups, we need to estimate the scoring period
         # Matchup periods typically correspond to weeks, so we can estimate
@@ -1148,8 +1125,10 @@ class ESPNFantasyBasketballClient:
         else:
             target_matchup_period = matchup_period
         
-        # Get matchup data for the specified period
-        matchup = await self.get_matchup_for_period(team_id, target_matchup_period, verbose=True)
+        # Get matchup data for the specified period, passing league_settings to avoid duplicate call
+        matchup = await self.get_matchup_for_period(
+            team_id, target_matchup_period, verbose=True, league_settings=league_settings
+        )
         if not matchup:
             period_desc = "next" if matchup_period is None else f"period {matchup_period}"
             raise ValueError(f"No matchup found for team {team_id} in {period_desc} matchup")
