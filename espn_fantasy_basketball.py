@@ -650,6 +650,63 @@ async def get_roster_schedule(
     return schedule_summary.model_dump()
 
 
+@mcp.tool()
+async def analyze_matchup(
+    team_id: int | None = None,
+    matchup_period: int | None = None,
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+) -> dict:
+    """Analyze a matchup and provide strategic recommendations.
+    
+    By default, analyzes your next matchup (current week + 1). Can also analyze
+    any other matchup period by specifying matchup_period.
+    
+    This provides comprehensive analysis including:
+    - Category win/loss projections based on games remaining and player stats
+    - Close categories where lineup decisions matter most
+    - Player recommendations prioritized by which categories you need
+    - Games remaining analysis for both teams
+    - Strategic notes and recommendations
+    
+    Args:
+        team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
+        matchup_period: Matchup period to analyze (optional, defaults to next matchup).
+                       Use None for next matchup, or specify a period number (e.g., 1, 2, 3...)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+    
+    Returns:
+        Dictionary with comprehensive matchup analysis including:
+        - categoryProjections: Projections for each category with current/projected scores
+        - categoriesWinning: Categories you're projected to win
+        - categoriesLosing: Categories you're projected to lose
+        - closeCategories: Categories that are close (within threshold)
+        - playerRecommendations: Prioritized list of players to start, sorted by priority
+        - yourGamesRemaining: Total games remaining for your team this week
+        - opponentGamesRemaining: Total games remaining for opponent this week
+        - currentCategoryWins/Losses/Ties: Current category record
+        - projectedCategoryWins/Losses: Projected category record
+        - strategyNotes: Strategic recommendations
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError("team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable.")
+    
+    # Convert matchup_period to int if it's a string (MCP client may pass strings)
+    if matchup_period is not None:
+        matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
+    
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    analysis = await client.analyze_matchup(team_id, matchup_period)
+    return analysis.model_dump()
+
+
 if __name__ == "__main__":
     # Run the server
     mcp.run(transport="stdio")

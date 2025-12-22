@@ -1,5 +1,7 @@
 """Data models for ESPN Fantasy Basketball API responses."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from pydantic import BaseModel
@@ -101,6 +103,71 @@ class TeamSeasonStats(BaseModel):
     matchupTies: int | None = None  # Number of matchup ties
     winPercentage: float | None = None  # Win percentage (wins / (wins + losses), excludes ties)
     gamesBack: float | None = None  # Games behind the league leader
+
+
+class CategoryProjection(BaseModel):
+    """Projection for a single category in the matchup."""
+    
+    category: str  # Category name (e.g., "points", "rebounds")
+    yourCurrent: float  # Your current total
+    opponentCurrent: float  # Opponent's current total
+    yourProjected: float | None = None  # Your projected total
+    opponentProjected: float | None = None  # Opponent's projected total
+    currentLead: float  # Your current lead (positive = winning, negative = losing)
+    projectedLead: float | None = None  # Projected lead
+    projectedResult: str | None = None  # "win", "loss", "tie", or "close"
+    margin: float | None = None  # Projected margin (absolute value)
+    isClose: bool = False  # Whether this category is close (within threshold)
+
+
+class PlayerRecommendation(BaseModel):
+    """Recommendation for a specific player."""
+    
+    playerId: int
+    playerName: str
+    position: str | None = None
+    lineupSlotId: int | None = None
+    lineupSlotName: str | None = None
+    gamesRemaining: int | None = None  # Games remaining this week
+    priority: int  # Priority score (1-10, higher = more important to start)
+    reasoning: str
+    categoriesHelped: list[str]  # Categories this player helps with
+    categoriesHurt: list[str] = []  # Categories this player hurts (e.g., turnovers, low FT%)
+    injuryStatus: str | None = None
+    todaysGame: TodaysGame | None = None
+
+
+class MatchupAnalysis(BaseModel):
+    """Comprehensive analysis of the current matchup."""
+    
+    matchupId: int
+    scoringPeriod: int
+    yourTeamId: int
+    opponentTeamId: int
+    yourTeamName: str | None = None
+    opponentTeamName: str | None = None
+    
+    # Category analysis
+    categoryProjections: list[CategoryProjection]  # Projections for each category
+    categoriesWinning: list[str]  # Categories you're projected to win
+    categoriesLosing: list[str]  # Categories you're projected to lose
+    categoriesTied: list[str]  # Categories projected to tie
+    closeCategories: list[str]  # Categories that are close (within threshold)
+    
+    # Player recommendations
+    playerRecommendations: list[PlayerRecommendation]  # Prioritized player recommendations
+    
+    # Additional context
+    yourGamesRemaining: int | None = None  # Total games remaining for your team
+    opponentGamesRemaining: int | None = None  # Total games remaining for opponent
+    currentCategoryWins: int | None = None  # Current category wins
+    currentCategoryLosses: int | None = None  # Current category losses
+    currentCategoryTies: int | None = None  # Current category ties
+    projectedCategoryWins: int | None = None  # Projected category wins
+    projectedCategoryLosses: int | None = None  # Projected category losses
+    
+    # Strategy recommendations
+    strategyNotes: list[str]  # Strategic notes and recommendations
 
 
 class PlayerOwnership(BaseModel):
