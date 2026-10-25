@@ -145,6 +145,10 @@ async def get_team_roster(
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     roster = await client.get_team_roster(team_id, scoring_period)
     return roster.model_dump()
@@ -183,7 +187,9 @@ async def get_team_season_stats(
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
     if team_id is None:
-        raise ValueError("team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable.")
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     stats = await client.get_team_season_stats(team_id)
     return stats.model_dump()
@@ -251,11 +257,11 @@ async def get_matchups(
     # Default to team_id from environment if not provided
     team_id = _get_team_id(team_id)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    
+
     # Convert scoring_period to int if it's a string (MCP client may pass strings)
     if scoring_period is not None:
         scoring_period = int(scoring_period) if isinstance(scoring_period, str) else scoring_period
-    
+
     matchups = await client.get_matchups(scoring_period, team_id)
     return [matchup.model_dump() for matchup in matchups]
 
@@ -270,13 +276,13 @@ async def get_my_current_matchup(
     swid: str | None = None,
 ) -> dict | None:
     """Get your current matchup with complete information in a single call.
-    
+
     This combines multiple pieces of information:
     - Your team's roster for the current week
     - Opponent's roster for the current week
     - Current category scores (with human-readable names)
     - The week/scoring period
-    
+
     This replaces the need for 3 separate calls (get_matchups, get_team_roster × 2).
 
     Args:
@@ -302,14 +308,16 @@ async def get_my_current_matchup(
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
     if not team_id:
-        raise ValueError("team_id is required. Provide it as a parameter or set ESPN_TEAM_ID env var.")
-    
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID env var."
+        )
+
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     matchup = await client.get_my_current_matchup(team_id, verbose)
-    
+
     if matchup is None:
         return None
-    
+
     return matchup.model_dump()
 
 
@@ -377,6 +385,10 @@ async def should_i_bid(
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     recommendation = await client.get_draft_recommendation(team_id, current_player_id)
     return recommendation.model_dump()
@@ -404,6 +416,10 @@ async def who_should_i_target_next(
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     recommendation = await client.get_draft_recommendation(team_id, None)
     return recommendation.model_dump()
@@ -431,6 +447,10 @@ async def analyze_my_draft_strategy(
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
 
     # Get team summary and strategy analysis
@@ -482,9 +502,9 @@ async def get_player_stats(
     swid: str | None = None,
 ) -> dict | list[dict]:
     """Get comprehensive player statistics for one or more players.
-    
-    Can be called with a single player ID (returns dict) or a list of player IDs 
-    (returns list[dict]). Using a list is more efficient as it makes a single 
+
+    Can be called with a single player ID (returns dict) or a list of player IDs
+    (returns list[dict]). Using a list is more efficient as it makes a single
     API request for all players.
 
     Args:
@@ -496,18 +516,18 @@ async def get_player_stats(
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
-        Dictionary with player statistics if single ID provided, 
+        Dictionary with player statistics if single ID provided,
         list of dictionaries if list provided
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    stats = await client.get_player_stats(player_id, timeframe)
-    
+
     # Return single dict or list of dicts based on input type
     if isinstance(player_id, int):
+        stats = await client.get_player_stats(player_id, timeframe)
         return stats.model_dump()
-    else:
-        return [s.model_dump() for s in stats]
+    stats_list = await client.get_player_stats(player_id, timeframe)
+    return [s.model_dump() for s in stats_list]
 
 
 @mcp.tool()
@@ -609,7 +629,7 @@ async def get_roster_schedule(
 
     This helps you see how many games each of your players has in the upcoming week(s),
     which is crucial for setting your lineup and making roster decisions.
-    
+
     Uses league settings to properly calculate week boundaries (Monday-to-Sunday)
     and map scoring periods to dates for accurate game counts.
 
@@ -635,7 +655,9 @@ async def get_roster_schedule(
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
     if not team_id:
-        raise ValueError("team_id is required. Provide it as a parameter or set ESPN_TEAM_ID env var.")
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID env var."
+        )
 
     # Default dates if not provided
     if not start_date:
@@ -660,17 +682,17 @@ async def analyze_matchup(
     swid: str | None = None,
 ) -> dict:
     """Analyze a matchup and provide strategic recommendations.
-    
+
     By default, analyzes your next matchup (current week + 1). Can also analyze
     any other matchup period by specifying matchup_period.
-    
+
     This provides comprehensive analysis including:
     - Category win/loss projections based on games remaining and player stats
     - Close categories where lineup decisions matter most
     - Player recommendations prioritized by which categories you need
     - Games remaining analysis for both teams
     - Strategic notes and recommendations
-    
+
     Args:
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         matchup_period: Matchup period to analyze (optional, defaults to next matchup).
@@ -679,7 +701,7 @@ async def analyze_matchup(
         year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
-    
+
     Returns:
         Dictionary with comprehensive matchup analysis including:
         - categoryProjections: Projections for each category with current/projected scores
@@ -696,12 +718,14 @@ async def analyze_matchup(
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
     if team_id is None:
-        raise ValueError("team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable.")
-    
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
+
     # Convert matchup_period to int if it's a string (MCP client may pass strings)
     if matchup_period is not None:
         matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
-    
+
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     analysis = await client.analyze_matchup(team_id, matchup_period)
     return analysis.model_dump()

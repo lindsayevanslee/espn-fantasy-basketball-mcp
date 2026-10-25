@@ -111,7 +111,7 @@ class TestMCPServerTools:
             assert result[0]["fullName"] == "Free Agent"
 
             # Verify client method was called correctly
-            mock_client_instance.get_free_agents.assert_called_once_with(10, 1)
+            mock_client_instance.get_free_agents.assert_called_once_with(10, 1, False)
 
     @pytest.mark.asyncio
     async def test_get_matchups_tool(self):
@@ -141,7 +141,7 @@ class TestMCPServerTools:
             assert result[0]["winner"] == "HOME"
 
             # Verify client method was called correctly
-            mock_client_instance.get_matchups.assert_called_once_with(1)
+            mock_client_instance.get_matchups.assert_called_once_with(1, None)
 
     @pytest.mark.asyncio
     async def test_get_nba_schedule_tool(self):
@@ -190,10 +190,10 @@ class TestMCPServerTools:
             MockClient.assert_called_with(12345, 2025, None, None)
 
             await get_free_agents(league_id=12345, year=2025)
-            mock_client_instance.get_free_agents.assert_called_with(50, None)
+            mock_client_instance.get_free_agents.assert_called_with(50, None, False)
 
             await get_matchups(league_id=12345, year=2025)
-            mock_client_instance.get_matchups.assert_called_with(None)
+            mock_client_instance.get_matchups.assert_called_with(None, None)
 
             await get_nba_schedule()
             mock_client_instance.get_nba_schedule.assert_called_with(None)
@@ -224,6 +224,18 @@ class TestTeamIdEnvVariable:
         monkeypatch.delenv("ESPN_TEAM_ID", raising=False)
         result = _get_team_id(team_id=None)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_team_roster_requires_team_id(self, monkeypatch):
+        """Test get_team_roster raises a clear error when no team ID is available."""
+        monkeypatch.delenv("ESPN_TEAM_ID", raising=False)
+
+        with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
+            with pytest.raises(ValueError, match="team_id is required"):
+                await get_team_roster(league_id=12345, year=2025)
+
+            # The client must not even be constructed when the team ID is missing
+            MockClient.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_get_team_roster_with_env_team_id(self, monkeypatch):

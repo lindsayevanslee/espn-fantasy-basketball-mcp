@@ -1,31 +1,48 @@
 # ESPN Fantasy Basketball MCP Server
 
-[![Tests](https://github.com/dylancharris/espn-fantasy-basketball-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/dylancharris/espn-fantasy-basketball-mcp/actions/workflows/test.yml)
+[![Tests](https://github.com/lindsayevanslee/espn-fantasy-basketball-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/lindsayevanslee/espn-fantasy-basketball-mcp/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Type checked: mypy](https://img.shields.io/badge/type%20checked-mypy-blue.svg)](https://mypy-lang.org/)
 
-An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Basketball APIs. This server enables Claude and other MCP clients to fetch fantasy basketball data including league teams, player rosters, waiver wire players, matchup schedules, and NBA schedules.
+An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Basketball APIs. This server enables Claude and other MCP clients to fetch fantasy basketball data including league settings, teams, rosters, free agents, matchups, player statistics, NBA schedules, and to analyze your current matchup.
 
 > **Note**: This is an unofficial third-party tool and is not affiliated with or endorsed by ESPN.
+>
+> This repository is a fork of [dylancharris/espn-fantasy-basketball-mcp](https://github.com/dylancharris/espn-fantasy-basketball-mcp) with additional tools, bug fixes, and hardening.
 
 ## Features
 
 ### Available Tools
 
-#### Core Fantasy Tools
+#### League & Roster Tools
 1. **get_league_teams** - Get all teams in an ESPN Fantasy Basketball league
-2. **get_team_roster** - Get roster for a specific team 
-3. **get_free_agents** - Get free agents/waiver wire players
-4. **get_matchups** - Get league matchup schedule
-5. **get_nba_schedule** - Get NBA game schedule
+2. **get_league_settings** - Scoring categories, roster slots, schedule/matchup periods, waiver and trade rules, current period
+3. **get_team_roster** - Get roster for a specific team, with per-player season stats, injury status, and today's game
+4. **get_team_season_stats** - Season category totals, record, win percentage, and games back for a team
+5. **get_free_agents** - Get free agents/waiver wire players (pass `verbose=true` for stats)
+6. **get_nba_schedule** - Get NBA game schedule for a date
+
+#### Matchup Tools
+7. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
+8. **get_my_current_matchup** - Your current matchup, both rosters, and category scores in one call
+9. **analyze_matchup** - Category-by-category projections, close categories, and start/sit priorities for a matchup
+10. **get_roster_schedule** - Games this week and next for every player on your roster
+
+#### Player Analysis Tools
+11. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
+12. **compare_players** - Compare players across categories
+13. **analyze_trade_proposal** - Value and category impact of a proposed trade
+14. **get_trending_players** - Players trending up or down in ownership
 
 #### Live Draft Assistant Tools
-6. **get_draft_status** - Get current draft status including all picks and progress
-7. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
-8. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
-9. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
-10. **get_available_players** - Get top available players for the draft with auction values
+15. **get_draft_status** - Get current draft status including all picks and progress
+16. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
+17. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
+18. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
+19. **get_available_players** - Get top available players for the draft with auction values
+
+Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_YEAR`, `ESPN_S2`, and `ESPN_SWID` from the environment, so you rarely need to pass them. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
 
 ## Installation
 
@@ -97,8 +114,8 @@ chmod 600 ~/Library/Application\ Support/Claude/claude_desktop_config.json
 The following environment variables can be configured:
 
 - **ESPN_LEAGUE_ID**: Your ESPN Fantasy Basketball league ID (required)
-- **ESPN_TEAM_ID**: Your team ID within the league (optional, but recommended for draft tools)
-- **ESPN_YEAR**: Season year (optional, defaults to 2025)
+- **ESPN_TEAM_ID**: Your team ID within the league (optional, but required by roster, matchup, schedule, and draft tools unless you pass `team_id` each time)
+- **ESPN_YEAR**: Season as ESPN labels it, which is the calendar year the season *ends* in (the 2026-27 season is `2027`). Optional, but the built-in default is still `2025`, so set this explicitly each season.
 - **ESPN_S2**: ESPN authentication cookie for private leagues (required for private leagues)
 - **ESPN_SWID**: ESPN SWID cookie for private leagues (required for private leagues)
 - **MY_TIMEZONE**: Timezone for date/time conversions (optional, defaults to `America/New_York`)
@@ -300,15 +317,24 @@ uv run pytest -v
 ### Code Quality
 
 ```bash
-# Lint and format code
+# Lint (and auto-fix what ruff can)
 uv run ruff check --fix .
 
-# Type checking
-uv run mypy espn_fantasy_basketball_mcp/
+# Format
+uv run ruff format .
 
-# Run all CI checks locally
+# Type checking (the package and the server entry point)
+uv run mypy espn_fantasy_basketball_mcp/ espn_fantasy_basketball.py
+
+# Run every CI check locally (lint, format check, mypy, tests with coverage)
 ./scripts/check.sh
 ```
+
+### Continuous Integration
+
+GitHub Actions (`.github/workflows/test.yml`) runs on every push and on pull requests into `main`, across Python 3.10–3.12. It installs from `uv.lock` (`uv sync --locked`) so CI uses exactly the versions committed here, and it runs the same four checks as `scripts/check.sh`. The workflow has read-only repository permissions and uses no secrets.
+
+Coverage is enforced with `fail_under` in `pyproject.toml`. It is currently set low (40%) because the matchup, schedule, and settings code added in 2025 does not have tests yet. Raise it as tests are added.
 
 ### Project Structure
 
@@ -317,18 +343,25 @@ espn-fantasy-basketball-mcp/
 ├── espn_fantasy_basketball.py      # Main MCP server using FastMCP
 ├── espn_fantasy_basketball_mcp/    # Core library package
 │   ├── __init__.py
-│   ├── client.py                   # ESPN API client
+│   ├── client.py                   # ESPN API client and analysis logic
 │   ├── models.py                   # Pydantic data models
-│   └── server.py                   # Legacy MCP server (unused)
-├── tests/                          # Test suite
+│   └── server.py                   # Legacy low-level MCP server (unused; kept for reference)
+├── tests/                          # Test suite (all ESPN calls are mocked; no network needed)
 │   ├── test_client.py             # Client tests
+│   ├── test_draft.py              # Draft client tests
+│   ├── test_draft_server.py       # Draft tool tests
 │   ├── test_models.py             # Model tests
-│   └── test_server.py             # Server tests
-├── conftest.py                    # Pytest configuration
-├── pyproject.toml                 # Project configuration
+│   ├── test_server.py             # Server tool tests
+│   ├── test_statistics.py         # Player stats / comparison / trade client tests
+│   └── test_statistics_server.py  # Player stats tool tests
+├── conftest.py                    # Pytest fixtures
+├── scripts/check.sh               # Runs the CI checks locally
+├── .github/workflows/test.yml     # CI
+├── pyproject.toml                 # Project configuration, tool settings, coverage gate
+├── uv.lock                        # Locked dependency versions (used by CI)
 ├── requirements.txt               # Dependencies (for pip users)
 ├── Pipfile                        # Dependencies (for pipenv users)
-├── .python-version               # Python version for pyenv
+├── .python-version               # Python version for pyenv/uv
 └── README.md                     # This file
 ```
 
@@ -340,13 +373,16 @@ This MCP server uses the following ESPN API endpoints:
 - **Base URL**: `https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba`
 - **League Data**: `/seasons/{year}/segments/0/leagues/{league_id}`
   - Teams: `?view=mTeam`
-  - Rosters: `?view=mRoster` 
-  - Matchups: `?view=mMatchup`
-  - Free Agents: `?view=kona_player_info`
+  - League settings and status: `?view=mSettings`
+  - Rosters: `?view=mRoster`
+  - Matchups and schedule: `?view=mMatchup`
+  - Draft: `?view=mDraftDetail`
+  - Players, free agents, and stats: `?view=kona_player_info` with an `x-fantasy-filter` request header
 
 ### NBA Schedule API
 - **Base URL**: `https://site.api.espn.com/apis/site/v2/sports/basketball/nba`
-- **Schedule**: `/scoreboard`
+- **Today's games**: `/scoreboard`
+- **Team season schedule**: `/teams/{team_id}/schedule`
 
 ## API Limitations & Alternatives Needed
 
@@ -438,9 +474,11 @@ nba_games = await client.get_nba_schedule()
 ### Common Issues
 
 1. **"Team not found" errors**: Verify your league ID and ensure you have access to the league
-2. **Authentication errors**: Check that your `espn_s2` and `SWID` cookies are correct and not expired
-3. **Empty results**: Some data may not be available during off-season or for certain league settings
-4. **Rate limiting**: ESPN may temporarily block requests if you make too many in quick succession
+2. **"team_id is required" errors**: Set `ESPN_TEAM_ID` in your MCP config or pass `team_id` to the tool
+3. **Wrong season or empty data**: Check `ESPN_YEAR`. ESPN names seasons by the year they end in, so the 2026-27 season is `2027`
+4. **Authentication errors**: Check that your `espn_s2` and `SWID` cookies are correct and not expired
+5. **Empty results**: Some data may not be available during off-season or for certain league settings
+6. **Rate limiting**: ESPN may temporarily block requests if you make too many in quick succession. `analyze_matchup` in particular makes many requests
 
 ### Debug Mode
 

@@ -13,7 +13,7 @@ repos:
         entry: uv run mypy
         language: system
         types: [python]
-        files: ^espn_fantasy_basketball_mcp/
+        files: ^(espn_fantasy_basketball_mcp/|espn_fantasy_basketball\.py$)
         require_serial: true
         
       - id: pytest

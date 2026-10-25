@@ -150,11 +150,14 @@ class TestStatisticalAnalysisClient:
         )
 
         with patch.object(client, "get_player_stats", new_callable=AsyncMock) as mock_stats:
-            mock_stats.side_effect = [mock_player_1, mock_player_2]
+            mock_stats.return_value = [mock_player_1, mock_player_2]
 
             comparison = await client.compare_players(
                 [12345, 54321], ["points", "rebounds", "assists"]
             )
+
+            # One batched request for all players, not one per player
+            mock_stats.assert_awaited_once_with([12345, 54321])
 
             assert len(comparison.players) == 2
             assert comparison.categories == ["points", "rebounds", "assists"]
