@@ -115,7 +115,7 @@ The following environment variables can be configured:
 
 - **ESPN_LEAGUE_ID**: Your ESPN Fantasy Basketball league ID (required)
 - **ESPN_TEAM_ID**: Your team ID within the league (optional, but required by roster, matchup, schedule, and draft tools unless you pass `team_id` each time)
-- **ESPN_YEAR**: Season as ESPN labels it, which is the calendar year the season *ends* in (the 2026-27 season is `2027`). Optional, but the built-in default is still `2025`, so set this explicitly each season.
+- **ESPN_YEAR**: Season as ESPN labels it, which is the calendar year the season *ends* in (the 2026-27 season is `2027`). Optional. When unset, the server picks the season in progress from today's date (October through December map to the following year). Set it explicitly during September draft prep for a new season, or to look at a past season.
 - **ESPN_S2**: ESPN authentication cookie for private leagues (required for private leagues)
 - **ESPN_SWID**: ESPN SWID cookie for private leagues (required for private leagues)
 - **MY_TIMEZONE**: Timezone for date/time conversions (optional, defaults to `America/New_York`)
@@ -475,7 +475,7 @@ nba_games = await client.get_nba_schedule()
 
 1. **"Team not found" errors**: Verify your league ID and ensure you have access to the league
 2. **"team_id is required" errors**: Set `ESPN_TEAM_ID` in your MCP config or pass `team_id` to the tool
-3. **Wrong season or empty data**: Check `ESPN_YEAR`. ESPN names seasons by the year they end in, so the 2026-27 season is `2027`
+3. **Wrong season or empty data**: Check `ESPN_YEAR` if you set it. ESPN names seasons by the year they end in, so the 2026-27 season is `2027`. Unset, the server infers the current season from the date
 4. **Authentication errors**: Check that your `espn_s2` and `SWID` cookies are correct and not expired
 5. **Empty results**: Some data may not be available during off-season or for certain league settings
 6. **Rate limiting**: ESPN may temporarily block requests if you make too many in quick succession. `analyze_matchup` in particular makes many requests

@@ -3,6 +3,7 @@
 
 import logging
 import os
+from datetime import date
 
 from mcp.server.fastmcp import FastMCP
 
@@ -16,6 +17,22 @@ logger = logging.getLogger("espn-fantasy-basketball-mcp")
 
 # Create the FastMCP server
 mcp = FastMCP("ESPN Fantasy Basketball")
+
+
+def _default_season(today: date | None = None) -> int:
+    """Return the ESPN season ID for the NBA season in progress (or next up).
+
+    ESPN labels a season by the calendar year it *ends* in: the 2026-27 season is 2027.
+    The regular season tips off in October, so October through December map to the
+    following year and January through September map to the current year.
+
+    During September draft prep for a new season, set ESPN_YEAR explicitly.
+
+    Args:
+        today: Date to evaluate (defaults to today; injectable for tests)
+    """
+    today = today or date.today()
+    return today.year + 1 if today.month >= 10 else today.year
 
 
 def _get_espn_credentials(
@@ -37,7 +54,7 @@ def _get_espn_credentials(
     """
     # Use provided parameters or fall back to environment variables
     final_league_id = league_id or int(os.getenv("ESPN_LEAGUE_ID", "0"))
-    final_year = year or int(os.getenv("ESPN_YEAR", "2025"))
+    final_year = year or int(os.getenv("ESPN_YEAR") or _default_season())
     final_espn_s2 = espn_s2 or os.getenv("ESPN_S2")
     final_swid = swid or os.getenv("ESPN_SWID")
 
@@ -71,7 +88,7 @@ async def get_league_teams(
 
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -102,7 +119,7 @@ async def get_league_settings(
 
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -135,7 +152,7 @@ async def get_team_roster(
     Args:
         team_id: Team ID to get roster for (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         scoring_period: Specific scoring period (optional)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
@@ -169,7 +186,7 @@ async def get_team_season_stats(
     Args:
         team_id: Team ID to get season stats for (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -209,7 +226,7 @@ async def get_free_agents(
 
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         size: Number of players to return (max 50, default 50)
         position_id: Filter by position ID (optional)
         verbose: If True, include full season stats and per-game averages.
@@ -242,7 +259,7 @@ async def get_matchups(
 
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         scoring_period: Specific scoring period to get matchups for (optional, defaults to current week)
         team_id: Filter to only return matchups for this team (optional, defaults to ESPN_TEAM_ID env var)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
@@ -288,7 +305,7 @@ async def get_my_current_matchup(
     Args:
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         verbose: If True, include full player stats in rosters.
                  If False, omit player stats from rosters (keeps only lineup info like name, position, injury status) (default False).
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
@@ -332,7 +349,8 @@ async def get_nba_schedule(date: str | None = None) -> list[dict]:
         List of NBA game dictionaries with teams, times, and details
     """
     # Create a temporary client just for NBA API access
-    client = ESPNFantasyBasketballClient(1, 2025)  # Dummy values for NBA API
+    # Dummy league ID; the NBA schedule endpoint does not use league or season
+    client = ESPNFantasyBasketballClient(1, _default_season())
     games = await client.get_nba_schedule(date)
     return [game.model_dump() for game in games]
 
@@ -348,7 +366,7 @@ async def get_draft_status(
 
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -376,7 +394,7 @@ async def should_i_bid(
         current_player_id: ID of player currently being nominated
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -407,7 +425,7 @@ async def who_should_i_target_next(
     Args:
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -438,7 +456,7 @@ async def analyze_my_draft_strategy(
     Args:
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -478,7 +496,7 @@ async def get_available_players(
 
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         limit: Number of players to return (default 50)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
@@ -510,7 +528,7 @@ async def get_player_stats(
     Args:
         player_id: ESPN player ID (int) or list of player IDs (list[int])
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         timeframe: Time period - "season", "projections", "last_7", "last_30"
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
@@ -544,7 +562,7 @@ async def compare_players(
     Args:
         player_ids: List of ESPN player IDs to compare
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         categories: List of categories to compare (optional, defaults to 9-cat)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
@@ -573,7 +591,7 @@ async def analyze_trade_proposal(
         your_player_ids: List of player IDs you would trade away
         their_player_ids: List of player IDs you would receive
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -599,7 +617,7 @@ async def get_trending_players(
 
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         direction: Trending direction - "up" or "down"
         limit: Number of players to return (default 20)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
@@ -639,7 +657,7 @@ async def get_roster_schedule(
         end_date: End date in YYYY-MM-DD format (optional, defaults to 7 days from start)
         scoring_period: Specific scoring period to get schedule for (optional)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -698,7 +716,7 @@ async def analyze_matchup(
         matchup_period: Matchup period to analyze (optional, defaults to next matchup).
                        Use None for next matchup, or specify a period number (e.g., 1, 2, 3...)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
-        year: Season year (e.g., 2025) (optional, uses ESPN_YEAR env var or defaults to 2025)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
