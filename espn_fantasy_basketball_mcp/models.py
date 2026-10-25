@@ -56,7 +56,7 @@ class TrendingPlayer(BaseModel):
     """Player trending information."""
 
     playerId: int
-    player: "Player"
+    player: Player
     trend_direction: str  # "up", "down", "hot", "cold"
     add_percentage: float
     drop_percentage: float
@@ -92,7 +92,7 @@ class Team(BaseModel):
 
 class TeamSeasonStats(BaseModel):
     """Team statistics aggregated across the entire season."""
-    
+
     teamId: int
     teamName: str | None = None
     categoryScores: dict[str, float]  # Season totals for each scoring category
@@ -107,7 +107,7 @@ class TeamSeasonStats(BaseModel):
 
 class CategoryProjection(BaseModel):
     """Projection for a single category in the matchup."""
-    
+
     category: str  # Category name (e.g., "points", "rebounds")
     yourCurrent: float  # Your current total
     opponentCurrent: float  # Opponent's current total
@@ -122,7 +122,7 @@ class CategoryProjection(BaseModel):
 
 class PlayerRecommendation(BaseModel):
     """Recommendation for a specific player."""
-    
+
     playerId: int
     playerName: str
     position: str | None = None
@@ -139,24 +139,24 @@ class PlayerRecommendation(BaseModel):
 
 class MatchupAnalysis(BaseModel):
     """Comprehensive analysis of the current matchup."""
-    
+
     matchupId: int
     scoringPeriod: int
     yourTeamId: int
     opponentTeamId: int
     yourTeamName: str | None = None
     opponentTeamName: str | None = None
-    
+
     # Category analysis
     categoryProjections: list[CategoryProjection]  # Projections for each category
     categoriesWinning: list[str]  # Categories you're projected to win
     categoriesLosing: list[str]  # Categories you're projected to lose
     categoriesTied: list[str]  # Categories projected to tie
     closeCategories: list[str]  # Categories that are close (within threshold)
-    
+
     # Player recommendations
     playerRecommendations: list[PlayerRecommendation]  # Prioritized player recommendations
-    
+
     # Additional context
     yourGamesRemaining: int | None = None  # Total games remaining for your team
     opponentGamesRemaining: int | None = None  # Total games remaining for opponent
@@ -165,7 +165,7 @@ class MatchupAnalysis(BaseModel):
     currentCategoryTies: int | None = None  # Current category ties
     projectedCategoryWins: int | None = None  # Projected category wins
     projectedCategoryLosses: int | None = None  # Projected category losses
-    
+
     # Strategy recommendations
     strategyNotes: list[str]  # Strategic notes and recommendations
 
@@ -188,7 +188,9 @@ class Player(BaseModel):
     defaultPositionId: int
     defaultPosition: str | None = None  # Human-readable position name (e.g., "PG", "SG")
     eligibleSlots: list[int] | None = None
-    eligibleSlotNames: list[str] | None = None  # Human-readable slot names (e.g., ["PG", "SG", "G"])
+    eligibleSlotNames: list[str] | None = (
+        None  # Human-readable slot names (e.g., ["PG", "SG", "G"])
+    )
     injured: bool | None = None
     injuryStatus: str | None = None
     stats: dict[str, Any] | None = None
@@ -208,9 +210,12 @@ class PlayerPoolEntry(BaseModel):
 
 class TodaysGame(BaseModel):
     """Information about a player's game today."""
+
     opponent: str | None = None  # Opponent team abbreviation (e.g., "DET")
     time: str | None = None  # Game time (e.g., "6:00 PM")
-    timeISO: str | None = None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T18:00:00-05:00")
+    timeISO: str | None = (
+        None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T18:00:00-05:00")
+    )
     home: bool | None = None  # True if home game, False if away
 
 
@@ -220,7 +225,9 @@ class RosterEntry(BaseModel):
     lineupSlotId: int
     lineupSlotName: str | None = None  # Human-readable slot name (e.g., "PG", "BENCH", "IR")
     acquisitionDate: int | None = None  # Epoch timestamp in milliseconds
-    acquisitionDateISO: str | None = None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T23:00:00-05:00")
+    acquisitionDateISO: str | None = (
+        None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T23:00:00-05:00")
+    )
     acquisitionType: str | None = None
     injuryStatus: str | None = None
     todaysGame: TodaysGame | None = None  # Today's game info if player has a game
@@ -237,9 +244,13 @@ class MatchupTeam(BaseModel):
     totalPoints: float | None = None
     totalProjectedPoints: float | None = None
     gamesPlayed: int | None = None
-    cumulativeScore: dict[str, Any] | None = None  # Original stat IDs (deprecated, use categoryScores instead)
+    cumulativeScore: dict[str, Any] | None = (
+        None  # Original stat IDs (deprecated, use categoryScores instead)
+    )
     categoryScores: dict[str, float] | None = None  # Scoring categories only (human-readable names)
-    componentStats: dict[str, float] | None = None  # Component stats (FGM, FGA, FTM, FTA) that aren't scoring categories
+    componentStats: dict[str, float] | None = (
+        None  # Component stats (FGM, FGA, FTM, FTA) that aren't scoring categories
+    )
 
 
 class Matchup(BaseModel):
@@ -253,6 +264,7 @@ class Matchup(BaseModel):
 
 class CurrentMatchup(BaseModel):
     """Complete current matchup information including rosters and scores."""
+
     matchupId: int
     scoringPeriod: int
     yourTeam: MatchupTeam
@@ -373,8 +385,11 @@ class DraftRecommendation(BaseModel):
 # League Settings Models
 class ScoringItem(BaseModel):
     """A single scoring category."""
+
     statId: int
-    categoryName: str | None = None  # Human-readable category name (e.g., "points", "rebounds", "assists")
+    categoryName: str | None = (
+        None  # Human-readable category name (e.g., "points", "rebounds", "assists")
+    )
     points: float
     isReverseItem: bool = False
     pointsOverrides: dict[str, Any] = {}
@@ -382,6 +397,7 @@ class ScoringItem(BaseModel):
 
 class ScoringSettings(BaseModel):
     """League scoring configuration."""
+
     scoringType: str  # "H2H_CATEGORY", "H2H_POINTS", "ROTO"
     scoringItems: list[ScoringItem]
     playerRankType: str | None = None
@@ -391,6 +407,7 @@ class ScoringSettings(BaseModel):
 
 class ScheduleSettings(BaseModel):
     """League schedule configuration."""
+
     matchupPeriodCount: int
     matchupPeriodLength: int
     matchupPeriods: dict[str, list[int]]  # Maps matchup period to scoring periods
@@ -402,8 +419,11 @@ class ScheduleSettings(BaseModel):
 
 class RosterSettings(BaseModel):
     """League roster configuration."""
+
     lineupSlotCounts: dict[str, int]  # Maps slot ID to count
-    lineupSlotNames: dict[str, str] | None = None  # Maps slot ID to human-readable slot name (e.g., "0" -> "PG", "12" -> "BENCH")
+    lineupSlotNames: dict[str, str] | None = (
+        None  # Maps slot ID to human-readable slot name (e.g., "0" -> "PG", "12" -> "BENCH")
+    )
     positionLimits: dict[str, int]  # Maps position ID to max count (-1 = unlimited)
     lineupLocktimeType: str  # When lineups lock
     rosterLocktimeType: str | None = None
@@ -413,6 +433,7 @@ class RosterSettings(BaseModel):
 
 class AcquisitionSettings(BaseModel):
     """League acquisition/waiver configuration."""
+
     acquisitionType: str  # "WAIVERS_TRADITIONAL", "FREE_AGENT", etc.
     waiverHours: int
     waiverProcessDays: list[str]  # Days waivers process (e.g., ["SUNDAY"])
@@ -425,8 +446,11 @@ class AcquisitionSettings(BaseModel):
 
 class TradeSettings(BaseModel):
     """League trade configuration."""
+
     deadlineDate: int | None = None  # Epoch timestamp in milliseconds
-    deadlineDateISO: str | None = None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T23:00:00-05:00")
+    deadlineDateISO: str | None = (
+        None  # ISO 8601 formatted datetime with timezone (e.g., "2026-02-28T23:00:00-05:00")
+    )
     vetoVotesRequired: int
     revisionHours: int  # Hours to revise trade
     max: int = -1  # Max trades per season (-1 = unlimited)
@@ -435,6 +459,7 @@ class TradeSettings(BaseModel):
 
 class LeagueStatus(BaseModel):
     """Current league status."""
+
     currentMatchupPeriod: int
     latestScoringPeriod: int
     firstScoringPeriod: int
@@ -445,6 +470,7 @@ class LeagueStatus(BaseModel):
 
 class LeagueSettings(BaseModel):
     """Complete league settings."""
+
     leagueId: int
     leagueName: str
     seasonId: int

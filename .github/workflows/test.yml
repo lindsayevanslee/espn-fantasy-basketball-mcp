@@ -2,43 +2,43 @@ name: Tests
 
 on:
   push:
-    branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+
+# The job only reads the repository; it never writes back to it.
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Install uv
       uses: astral-sh/setup-uv@v3
       with:
-        version: "latest"
-    
+        version: "0.11.32"
+
     - name: Set up Python ${{ matrix.python-version }}
       run: uv python install ${{ matrix.python-version }}
-    
-    - name: Install dependencies
-      run: uv sync --all-extras --dev
-    
-    - name: Run linting
+
+    - name: Install dependencies (from lockfile)
+      run: uv sync --locked --all-extras --dev
+
+    - name: Lint
       run: uv run ruff check .
-    
-    - name: Run type checking
-      run: uv run mypy espn_fantasy_basketball_mcp/
-    
+
+    - name: Check formatting
+      run: uv run ruff format --check .
+
+    - name: Type check
+      run: uv run mypy espn_fantasy_basketball_mcp/ espn_fantasy_basketball.py
+
     - name: Run tests with coverage
-      run: uv run pytest --cov=espn_fantasy_basketball_mcp --cov-report=xml --cov-report=term-missing
-    
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage.xml
-        fail_ci_if_error: false
-        token: ${{ secrets.CODECOV_TOKEN }}
+      run: uv run pytest --cov=espn_fantasy_basketball_mcp --cov-report=term-missing
