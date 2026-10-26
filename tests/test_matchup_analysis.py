@@ -181,7 +181,9 @@ async def test_current_week_projection_only_counts_games_from_today(monkeypatch)
         patch.object(client, "get_league_settings", AsyncMock(return_value=settings)),
         patch.object(client, "get_matchup_for_period", AsyncMock(return_value=matchup)),
         patch.object(
-            client, "_get_scoring_period_dates", AsyncMock(return_value=(_day(-3), _day(3)))
+            client,
+            "get_matchup_period_dates",
+            AsyncMock(return_value=(TODAY - timedelta(days=3), TODAY + timedelta(days=3))),
         ),
         patch.object(client, "get_roster_schedule_summary", side_effect=fake_schedule),
         patch.object(client, "get_player_stats", side_effect=fake_stats),
@@ -308,7 +310,9 @@ async def test_unavailable_players_do_not_project_and_starters_are_flagged(monke
         patch.object(client, "get_league_settings", AsyncMock(return_value=settings)),
         patch.object(client, "get_matchup_for_period", AsyncMock(return_value=matchup)),
         patch.object(
-            client, "_get_scoring_period_dates", AsyncMock(return_value=(_day(-3), _day(3)))
+            client,
+            "get_matchup_period_dates",
+            AsyncMock(return_value=(TODAY - timedelta(days=3), TODAY + timedelta(days=3))),
         ),
         patch.object(client, "get_roster_schedule_summary", side_effect=fake_schedule),
         patch.object(client, "get_player_stats", side_effect=fake_stats),
@@ -422,7 +426,9 @@ async def test_percentage_projection_uses_made_and_attempted(monkeypatch):
         patch.object(client, "get_league_settings", AsyncMock(return_value=settings)),
         patch.object(client, "get_matchup_for_period", AsyncMock(return_value=matchup)),
         patch.object(
-            client, "_get_scoring_period_dates", AsyncMock(return_value=(_day(-3), _day(3)))
+            client,
+            "get_matchup_period_dates",
+            AsyncMock(return_value=(TODAY - timedelta(days=3), TODAY + timedelta(days=3))),
         ),
         patch.object(client, "get_roster_schedule_summary", side_effect=fake_schedule),
         patch.object(client, "get_player_stats", side_effect=fake_stats),

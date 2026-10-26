@@ -27,9 +27,10 @@ import logging
 import os
 import sys
 import traceback
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -280,6 +281,30 @@ async def main() -> int:
         )
         cats = [i.categoryName for i in settings.scoringSettings.scoringItems]
         report.info(f"scoring categories: {cats}")
+        periods = settings.scheduleSettings.matchupPeriods
+        cur_periods = periods.get(str(st.currentMatchupPeriod), [])
+        window = await client.get_matchup_period_dates(st.currentMatchupPeriod, settings)
+        report.info(
+            f"matchup period {st.currentMatchupPeriod} = scoring periods {cur_periods[:1]}..{cur_periods[-1:]} "
+            f"-> {window[0] if window else '?'}..{window[1] if window else '?'}"
+        )
+        report.check(
+            bool(periods),
+            "League settings include the matchupPeriods mapping",
+            f"{len(periods)} periods",
+        )
+        report.check(
+            st.latestScoringPeriod in cur_periods,
+            "Today's scoring period falls inside the current matchup period",
+            f"latest={st.latestScoringPeriod} current period covers {cur_periods[:1]}..{cur_periods[-1:]}",
+        )
+        if window:
+            today_et = datetime.now(ZoneInfo("America/New_York")).date()
+            report.check(
+                window[0] <= today_et <= window[1],
+                "Mapped dates for the current matchup period contain today",
+                f"{window[0]}..{window[1]} vs today(ET)={today_et}",
+            )
     except Exception as exc:  # noqa: BLE001
         report.error("Fetch league settings", exc)
         traceback.print_exc()
@@ -377,9 +402,8 @@ async def main() -> int:
         current = settings.status.currentMatchupPeriod
         report.info("this makes many requests; allow 30-90 seconds")
         analysis = await client.analyze_matchup(team_id, current)
-        start, end = await client._get_scoring_period_dates(current)
-        if start and end:
-            end = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
+        window = await client.get_matchup_period_dates(current, settings)
+        start, end = (window[0].isoformat(), window[1].isoformat()) if window else (None, None)
         schedule = await client.get_roster_schedule_summary(team_id, start, end, current)
         week_games = {ps.playerId: ps.gamesThisWeek for ps in schedule.playerSchedules}
 
