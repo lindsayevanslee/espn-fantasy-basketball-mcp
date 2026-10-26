@@ -375,7 +375,8 @@ class TestDraftSettingsAware:
         assert ESPNFantasyBasketballClient._team_on_the_clock(5, [], "AUCTION") is None
 
     @pytest.mark.asyncio
-    async def test_settings_expose_draft_and_roster_size(self, client):
+    async def test_settings_expose_draft_and_roster_size(self, client, monkeypatch):
+        monkeypatch.setenv("MY_TIMEZONE", "America/Chicago")
         payload = {
             "id": 12345,
             "seasonId": 2027,
@@ -403,14 +404,49 @@ class TestDraftSettingsAware:
                         "12": 3,
                         "13": 2,
                     },
-                    "positionLimits": {},
+                    "positionLimits": {"1": -1, "2": -1, "3": -1, "4": -1, "5": 4},
                     "lineupLocktimeType": "INDIVIDUAL_GAME",
                 },
+                "scheduleSettings": {
+                    "matchupPeriodCount": 3,
+                    "matchupPeriods": {"1": [1], "2": [2], "3": [3, 4]},
+                },
+                "acquisitionSettings": {"waiverProcessDays": ["SUNDAY"], "waiverProcessHour": 8},
             },
-            "status": {"currentMatchupPeriod": 1, "latestScoringPeriod": 6, "isActive": True},
+            "status": {
+                "currentMatchupPeriod": 1,
+                "latestScoringPeriod": 6,
+                "firstScoringPeriod": 1,
+                "finalScoringPeriod": 170,
+                "isActive": True,
+            },
         }
-        with patch.object(client, "_make_request", AsyncMock(return_value=payload)):
+        from datetime import date
+
+        with (
+            patch.object(client, "_make_request", AsyncMock(return_value=payload)),
+            patch.object(
+                client, "_scoring_period_anchor", AsyncMock(return_value=(6, date(2026, 10, 25)))
+            ),
+        ):
             settings = await client.get_league_settings()
+
+        # Derived, reader-friendly fields
+        assert settings.scheduleSettings.matchupPeriodDates == {
+            "1": ["2026-10-20", "2026-10-25"],
+            "2": ["2026-10-26", "2026-11-01"],
+            "3": ["2026-11-02", "2026-11-15"],  # two-week period
+        }
+        assert settings.rosterSettings.positionLimitNames == {
+            "PG": -1,
+            "SG": -1,
+            "SF": -1,
+            "PF": -1,
+            "C": 4,
+        }
+        assert settings.rosterSettings.lineupSlotNames["11"] == "UTIL"
+        assert settings.acquisitionSettings.waiverProcessHourTimezone == "America/New_York"
+        assert settings.acquisitionSettings.waiverProcessTimeLocal == "07:00 America/Chicago"
         assert settings.draftSettings.type == "AUCTION"
         assert settings.draftSettings.auctionBudget == 300
         assert settings.draftSettings.pickOrder == [8, 3, 5]

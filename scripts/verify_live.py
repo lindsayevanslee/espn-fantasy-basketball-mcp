@@ -295,6 +295,32 @@ async def main() -> int:
             f"(mapping entry {cur_entry}) -> {window[0] if window else '?'}..{window[1] if window else '?'}"
         )
         multi = {k: v for k, v in periods.items() if len(v) > 1}
+        dates = settings.scheduleSettings.matchupPeriodDates or {}
+        nxt = str(st.currentMatchupPeriod + 1)
+        report.info(
+            f"matchupPeriodDates: current={dates.get(str(st.currentMatchupPeriod))} next={dates.get(nxt)}"
+        )
+        report.check(
+            bool(dates),
+            "Settings expose calendar dates for matchup periods",
+            f"{len(dates)} periods",
+        )
+        report.info(f"position limits: {settings.rosterSettings.positionLimitNames}")
+        report.info(
+            f"waivers: {settings.acquisitionSettings.waiverProcessDays} at hour "
+            f"{settings.acquisitionSettings.waiverProcessHour} ET = "
+            f"{settings.acquisitionSettings.waiverProcessTimeLocal}"
+        )
+        slot_names = settings.rosterSettings.lineupSlotNames or {}
+        used_slots = {
+            f"{k}={slot_names.get(k, '?')}": v
+            for k, v in settings.rosterSettings.lineupSlotCounts.items()
+            if v
+        }
+        report.info(f"lineup slot counts (id=name: count): {used_slots}")
+        report.info(
+            "  compare the slot names above with the ESPN lineup page; UTIL should be id 11"
+        )
         report.check(
             bool(periods),
             "League settings include the matchupPeriods mapping",
@@ -366,7 +392,7 @@ async def main() -> int:
         static_codes = set(client._get_pro_team_id_to_abbrev().values())
         mismatches: list[str] = []
         bad_codes: list[str] = []
-        print(f"       {'player':<26}{'team':<6}{'slot':<7}{'injury':<12}today")
+        print(f"       {'player':<26}{'team':<6}{'slot (id)':<12}{'injury':<12}today")
         for entry in roster.entries:
             p = entry.playerPoolEntry.player
             code = p.proTeamAbbrev
@@ -380,8 +406,9 @@ async def main() -> int:
                 bad_codes.append(f"{p.fullName}: proTeamId={p.proTeamId} abbrev={code}")
             tg = entry.todaysGame
             today_txt = f"{'vs' if tg.home else '@'} {tg.opponent} {tg.time}" if tg else "-"
+            slot_txt = f"{entry.lineupSlotName or ''} ({entry.lineupSlotId})"
             print(
-                f"       {p.fullName[:25]:<26}{(code or '?'):<6}{(entry.lineupSlotName or ''):<7}"
+                f"       {p.fullName[:25]:<26}{(code or '?'):<6}{slot_txt:<12}"
                 f"{(entry.injuryStatus or ''):<12}{today_txt}"
             )
         report.check(

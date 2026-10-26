@@ -120,3 +120,16 @@ class TestParseTodaysGames:
     def test_malformed_payload_returns_empty(self, client):
         games, mapping = client._parse_todays_games({"events": [{"competitions": []}]})
         assert games == {} and mapping == {}
+
+
+class TestLineupSlotNames:
+    def test_espn_basketball_slot_ids(self):
+        from espn_fantasy_basketball_mcp.constants import LINEUP_SLOT_NAMES
+
+        assert LINEUP_SLOT_NAMES[7] == "SG/SF"
+        assert LINEUP_SLOT_NAMES[8] == "G/F"
+        assert LINEUP_SLOT_NAMES[9] == "PF/C"
+        assert LINEUP_SLOT_NAMES[10] == "F/C"
+        assert LINEUP_SLOT_NAMES[11] == "UTIL"
+        assert LINEUP_SLOT_NAMES[12] == "BENCH" and LINEUP_SLOT_NAMES[13] == "IR"
+        assert list(LINEUP_SLOT_NAMES.values()).count("UTIL") == 1, "only slot 11 is UTIL"
