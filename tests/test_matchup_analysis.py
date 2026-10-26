@@ -4,7 +4,7 @@ Everything the method fetches is mocked at the client-method boundary, so these 
 exercise the projection and recommendation logic without any network access.
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
