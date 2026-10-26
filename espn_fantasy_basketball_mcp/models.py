@@ -128,7 +128,11 @@ class PlayerRecommendation(BaseModel):
     position: str | None = None
     lineupSlotId: int | None = None
     lineupSlotName: str | None = None
-    gamesRemaining: int | None = None  # Games remaining this week
+    gamesRemaining: int | None = None  # Scheduled games not yet played this matchup
+    availability: str | None = (
+        None  # ACTIVE, DAY_TO_DAY, QUESTIONABLE, DOUBTFUL, OUT, SUSPENDED, IR, FA
+    )
+    expectedGames: float | None = None  # gamesRemaining discounted by availability
     priority: int  # Priority score (1-10, higher = more important to start)
     reasoning: str
     categoriesHelped: list[str]  # Categories this player helps with
@@ -158,8 +162,12 @@ class MatchupAnalysis(BaseModel):
     playerRecommendations: list[PlayerRecommendation]  # Prioritized player recommendations
 
     # Additional context
-    yourGamesRemaining: int | None = None  # Total games remaining for your team
-    opponentGamesRemaining: int | None = None  # Total games remaining for opponent
+    yourGamesRemaining: int | None = None  # Scheduled games not yet played, all rostered players
+    opponentGamesRemaining: int | None = None
+    yourExpectedGames: float | None = (
+        None  # Games remaining discounted by availability (OUT, IR, FA...)
+    )
+    opponentExpectedGames: float | None = None
     currentCategoryWins: int | None = None  # Current category wins
     currentCategoryLosses: int | None = None  # Current category losses
     currentCategoryTies: int | None = None  # Current category ties
@@ -168,6 +176,7 @@ class MatchupAnalysis(BaseModel):
 
     # Strategy recommendations
     strategyNotes: list[str]  # Strategic notes and recommendations
+    lineupWarnings: list[str] = []  # Starters who cannot play (OUT, suspended, unsigned, on IR)
 
 
 class PlayerOwnership(BaseModel):

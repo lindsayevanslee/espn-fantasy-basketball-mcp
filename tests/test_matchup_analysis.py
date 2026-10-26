@@ -82,20 +82,34 @@ def _settings(stat_ids: list[int]) -> LeagueSettings:
     )
 
 
-def _roster(team_id: int, player_ids: list[int]) -> Roster:
-    return Roster(
-        teamId=team_id,
-        entries=[
-            RosterEntry(
-                playerId=pid,
-                lineupSlotId=0,
-                playerPoolEntry=PlayerPoolEntry(
-                    id=pid, player=Player(id=pid, fullName=f"Player {pid}", defaultPositionId=1)
-                ),
-            )
-            for pid in player_ids
-        ],
+def _entry(
+    pid: int,
+    slot: int = 0,
+    injury: str | None = None,
+    pro_team_id: int | None = 2,
+    pro_team_abbrev: str | None = "BOS",
+) -> RosterEntry:
+    return RosterEntry(
+        playerId=pid,
+        lineupSlotId=slot,
+        lineupSlotName={0: "PG", 1: "SG", 12: "BENCH", 13: "IR"}.get(slot),
+        injuryStatus=injury,
+        playerPoolEntry=PlayerPoolEntry(
+            id=pid,
+            player=Player(
+                id=pid,
+                fullName=f"Player {pid}",
+                defaultPositionId=1,
+                proTeamId=pro_team_id,
+                proTeamAbbrev=pro_team_abbrev,
+                injuryStatus=injury,
+            ),
+        ),
     )
+
+
+def _roster(team_id: int, player_ids: list[int]) -> Roster:
+    return Roster(teamId=team_id, entries=[_entry(pid) for pid in player_ids])
 
 
 def _schedule(team_id: int, games_by_player: dict[int, list[str]]) -> RosterScheduleSummary:
@@ -245,3 +259,104 @@ def test_games_remaining_by_player_skips_unparseable_dates():
     schedule = _schedule(1, {7: ["not-a-date", _day(1)]})
     remaining = ESPNFantasyBasketballClient._games_remaining_by_player(schedule, NOW)
     assert remaining == {7: 1}
+
+
+@pytest.mark.asyncio
+async def test_unavailable_players_do_not_project_and_starters_are_flagged(monkeypatch):
+    """OUT / FA / IR players contribute no games; OUT and FA starters produce lineup warnings."""
+    monkeypatch.setenv("MY_TIMEZONE", "UTC")
+    client = ESPNFantasyBasketballClient(league_id=12345, year=2027)
+    settings = _settings([0])  # points only
+
+    my_roster = Roster(
+        teamId=1,
+        entries=[
+            _entry(101),  # healthy starter, PG
+            _entry(102, slot=1, injury="OUT"),  # OUT starter, SG
+            _entry(103, slot=0, injury="DAY_TO_DAY"),  # questionable starter
+            _entry(104, slot=1, pro_team_id=0, pro_team_abbrev="FA"),  # unsigned starter
+            _entry(105, slot=12, injury="OUT"),  # OUT on the bench: no warning
+            _entry(106, slot=13),  # IR slot
+        ],
+    )
+    their_roster = Roster(teamId=2, entries=[_entry(201), _entry(202, injury="OUT")])
+    matchup = CurrentMatchup(
+        matchupId=1,
+        scoringPeriod=30,
+        yourTeam=MatchupTeam(teamId=1, teamName="Me", categoryScores={"points": 100.0}),
+        opponentTeam=MatchupTeam(teamId=2, teamName="Them", categoryScores={"points": 100.0}),
+        yourRoster=my_roster,
+        opponentRoster=their_roster,
+    )
+    # everyone has two games left
+    two = [_day(1), _day(2)]
+    my_schedule = _schedule(1, dict.fromkeys((101, 102, 103, 105, 106), two))  # 104 has no team
+    their_schedule = _schedule(2, {201: two, 202: two})
+
+    projections = [
+        _stats(pid, "projections", points=10.0) for pid in (101, 102, 103, 104, 105, 106, 201, 202)
+    ]
+    recent = [_stats(pid, "last_7", points=0.0) for pid in (101, 102, 103, 104, 105, 106, 201, 202)]
+
+    async def fake_stats(player_ids, timeframe):
+        return projections if timeframe == "projections" else recent
+
+    async def fake_schedule(team_id, start, end, period):
+        return my_schedule if team_id == 1 else their_schedule
+
+    with (
+        patch.object(client, "get_league_settings", AsyncMock(return_value=settings)),
+        patch.object(client, "get_matchup_for_period", AsyncMock(return_value=matchup)),
+        patch.object(
+            client, "_get_scoring_period_dates", AsyncMock(return_value=(_day(-3), _day(3)))
+        ),
+        patch.object(client, "get_roster_schedule_summary", side_effect=fake_schedule),
+        patch.object(client, "get_player_stats", side_effect=fake_stats),
+    ):
+        analysis = await client.analyze_matchup(team_id=1, matchup_period=CURRENT_PERIOD)
+
+    points = next(c for c in analysis.categoryProjections if c.category == "points")
+    # Only 101 (2 games) and 103 (2 games, day-to-day counts fully) project: 100 + 4*10
+    assert points.yourProjected == pytest.approx(140.0)
+    # Opponent: only 201 projects: 100 + 2*10
+    assert points.opponentProjected == pytest.approx(120.0)
+
+    # Raw remaining counts every scheduled game; expected games discount unavailable players
+    assert analysis.yourGamesRemaining == 10
+    assert analysis.yourExpectedGames == pytest.approx(4.0)
+    assert analysis.opponentGamesRemaining == 4
+    assert analysis.opponentExpectedGames == pytest.approx(2.0)
+
+    rec_ids = [r.playerId for r in analysis.playerRecommendations]
+    assert 101 in rec_ids and 103 in rec_ids
+    assert not {102, 104, 105, 106} & set(rec_ids), "OUT, FA, and IR players are never recommended"
+    by_id = {r.playerId: r for r in analysis.playerRecommendations}
+    assert by_id[103].availability == "DAY_TO_DAY"
+    assert by_id[103].expectedGames == pytest.approx(2.0)
+    assert by_id[103].priority < by_id[101].priority, "uncertain status lowers priority"
+    assert "DAY_TO_DAY" in by_id[103].reasoning
+
+    warnings = "\n".join(analysis.lineupWarnings)
+    assert "Player 102 (SG) is OUT with 2 game(s) left" in warnings
+    assert "Player 104 (SG) is not on an NBA roster" in warnings
+    assert "Player 103 (PG) is DAY_TO_DAY" in warnings
+    assert "Player 105" not in warnings, "a benched OUT player is not a lineup problem"
+    assert "Player 106" not in warnings, "IR slot is where an injured player belongs"
+    assert any("lineup warning" in n for n in analysis.strategyNotes)
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        (_entry(1), ("ACTIVE", 1.0)),
+        (_entry(1, injury="ACTIVE"), ("ACTIVE", 1.0)),
+        (_entry(1, injury="DAY_TO_DAY"), ("DAY_TO_DAY", 1.0)),
+        (_entry(1, injury="DOUBTFUL"), ("DOUBTFUL", 0.5)),
+        (_entry(1, injury="OUT"), ("OUT", 0.0)),
+        (_entry(1, injury="SUSPENSION"), ("SUSPENDED", 0.0)),
+        (_entry(1, slot=13, injury="ACTIVE"), ("IR", 0.0)),
+        (_entry(1, pro_team_id=0, pro_team_abbrev="FA", injury="ACTIVE"), ("FA", 0.0)),
+    ],
+)
+def test_availability_classification(entry, expected):
+    assert ESPNFantasyBasketballClient._availability(entry) == expected

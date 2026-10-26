@@ -380,7 +380,9 @@ async def main() -> int:
         )
         report.info(
             f"games remaining: you={analysis.yourGamesRemaining} "
-            f"(of {schedule.totalGamesThisWeek} this week) opp={analysis.opponentGamesRemaining}"
+            f"(of {schedule.totalGamesThisWeek} this week) opp={analysis.opponentGamesRemaining}; "
+            f"expected after availability: you={analysis.yourExpectedGames} "
+            f"opp={analysis.opponentExpectedGames}"
         )
         report.check(
             (analysis.yourGamesRemaining or 0) <= schedule.totalGamesThisWeek,
@@ -418,13 +420,15 @@ async def main() -> int:
             f"regressed: {regress}",
         )
 
-        print(f"\n       {'player':<26}{'left':>5}{'/wk':>4}  helped / hurt")
+        print(f"\n       {'player':<26}{'left':>5}{'/wk':>4}  {'status':<12}helped / hurt")
         for r in analysis.playerRecommendations[:15]:
             print(
                 f"       {r.playerName[:25]:<26}{r.gamesRemaining or 0:>5}"
-                f"{week_games.get(r.playerId, 0):>4}  "
+                f"{week_games.get(r.playerId, 0):>4}  {(r.availability or ''):<12}"
                 f"{', '.join(r.categoriesHelped) or '-'} / {', '.join(r.categoriesHurt) or '-'}"
             )
+        for warning in analysis.lineupWarnings:
+            report.info(f"lineup warning: {warning}")
         for note in analysis.strategyNotes:
             report.info(f"note: {note}")
     except Exception as exc:  # noqa: BLE001
