@@ -26,7 +26,7 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 #### Matchup Tools
 7. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
 8. **get_my_current_matchup** - Your current matchup, both rosters, and category scores in one call
-9. **analyze_matchup** - Category-by-category projections, close categories, and start/sit priorities for a matchup
+9. **analyze_matchup** - Category-by-category projections, close categories, start/sit priorities, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
 10. **get_roster_schedule** - Games this week and next for every player on your roster
 
 #### Player Analysis Tools
@@ -362,8 +362,8 @@ uv run python scripts/verify_live.py
 It reads `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_S2`, `ESPN_SWID`, `ESPN_YEAR`, and `MY_TIMEZONE`
 from the environment, and anything not set there from the `env` block of this server's entry in
 your Claude Desktop config. If Claude Desktop already works, no extra setup is needed. Use
-`--config PATH` if your config lives somewhere unusual, or `--server NAME` if you have several
-ESPN entries. Alternatively copy `.env.example` to `.env` (gitignored) and load it with
+`--config PATH` if your config lives somewhere unusual, `--server NAME` if you have several
+ESPN entries, or `--year 2027` to check a specific season regardless of `ESPN_YEAR`. Alternatively copy `.env.example` to `.env` (gitignored) and load it with
 `set -a; source .env; set +a`.
 
 It prints a PASS/FAIL report covering: the season your settings resolve to, today's NBA

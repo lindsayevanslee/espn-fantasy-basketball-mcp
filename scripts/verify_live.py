@@ -9,7 +9,8 @@ Usage (from the repository root):
     uv run python scripts/verify_live.py
 
 Credentials are taken from the environment (ESPN_LEAGUE_ID, ESPN_TEAM_ID, ESPN_S2, ESPN_SWID,
-and optionally ESPN_YEAR, MY_TIMEZONE). Anything not set there is read from the `env` block of
+and optionally ESPN_YEAR, MY_TIMEZONE). Pass --year 2027 to check a specific season regardless
+of ESPN_YEAR. Anything not set there is read from the `env` block of
 this server's entry in your Claude Desktop config, so if Claude Desktop already works you need
 no extra setup. Override the config location with --config PATH, or pick a specific server entry
 with --server NAME.
@@ -206,6 +207,9 @@ async def main() -> int:
         "--config", help="path to claude_desktop_config.json (default: platform location)"
     )
     parser.add_argument("--server", help="name of the mcpServers entry to read env from")
+    parser.add_argument(
+        "--year", type=int, help="ESPN season ID to use for this run, overriding ESPN_YEAR"
+    )
     args = parser.parse_args()
 
     report = Report()
@@ -235,12 +239,17 @@ async def main() -> int:
     team_id = int(team_id_raw)
 
     year_env = os.getenv("ESPN_YEAR")
-    year = int(year_env) if year_env else _default_season()
+    if args.year:
+        year, year_source = args.year, "from --year"
+    elif year_env:
+        year, year_source = int(year_env), "from ESPN_YEAR"
+    else:
+        year, year_source = _default_season(), "computed default"
 
     report.info(
         f"league_id={league_id} team_id={team_id} timezone={os.getenv('MY_TIMEZONE', 'America/New_York (default)')}"
     )
-    report.info(f"season={year} ({'from ESPN_YEAR' if year_env else 'computed default'})")
+    report.info(f"season={year} ({year_source})")
     report.info(
         f"cookies: espn_s2={'set' if espn_s2 else 'NOT SET'} swid={'set' if swid else 'NOT SET'}"
     )
@@ -380,7 +389,9 @@ async def main() -> int:
         )
         report.info(
             f"games remaining: you={analysis.yourGamesRemaining} "
-            f"(of {schedule.totalGamesThisWeek} this week) opp={analysis.opponentGamesRemaining}"
+            f"(of {schedule.totalGamesThisWeek} this week) opp={analysis.opponentGamesRemaining}; "
+            f"expected after availability: you={analysis.yourExpectedGames} "
+            f"opp={analysis.opponentExpectedGames}"
         )
         report.check(
             (analysis.yourGamesRemaining or 0) <= schedule.totalGamesThisWeek,
@@ -418,13 +429,15 @@ async def main() -> int:
             f"regressed: {regress}",
         )
 
-        print(f"\n       {'player':<26}{'left':>5}{'/wk':>4}  helped / hurt")
+        print(f"\n       {'player':<26}{'left':>5}{'/wk':>4}  {'status':<12}helped / hurt")
         for r in analysis.playerRecommendations[:15]:
             print(
                 f"       {r.playerName[:25]:<26}{r.gamesRemaining or 0:>5}"
-                f"{week_games.get(r.playerId, 0):>4}  "
+                f"{week_games.get(r.playerId, 0):>4}  {(r.availability or ''):<12}"
                 f"{', '.join(r.categoriesHelped) or '-'} / {', '.join(r.categoriesHurt) or '-'}"
             )
+        for warning in analysis.lineupWarnings:
+            report.info(f"lineup warning: {warning}")
         for note in analysis.strategyNotes:
             report.info(f"note: {note}")
     except Exception as exc:  # noqa: BLE001

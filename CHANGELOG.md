@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- `analyze_matchup` is availability-aware. Players who are OUT, suspended, in the IR slot, or
+  not on an NBA roster (`FA`) contribute no games to projections and are never recommended;
+  DOUBTFUL players count for half. New fields: `yourExpectedGames`/`opponentExpectedGames`,
+  per-player `availability` and `expectedGames`, and `lineupWarnings` naming starters who cannot
+  play or whose status should be checked before tip-off. The games-edge strategy note now uses
+  expected games.
+
 ### Changed
 - ESPN responses are cached in memory, process-wide, with per-endpoint lifetimes (NBA team
   schedules 6h, league settings 10m, team list 5m, scoreboard 60s, live data 15s). Concurrent

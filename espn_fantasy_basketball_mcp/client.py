@@ -1272,6 +1272,38 @@ class ESPNFantasyBasketballClient:
         "freeThrowPercentage": (80.0, 70.0),
     }
 
+    # Share of remaining games a player is expected to play, by ESPN injury status.
+    _AVAILABILITY_FACTORS: dict[str, float] = {
+        "ACTIVE": 1.0,
+        "NORMAL": 1.0,
+        "DAY_TO_DAY": 1.0,
+        "QUESTIONABLE": 1.0,
+        "PROBABLE": 1.0,
+        "DOUBTFUL": 0.5,
+        "OUT": 0.0,
+        "SUSPENSION": 0.0,
+        "SUSPENDED": 0.0,
+    }
+    _SLOT_BENCH = 12
+    _SLOT_IR = 13
+
+    @classmethod
+    def _availability(cls, entry: RosterEntry) -> tuple[str, float]:
+        """Classify how available a rostered player is for the remaining games.
+
+        Returns a (label, factor) pair. The factor scales the player's remaining games in
+        projections: 1.0 for healthy and day-to-day players, 0.5 for doubtful, 0.0 for players
+        who cannot score (OUT, suspended, in the IR slot, or unsigned/"FA").
+        """
+        player = entry.playerPoolEntry.player
+        if player.proTeamAbbrev == "FA" or player.proTeamId == 0:
+            return "FA", 0.0
+        if entry.lineupSlotId == cls._SLOT_IR:
+            return "IR", 0.0
+        status = (entry.injuryStatus or player.injuryStatus or "ACTIVE").upper()
+        label = "SUSPENDED" if status == "SUSPENSION" else status
+        return label, cls._AVAILABILITY_FACTORS.get(status, 1.0)
+
     @staticmethod
     def _games_remaining_by_player(
         schedule: RosterScheduleSummary, now: datetime, window_end: date | None = None
@@ -1479,6 +1511,23 @@ class ESPNFantasyBasketballClient:
         your_games_remaining = sum(your_games_left.values())
         opponent_games_remaining = sum(opponent_games_left.values())
 
+        # Discount remaining games by availability: an OUT, suspended, IR, or unsigned player
+        # contributes nothing, a DOUBTFUL player half. Projections use these expected games.
+        your_availability = {e.playerId: self._availability(e) for e in matchup.yourRoster.entries}
+        opponent_availability = {
+            e.playerId: self._availability(e) for e in matchup.opponentRoster.entries
+        }
+        your_expected = {
+            pid: games * your_availability.get(pid, ("ACTIVE", 1.0))[1]
+            for pid, games in your_games_left.items()
+        }
+        opponent_expected = {
+            pid: games * opponent_availability.get(pid, ("ACTIVE", 1.0))[1]
+            for pid, games in opponent_games_left.items()
+        }
+        your_expected_games = round(sum(your_expected.values()), 1)
+        opponent_expected_games = round(sum(opponent_expected.values()), 1)
+
         for stat_id in scoring_stat_ids:
             category_name = stat_mapping.get(str(stat_id))
             if not category_name:
@@ -1569,7 +1618,7 @@ class ESPNFantasyBasketballClient:
                     # Add projected contributions for games remaining (not yet tipped off)
                     for entry in matchup.yourRoster.entries:
                         player_id = entry.playerId
-                        games_left = your_games_left.get(player_id, 0)
+                        games_left = your_expected.get(player_id, 0.0)
 
                         if games_left > 0 and player_id in player_projections:
                             proj = player_projections[player_id]
@@ -1606,7 +1655,7 @@ class ESPNFantasyBasketballClient:
                     # Add projected contributions for opponent
                     for entry in matchup.opponentRoster.entries:
                         player_id = entry.playerId
-                        games_left = opponent_games_left.get(player_id, 0)
+                        games_left = opponent_expected.get(player_id, 0.0)
 
                         if games_left > 0 and player_id in player_projections:
                             proj = player_projections[player_id]
@@ -1708,7 +1757,7 @@ class ESPNFantasyBasketballClient:
                     # For current week, only count games that haven't been played yet
                     for entry in matchup.yourRoster.entries:
                         player_id = entry.playerId
-                        games_left = your_games_left.get(player_id, 0)
+                        games_left = your_expected.get(player_id, 0.0)
 
                         if games_left > 0 and player_id in player_projections:
                             proj = player_projections[player_id]
@@ -1744,7 +1793,7 @@ class ESPNFantasyBasketballClient:
                     # Add projected contributions for opponent
                     for entry in matchup.opponentRoster.entries:
                         player_id = entry.playerId
-                        games_left = opponent_games_left.get(player_id, 0)
+                        games_left = opponent_expected.get(player_id, 0.0)
 
                         if games_left > 0 and player_id in player_projections:
                             proj = player_projections[player_id]
@@ -1802,7 +1851,7 @@ class ESPNFantasyBasketballClient:
                 # Calculate projections for your team
                 for entry in matchup.yourRoster.entries:
                     player_id = entry.playerId
-                    games_left = your_games_left.get(player_id, 0)
+                    games_left = your_expected.get(player_id, 0.0)
 
                     if games_left > 0 and player_id in player_projections:
                         proj = player_projections[player_id]
@@ -1815,7 +1864,7 @@ class ESPNFantasyBasketballClient:
                 # Calculate projections for opponent team
                 for entry in matchup.opponentRoster.entries:
                     player_id = entry.playerId
-                    games_left = opponent_games_left.get(player_id, 0)
+                    games_left = opponent_expected.get(player_id, 0.0)
 
                     if games_left > 0 and player_id in player_projections:
                         proj = player_projections[player_id]
@@ -1909,16 +1958,43 @@ class ESPNFantasyBasketballClient:
                 )
             )
 
-        # Generate player recommendations
+        # Generate player recommendations and lineup warnings
         player_recommendations = []
+        lineup_warnings: list[str] = []
 
         for entry in matchup.yourRoster.entries:
             player_id = entry.playerId
             player = entry.playerPoolEntry.player
             games_remaining = your_games_left.get(player_id, 0)
+            availability, factor = your_availability.get(player_id, ("ACTIVE", 1.0))
+            slot_name = entry.lineupSlotName or self._get_lineup_slot_id_mapping().get(
+                entry.lineupSlotId, f"SLOT_{entry.lineupSlotId}"
+            )
+            is_starter = entry.lineupSlotId not in (self._SLOT_BENCH, self._SLOT_IR)
 
-            # Skip players with no games remaining or on IR
-            if games_remaining == 0 or entry.lineupSlotId == 13:  # IR slot
+            # A starter who cannot play is a dead lineup slot; say so explicitly.
+            if is_starter and factor == 0.0:
+                if availability == "FA":
+                    lineup_warnings.append(
+                        f"{player.fullName} ({slot_name}) is not on an NBA roster and cannot "
+                        "score; replace or move to bench"
+                    )
+                elif games_remaining > 0:
+                    lineup_warnings.append(
+                        f"{player.fullName} ({slot_name}) is {availability} with "
+                        f"{games_remaining} game(s) left; move to bench and start a healthy player"
+                    )
+            elif (
+                is_starter
+                and games_remaining > 0
+                and availability not in ("ACTIVE", "NORMAL", "PROBABLE")
+            ):
+                lineup_warnings.append(
+                    f"{player.fullName} ({slot_name}) is {availability}; check status before tip-off"
+                )
+
+            # Skip players who cannot play or have no games left
+            if games_remaining == 0 or factor == 0.0:
                 continue
 
             # Get player stats
@@ -1986,6 +2062,12 @@ class ESPNFantasyBasketballClient:
             elif games_remaining == 2:
                 priority_score += 1
 
+            # Discount uncertain availability
+            if availability == "DOUBTFUL":
+                priority_score -= 2
+            elif availability in ("DAY_TO_DAY", "QUESTIONABLE"):
+                priority_score -= 1
+
             # Boost priority if player helps in multiple categories
             if len(categories_helped) >= 3:
                 priority_score += 2
@@ -2001,6 +2083,8 @@ class ESPNFantasyBasketballClient:
                 reasoning_parts.append(f"Strong in: {', '.join(categories_helped)}")
             if games_remaining >= 3:
                 reasoning_parts.append(f"{games_remaining} games remaining")
+            if availability not in ("ACTIVE", "NORMAL"):
+                reasoning_parts.append(f"Status: {availability}")
             if not reasoning_parts:
                 reasoning_parts.append("Active player")
 
@@ -2024,6 +2108,8 @@ class ESPNFantasyBasketballClient:
                     lineupSlotId=entry.lineupSlotId,
                     lineupSlotName=lineup_slot_name,
                     gamesRemaining=games_remaining,
+                    availability=availability,
+                    expectedGames=round(games_remaining * factor, 1),
                     priority=priority_score,
                     reasoning=reasoning,
                     categoriesHelped=categories_helped,
@@ -2061,14 +2147,17 @@ class ESPNFantasyBasketballClient:
                 f"Focus on {len(close_categories)} close categories: {', '.join(close_categories)}"
             )
 
-        if your_games_remaining > opponent_games_remaining:
+        games_edge = round(your_expected_games - opponent_expected_games, 1)
+        if games_edge > 0:
             strategy_notes.append(
-                f"You have {your_games_remaining - opponent_games_remaining} more games remaining - advantage"
+                f"You have {games_edge:g} more expected games remaining than your opponent - advantage"
             )
-        elif opponent_games_remaining > your_games_remaining:
+        elif games_edge < 0:
             strategy_notes.append(
-                f"Opponent has {opponent_games_remaining - your_games_remaining} more games remaining - consider streaming"
+                f"Opponent has {-games_edge:g} more expected games remaining - consider streaming"
             )
+        if lineup_warnings:
+            strategy_notes.append(f"{len(lineup_warnings)} lineup warning(s): see lineupWarnings")
 
         if categories_losing:
             strategy_notes.append(
@@ -2090,12 +2179,15 @@ class ESPNFantasyBasketballClient:
             playerRecommendations=player_recommendations,
             yourGamesRemaining=your_games_remaining,
             opponentGamesRemaining=opponent_games_remaining,
+            yourExpectedGames=your_expected_games,
+            opponentExpectedGames=opponent_expected_games,
             currentCategoryWins=current_category_wins,
             currentCategoryLosses=current_category_losses,
             currentCategoryTies=current_category_ties,
             projectedCategoryWins=projected_category_wins,
             projectedCategoryLosses=projected_category_losses,
             strategyNotes=strategy_notes,
+            lineupWarnings=lineup_warnings,
         )
 
     async def get_team_season_stats(self, team_id: int) -> TeamSeasonStats:
