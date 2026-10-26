@@ -16,14 +16,15 @@ from espn_fantasy_basketball_mcp.models import (
     TradeSettings,
 )
 
-# Mirrors a real league: the opening week ran Tue Oct 20 - Sun Oct 25 2026 (scoring periods
-# 1-6), ordinary weeks are 7 periods, and period 17 is a two-week All-Star stretch.
-MATCHUP_PERIODS = {
-    "1": list(range(1, 7)),
-    "2": list(range(7, 14)),
-    "3": list(range(14, 21)),
-    "17": list(range(112, 126)),
-}
+# Mirrors a real league. ESPN's matchupPeriods is week-indexed: one element per week a period
+# covers (verified live: period 1 was [1] while the daily scoring counter read 6). Period 17 is
+# a two-week All-Star stretch. Opening night was Tue Oct 20 2026; Oct 25 was scoring period 6.
+MATCHUP_PERIODS = (
+    {str(k): [k] for k in range(1, 17)}
+    | {"17": [17, 18]}
+    | {str(k): [k + 1] for k in range(18, 24)}
+)
+DAILY_PERIODS = {"1": list(range(1, 7)), "2": list(range(7, 14))}
 TODAY = date(2026, 10, 25)  # scoring period 6
 
 
@@ -111,23 +112,51 @@ async def test_offseason_anchor_uses_opening_night(client):
 
 
 @pytest.mark.asyncio
-async def test_missing_mapping_falls_back_to_week_estimate(client):
+async def test_empty_mapping_assumes_one_week_periods(client):
     s = _settings(periods={})
-    with patch.object(
-        client, "_get_scoring_period_dates", AsyncMock(return_value=("2026-10-19", "2026-10-25"))
-    ) as legacy:
-        assert await client.get_matchup_period_dates(1, s, today=TODAY) == (
-            date(2026, 10, 19),
-            date(2026, 10, 25),
-        )
-    legacy.assert_awaited_once_with(1)
+    assert await client.get_matchup_period_dates(1, s, today=TODAY) == (
+        date(2026, 10, 20),
+        date(2026, 10, 25),
+    )
+    assert await client.get_matchup_period_dates(3, s, today=TODAY) == (
+        date(2026, 11, 2),
+        date(2026, 11, 8),
+    )
 
 
 @pytest.mark.asyncio
-async def test_unknown_period_and_no_estimate_returns_none(client):
-    s = _settings()
-    with patch.object(client, "_get_scoring_period_dates", AsyncMock(return_value=(None, None))):
-        assert await client.get_matchup_period_dates(99, s, today=TODAY) is None
+async def test_period_beyond_schedule_returns_none(client):
+    assert await client.get_matchup_period_dates(99, _settings(), today=TODAY) is None
+    assert await client.get_matchup_period_dates(0, _settings(), today=TODAY) is None
+
+
+@pytest.mark.asyncio
+async def test_daily_style_mapping_is_also_understood(client):
+    s = _settings(periods=DAILY_PERIODS)
+    assert await client.get_matchup_period_dates(1, s, today=TODAY) == (
+        date(2026, 10, 20),
+        date(2026, 10, 25),
+    )
+    assert await client.get_matchup_period_dates(2, s, today=TODAY) == (
+        date(2026, 10, 26),
+        date(2026, 11, 1),
+    )
+
+
+def test_window_when_season_opens_on_a_monday():
+    """A Monday opener gives a full seven-day first period."""
+    w = ESPNFantasyBasketballClient._matchup_period_window
+    assert w(1, date(2026, 10, 19), {"1": [1], "2": [2]}) == (
+        date(2026, 10, 19),
+        date(2026, 10, 25),
+    )
+    assert w(2, date(2026, 10, 19), {"1": [1], "2": [2]}) == (date(2026, 10, 26), date(2026, 11, 1))
+
+
+@pytest.mark.asyncio
+async def test_settings_fetch_failure_returns_none(client):
+    with patch.object(client, "get_league_settings", AsyncMock(side_effect=RuntimeError("down"))):
+        assert await client.get_matchup_period_dates(1, None, today=TODAY) is None
 
 
 @pytest.mark.asyncio

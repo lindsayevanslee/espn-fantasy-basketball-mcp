@@ -282,21 +282,23 @@ async def main() -> int:
         cats = [i.categoryName for i in settings.scoringSettings.scoringItems]
         report.info(f"scoring categories: {cats}")
         periods = settings.scheduleSettings.matchupPeriods
-        cur_periods = periods.get(str(st.currentMatchupPeriod), [])
+        cur_entry = periods.get(str(st.currentMatchupPeriod), [])
+        anchor = await client._scoring_period_anchor(settings)
+        if anchor:
+            season_start = client._date_for_scoring_period(st.firstScoringPeriod or 1, *anchor)
+            report.info(
+                f"scoring period 1 (opening night) = {season_start}; today is period {anchor[0]}"
+            )
         window = await client.get_matchup_period_dates(st.currentMatchupPeriod, settings)
         report.info(
-            f"matchup period {st.currentMatchupPeriod} = scoring periods {cur_periods[:1]}..{cur_periods[-1:]} "
-            f"-> {window[0] if window else '?'}..{window[1] if window else '?'}"
+            f"matchup period {st.currentMatchupPeriod} covers {max(1, len(cur_entry))} week(s) "
+            f"(mapping entry {cur_entry}) -> {window[0] if window else '?'}..{window[1] if window else '?'}"
         )
+        multi = {k: v for k, v in periods.items() if len(v) > 1}
         report.check(
             bool(periods),
             "League settings include the matchupPeriods mapping",
-            f"{len(periods)} periods",
-        )
-        report.check(
-            st.latestScoringPeriod in cur_periods,
-            "Today's scoring period falls inside the current matchup period",
-            f"latest={st.latestScoringPeriod} current period covers {cur_periods[:1]}..{cur_periods[-1:]}",
+            f"{len(periods)} periods; multi-week: {multi or 'none'}",
         )
         if window:
             today_et = datetime.now(ZoneInfo("America/New_York")).date()

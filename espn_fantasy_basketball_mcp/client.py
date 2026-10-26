@@ -3796,17 +3796,62 @@ class ESPNFantasyBasketballClient:
             return status.firstScoringPeriod or 1, first_game.date()
         return None
 
+    @staticmethod
+    def _matchup_period_window(
+        matchup_period: int,
+        season_start: date,
+        matchup_periods: dict[str, list[int]],
+        week_start_day: int = 0,
+    ) -> tuple[date, date] | None:
+        """Calendar window of a matchup period given opening night and ESPN's period mapping.
+
+        ESPN's scheduleSettings.matchupPeriods is week-indexed: each entry lists the week
+        number(s) a matchup period covers, so a normal period has one element and a two-week
+        All-Star period has two. (Verified live: period 1 was [1] while the daily scoring
+        period counter read 6.) Period 1 starts on opening night and ends at the end of that
+        calendar week; every later period is whole weeks from the next day.
+
+        Some leagues may instead list one scoring period per day; if any entry is longer than
+        four, the lists are treated as daily and the window is their min/max day.
+        """
+        if matchup_period < 1:
+            return None
+        if matchup_periods and str(matchup_period) not in matchup_periods:
+            return None  # beyond the league's schedule
+
+        daily = any(len(v) > 4 for v in matchup_periods.values())
+        if daily:
+            days = matchup_periods[str(matchup_period)]
+            return (
+                season_start + timedelta(days=min(days) - 1),
+                season_start + timedelta(days=max(days) - 1),
+            )
+
+        def weeks_in(period: int) -> int:
+            entry = matchup_periods.get(str(period))
+            return max(1, len(entry)) if entry else 1
+
+        # ESPN weeks end the day before week_start_day (Sunday for Monday starts).
+        days_to_week_end = (week_start_day - 1 - season_start.weekday()) % 7
+        start = season_start
+        end = season_start + timedelta(days=days_to_week_end, weeks=weeks_in(1) - 1)
+        for period in range(2, matchup_period + 1):
+            start = end + timedelta(days=1)
+            end = start + timedelta(days=7 * weeks_in(period) - 1)
+        return start, end
+
     async def get_matchup_period_dates(
         self,
         matchup_period: int,
         league_settings: LeagueSettings | None = None,
         today: date | None = None,
     ) -> tuple[date, date] | None:
-        """First and last calendar day of a matchup period, from ESPN's own mapping.
+        """First and last calendar day of a matchup period.
 
-        scheduleSettings.matchupPeriods lists the scoring periods (one per day) in each matchup
-        period, so a six-day opening week or a two-week All-Star period comes out right. When
-        the mapping or its anchor is unavailable, falls back to the Monday-to-Sunday estimate.
+        Opening night is found from the daily scoring-period counter (today is
+        status.latestScoringPeriod during the season), and the period's length from
+        scheduleSettings.matchupPeriods, so a short opening week or a two-week All-Star period
+        comes out right.
 
         Args:
             matchup_period: Matchup period (week) number
@@ -3821,22 +3866,19 @@ class ESPNFantasyBasketballClient:
                 league_settings = await self.get_league_settings()
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"Could not get league settings for matchup period dates: {e}")
-        if league_settings is not None:
-            periods = league_settings.scheduleSettings.matchupPeriods.get(str(matchup_period))
-            anchor = await self._scoring_period_anchor(league_settings, today)
-            if periods and anchor is not None:
-                anchor_period, anchor_date = anchor
-                return (
-                    self._date_for_scoring_period(min(periods), anchor_period, anchor_date),
-                    self._date_for_scoring_period(max(periods), anchor_period, anchor_date),
-                )
-            logger.info(
-                f"No matchupPeriods mapping for period {matchup_period}; estimating a 7-day week"
-            )
-        start, end = await self._get_scoring_period_dates(matchup_period)
-        if start and end:
-            return date.fromisoformat(start), date.fromisoformat(end)
-        return None
+                return None
+        anchor = await self._scoring_period_anchor(league_settings, today)
+        if anchor is None:
+            return None
+        anchor_period, anchor_date = anchor
+        first_period = league_settings.status.firstScoringPeriod or 1
+        season_start = self._date_for_scoring_period(first_period, anchor_period, anchor_date)
+        return self._matchup_period_window(
+            matchup_period,
+            season_start,
+            league_settings.scheduleSettings.matchupPeriods,
+            self._infer_week_start_day(league_settings),
+        )
 
     async def _get_season_start_date(self) -> datetime | None:
         """Get the NBA season start date by querying the NBA schedule API.
@@ -3882,46 +3924,6 @@ class ESPNFantasyBasketballClient:
         except Exception as e:
             logger.warning(f"Could not determine season start date from API: {e}")
             return None
-
-    async def _get_scoring_period_dates(self, scoring_period: int) -> tuple[str | None, str | None]:
-        """Get date range for a specific scoring period by querying NBA schedule.
-
-        Determines the season start date from the NBA schedule API, then calculates
-        scoring period dates based on week boundaries (Monday-Sunday).
-
-        Args:
-            scoring_period: Scoring period number
-
-        Returns:
-            Tuple of (start_date, end_date) in YYYY-MM-DD format, or (None, None) if not found
-        """
-        from datetime import datetime, timedelta
-
-        # Get league settings to determine week start day
-        try:
-            league_settings = await self.get_league_settings()
-            week_start_day = self._infer_week_start_day(league_settings)
-        except Exception:
-            week_start_day = 0  # Default to Monday
-
-        # Get season start date from NBA schedule API
-        first_game_date = await self._get_season_start_date()
-
-        if not first_game_date:
-            # Fallback: estimate based on typical season start
-            logger.warning("Could not get season start from API, using estimate")
-            first_game_date = datetime(self.year - 1, 10, 15)
-
-        # Find the Monday of the week containing the first game
-        # This becomes the start of scoring period 1
-        days_since_week_start = (first_game_date.weekday() - week_start_day) % 7
-        scoring_period_1_start = first_game_date - timedelta(days=days_since_week_start)
-
-        # Calculate the start date for the requested scoring period
-        scoring_period_start = scoring_period_1_start + timedelta(days=(scoring_period - 1) * 7)
-        scoring_period_end = scoring_period_start + timedelta(days=6)  # Week ends 6 days later
-
-        return scoring_period_start.strftime("%Y-%m-%d"), scoring_period_end.strftime("%Y-%m-%d")
 
     def _infer_week_start_day(self, league_settings: LeagueSettings | None) -> int:
         """Infer week start day from league settings.

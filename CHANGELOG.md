@@ -3,12 +3,13 @@
 ## [Unreleased]
 
 ### Changed
-- Matchup period dates now come from ESPN's `scheduleSettings.matchupPeriods` mapping anchored
-  on `status.latestScoringPeriod` (today's scoring period), instead of assuming 7-day
-  Monday-to-Sunday weeks counted from a Lakers game. A six-day opening week or a two-week
-  All-Star period is now measured correctly in `analyze_matchup` and `get_roster_schedule`.
-  The old estimate remains only as a fallback. `get_roster_schedule`'s `scoring_period`
-  parameter is renamed `matchup_period`, which is what it always was.
+- Matchup period dates are now derived from ESPN's own data instead of 7-day weeks counted
+  from a Lakers game: opening night comes from the daily scoring-period counter
+  (`status.latestScoringPeriod` is today's period), and each period's length in weeks from
+  `scheduleSettings.matchupPeriods` (week-indexed; a two-week All-Star period has two entries).
+  A six-day opening week and multi-week periods are now measured correctly in `analyze_matchup`
+  and `get_roster_schedule`. `get_roster_schedule`'s `scoring_period` parameter is renamed
+  `matchup_period`, which is what it always was.
 
 ### Added
 - New tool `search_players`: find ESPN player IDs by name. Forgiving matching (surname only,
