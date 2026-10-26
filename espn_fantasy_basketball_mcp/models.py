@@ -183,7 +183,7 @@ class Player(BaseModel):
     lastName: str | None = None
     jersey: str | None = None
     proTeamId: int | None = None
-    proTeamAbbrev: str | None = None  # NBA team abbreviation (e.g., "MIN", "LAL")
+    proTeamAbbrev: str | None = None  # NBA team abbreviation (e.g., "MIN", "LAL"); "FA" if unsigned
     proTeamName: str | None = None  # NBA team full name (e.g., "Timberwolves", "Lakers")
     defaultPositionId: int
     defaultPosition: str | None = None  # Human-readable position name (e.g., "PG", "SG")

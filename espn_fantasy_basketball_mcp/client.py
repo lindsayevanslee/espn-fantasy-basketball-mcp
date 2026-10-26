@@ -3029,14 +3029,19 @@ class ESPNFantasyBasketballClient:
             team_id_to_abbrev: Optional mapping from today's games (proTeamId -> abbrev)
 
         Returns:
-            Team abbreviation or None if proTeamId is invalid
+            Team abbreviation, "FA" for an unsigned player (proTeamId 0), or None if unknown
         """
         # Use API value if available (normalized so it matches our lookup keys)
         if api_pro_team_abbrev:
             return self._normalize_nba_abbrev(api_pro_team_abbrev)
 
-        # If no proTeamId, can't resolve
-        if not pro_team_id:
+        # ESPN uses proTeamId 0 for players not on any NBA roster (shown as "FA" in its UI).
+        # Such a player cannot play, so no today's-game or schedule lookups will match "FA".
+        if pro_team_id == 0:
+            return "FA"
+
+        # If no proTeamId at all, can't resolve
+        if pro_team_id is None:
             return None
 
         # Try today's games mapping first (if provided)

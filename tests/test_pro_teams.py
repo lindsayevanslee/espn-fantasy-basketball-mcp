@@ -82,6 +82,13 @@ class TestResolveProTeamAbbrev:
         assert client._resolve_pro_team_abbrev(999) is None
         assert client._resolve_pro_team_abbrev(None) is None
 
+    def test_unsigned_player_is_fa(self, client):
+        """ESPN reports proTeamId 0 for players without an NBA team (shown as FA in its UI)."""
+        assert client._resolve_pro_team_abbrev(0) == "FA"
+        # and FA never matches a scoreboard team, so such a player gets no todaysGame
+        games, _ = client._parse_todays_games(_scoreboard(("BOS", "MIA", (2, 14))))
+        assert "FA" not in games
+
 
 class TestParseTodaysGames:
     def test_cache_keys_match_resolved_abbreviations(self, client):

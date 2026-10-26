@@ -27,6 +27,8 @@
 - `get_matchups` no longer fetches league settings twice.
 
 ### Added
+- Players with no NBA team (ESPN `proTeamId` 0, shown as "FA" in the ESPN UI) now get
+  `proTeamAbbrev` "FA" instead of null, so an unsigned player sitting in a lineup slot is visible.
 - `scripts/verify_live.py`: read-only PASS/FAIL verification against your real league (season,
   today's-game lookups, current-week matchup projections). Reads credentials from the
   environment or, when unset, from your Claude Desktop config. `.env.example` as an alternative.
