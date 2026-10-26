@@ -12,7 +12,10 @@
   WAS, ...), including those in `get_player_schedule`.
 - `analyze_matchup` for the current week no longer double counts games already played:
   projections, `yourGamesRemaining`/`opponentGamesRemaining`, and per-player `gamesRemaining`
-  now count only games dated today or later. (For a future matchup the result is unchanged.)
+  now count only games that have not tipped off yet and that fall inside the matchup period.
+  (The roster schedule deliberately spans an extra week for `gamesNextWeek`; those games were
+  previously being projected into the current matchup.) `PlayerScheduleGame` gains
+  `datetimeISO` so tip-off time is available.
 - `analyze_matchup` compared FG% and FT% against 0.45/0.40 while `PlayerStats` stores
   percentages on a 0–100 scale, so every player counted as a good shooter. Thresholds are now
   48/43 for FG% and 80/70 for FT%.

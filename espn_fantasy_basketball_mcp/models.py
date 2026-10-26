@@ -298,10 +298,11 @@ class NBAGame(BaseModel):
 class PlayerScheduleGame(BaseModel):
     """A single game in a player's schedule."""
 
-    date: str  # YYYY-MM-DD format
+    date: str  # YYYY-MM-DD format, in the MY_TIMEZONE timezone
     opponent: str  # Opponent team abbreviation
     is_home: bool  # True if home game, False if away
     game_id: str | None = None
+    datetimeISO: str | None = None  # Tip-off as ISO 8601 with offset, in MY_TIMEZONE (when known)
 
 
 class PlayerSchedule(BaseModel):

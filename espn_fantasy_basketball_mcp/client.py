@@ -4,6 +4,7 @@ import logging
 import os
 from datetime import date, datetime
 from typing import Any, overload
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -1147,29 +1148,49 @@ class ESPNFantasyBasketballClient:
     }
 
     @staticmethod
-    def _games_remaining_by_player(schedule: RosterScheduleSummary, today: date) -> dict[int, int]:
-        """Count each player's games dated on or after ``today``.
+    def _games_remaining_by_player(
+        schedule: RosterScheduleSummary, now: datetime, window_end: date | None = None
+    ) -> dict[int, int]:
+        """Count each player's games that have not started yet, within the matchup window.
 
-        Games before today are already included in the matchup's current category scores,
-        so projecting them again would double count. A game dated today counts as remaining
-        even if it has already tipped off, which slightly overstates projections on game days.
+        Games already played (or in progress) are reflected in the matchup's current category
+        scores, so projecting them again would double count. Games after ``window_end`` belong
+        to a later matchup period and are excluded; the schedule summaries deliberately fetch an
+        extra week so ``gamesNextWeek`` can be reported.
+
+        A game counts as remaining when its tip-off (``datetimeISO``) is later than ``now``.
+        When only the date is known, a game dated today or later counts.
 
         Args:
             schedule: Roster schedule summary for one fantasy team
-            today: The date to count from
+            now: Timezone-aware current time
+            window_end: Last date (inclusive) of the matchup period, or None for no bound
 
         Returns:
             Mapping of playerId -> number of remaining games
         """
+        today = now.date()
         remaining: dict[int, int] = {}
         for player_schedule in schedule.playerSchedules:
             count = 0
             for game in player_schedule.games:
                 try:
-                    if date.fromisoformat(game.date) >= today:
-                        count += 1
+                    game_day = date.fromisoformat(game.date)
                 except ValueError:
                     continue
+                if window_end is not None and game_day > window_end:
+                    continue
+                tip_off: datetime | None = None
+                if game.datetimeISO:
+                    try:
+                        tip_off = datetime.fromisoformat(game.datetimeISO)
+                    except ValueError:
+                        tip_off = None
+                if tip_off is not None and tip_off.tzinfo is not None and now.tzinfo is not None:
+                    if tip_off > now:
+                        count += 1
+                elif game_day >= today:
+                    count += 1
             remaining[player_schedule.playerId] = count
         return remaining
 
@@ -1231,10 +1252,12 @@ class ESPNFantasyBasketballClient:
         # Get actual dates for the matchup period using scoring period mapping
         # Matchup periods typically correspond to scoring periods, but we need to map correctly
         # For now, use the matchup period as the scoring period to get dates
+        matchup_end: date | None = None  # last day of the matchup period, for games-remaining
         try:
             scoring_start, scoring_end = await self._get_scoring_period_dates(target_matchup_period)
             if scoring_start and scoring_end:
                 start_date = scoring_start
+                matchup_end = date.fromisoformat(scoring_end)
                 # Extend end_date to cover the full week
                 end_date = (datetime.fromisoformat(scoring_end) + timedelta(days=1)).strftime(
                     "%Y-%m-%d"
@@ -1254,6 +1277,7 @@ class ESPNFantasyBasketballClient:
                 end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime(
                     "%Y-%m-%d"
                 )
+                matchup_end = date.fromisoformat(end_date)
         except Exception as e:
             logger.warning(f"Could not get scoring period dates, using date estimation: {e}")
             # Fallback to date estimation
@@ -1266,6 +1290,7 @@ class ESPNFantasyBasketballClient:
                 weeks_back = current_matchup_period - target_matchup_period
                 start_date = (datetime.now() - timedelta(weeks=weeks_back)).strftime("%Y-%m-%d")
             end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime("%Y-%m-%d")
+            matchup_end = date.fromisoformat(end_date)
 
         # Use the matchup period as scoring period for schedule lookup
         your_schedule = await self.get_roster_schedule_summary(
@@ -1321,9 +1346,9 @@ class ESPNFantasyBasketballClient:
 
         # Games already played are reflected in the current category scores, so projections
         # must only add games on or after today. Count them once per player for both rosters.
-        today = date.today()
-        your_games_left = self._games_remaining_by_player(your_schedule, today)
-        opponent_games_left = self._games_remaining_by_player(opponent_schedule, today)
+        now = datetime.now(ZoneInfo(self._get_timezone()))
+        your_games_left = self._games_remaining_by_player(your_schedule, now, matchup_end)
+        opponent_games_left = self._games_remaining_by_player(opponent_schedule, now, matchup_end)
         your_games_remaining = sum(your_games_left.values())
         opponent_games_remaining = sum(opponent_games_left.values())
 
@@ -1414,12 +1439,7 @@ class ESPNFantasyBasketballClient:
                     opponent_projected_fgm = opponent_fgm
                     opponent_projected_fga = opponent_fga
 
-                    # Add projected contributions based on games remaining
-                    # For current week, only count games that haven't been played yet
-                    from datetime import datetime
-
-                    today = datetime.now().date()
-
+                    # Add projected contributions for games remaining (not yet tipped off)
                     for entry in matchup.yourRoster.entries:
                         player_id = entry.playerId
                         games_left = your_games_left.get(player_id, 0)
@@ -3592,13 +3612,13 @@ class ESPNFantasyBasketballClient:
                 # NBA games are played in the evening in local time (ET/PT)
                 # A game at midnight UTC Dec 18 is actually Dec 17 evening in ET
                 # So we need to convert to ET and use that date
+                tip_off_iso: str | None = None
                 try:
-                    from zoneinfo import ZoneInfo
-
                     utc_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
                     et_dt = utc_dt.astimezone(ZoneInfo(self._get_timezone()))
                     game_date_str = et_dt.strftime("%Y-%m-%d")
                     game_dt = datetime.fromisoformat(game_date_str)
+                    tip_off_iso = et_dt.isoformat()
                 except (ImportError, ValueError):
                     # Fallback: parse UTC datetime and check if we need to adjust
                     # Only subtract 1 day if the UTC time is before ~5 AM (midnight ET)
@@ -3645,6 +3665,7 @@ class ESPNFantasyBasketballClient:
                     opponent=opponent,
                     is_home=is_home,
                     game_id=event.get("id"),
+                    datetimeISO=tip_off_iso,
                 )
                 games.append(game)
 

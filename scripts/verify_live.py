@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import traceback
@@ -33,6 +34,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from espn_fantasy_basketball import _default_season  # noqa: E402
 from espn_fantasy_basketball_mcp.client import ESPNFantasyBasketballClient  # noqa: E402
+
+
+class _RequestCounter(logging.Filter):
+    """Counts httpx request log lines and keeps them out of the report."""
+
+    count = 0
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if "HTTP Request:" in record.getMessage():
+            _RequestCounter.count += 1
+            return False
+        return True
+
 
 ENV_KEYS = ("ESPN_LEAGUE_ID", "ESPN_TEAM_ID", "ESPN_S2", "ESPN_SWID", "ESPN_YEAR", "MY_TIMEZONE")
 
@@ -139,6 +153,7 @@ class Report:
         counts = {s: sum(1 for r in self.rows if r[0] == s) for s in ("PASS", "FAIL", "SKIP")}
         print("\n" + "=" * 72)
         print(f"PASS {counts['PASS']}   FAIL {counts['FAIL']}   SKIP {counts['SKIP']}")
+        print(f"HTTP requests made: {_RequestCounter.count}")
         if counts["FAIL"]:
             print("Failed checks:")
             for s, name, detail in self.rows:
@@ -190,6 +205,7 @@ async def main() -> int:
     args = parser.parse_args()
 
     report = Report()
+    logging.getLogger("httpx").addFilter(_RequestCounter())
 
     section("Configuration")
     source = load_claude_desktop_env(args.config, args.server)
@@ -398,10 +414,11 @@ async def main() -> int:
             f"regressed: {regress}",
         )
 
-        print(f"\n       {'player':<26}{'left':>5}  helped / hurt")
+        print(f"\n       {'player':<26}{'left':>5}{'/wk':>4}  helped / hurt")
         for r in analysis.playerRecommendations[:15]:
             print(
-                f"       {r.playerName[:25]:<26}{r.gamesRemaining or 0:>5}  "
+                f"       {r.playerName[:25]:<26}{r.gamesRemaining or 0:>5}"
+                f"{week_games.get(r.playerId, 0):>4}  "
                 f"{', '.join(r.categoriesHelped) or '-'} / {', '.join(r.categoriesHurt) or '-'}"
             )
         for note in analysis.strategyNotes:

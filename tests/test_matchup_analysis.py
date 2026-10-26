@@ -4,7 +4,7 @@ Everything the method fetches is mocked at the client-method boundary, so these 
 exercise the projection and recommendation logic without any network access.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -31,7 +31,10 @@ from espn_fantasy_basketball_mcp.models import (
     TradeSettings,
 )
 
-TODAY = date.today()
+# Everything here is pinned to UTC: the client computes "now" in MY_TIMEZONE, so the test
+# sets that to UTC too. Using the system-local date would straddle midnight in some zones.
+NOW = datetime.now(timezone.utc)
+TODAY = NOW.date()
 CURRENT_PERIOD = 5
 
 
@@ -124,6 +127,7 @@ def _stats(pid: int, timeframe: str, **values) -> PlayerStats:
 @pytest.mark.asyncio
 async def test_current_week_projection_only_counts_games_from_today(monkeypatch):
     """Games already played are in the current score; projecting them again double counts."""
+    monkeypatch.setenv("MY_TIMEZONE", "UTC")
     client = ESPNFantasyBasketballClient(league_id=12345, year=2027)
     settings = _settings([0, 20])  # points, FT%
 
@@ -141,9 +145,10 @@ async def test_current_week_projection_only_counts_games_from_today(monkeypatch)
     )
 
     # Mine: 101 has played 2 of 3 games (1 left); 102 has 1 game left.
-    # Theirs: 201 has played 1 of 3 (2 left).
+    # Theirs: 201 has played 1 of 3 (2 left), plus a game in *next* week's window that the
+    # schedule summary includes (for gamesNextWeek) but that must not count for this matchup.
     my_schedule = _schedule(1, {101: [_day(-2), _day(-1), _day(1)], 102: [_day(1)]})
-    their_schedule = _schedule(2, {201: [_day(-1), _day(1), _day(2)]})
+    their_schedule = _schedule(2, {201: [_day(-1), _day(1), _day(2), _day(5)]})
 
     projections = [
         _stats(101, "projections", points=20.0, freeThrowPercentage=85.0),
@@ -172,7 +177,7 @@ async def test_current_week_projection_only_counts_games_from_today(monkeypatch)
     points = next(c for c in analysis.categoryProjections if c.category == "points")
     # 100 current + 20*1 (player 101) + 5*1 (player 102); NOT 100 + 20*3 + 5*1 = 165
     assert points.yourProjected == pytest.approx(125.0)
-    # 90 current + 10*2; NOT 90 + 10*3 = 120
+    # 90 current + 10*2; NOT 90 + 10*3 = 120 (played game) nor 90 + 10*3 (next-week game)
     assert points.opponentProjected == pytest.approx(110.0)
     assert points.projectedResult == "win"
 
@@ -191,13 +196,52 @@ async def test_current_week_projection_only_counts_games_from_today(monkeypatch)
     assert "freeThrowPercentage" not in by_id[102].categoriesHelped
 
 
-def test_games_remaining_by_player_counts_today_and_later():
+def test_games_remaining_by_player_counts_today_and_later_when_only_dates_known():
     schedule = _schedule(1, {7: [_day(-1), _day(0), _day(2)], 8: [_day(-5)], 9: []})
-    remaining = ESPNFantasyBasketballClient._games_remaining_by_player(schedule, TODAY)
+    remaining = ESPNFantasyBasketballClient._games_remaining_by_player(schedule, NOW)
     assert remaining == {7: 2, 8: 0, 9: 0}
+
+
+def test_games_remaining_by_player_respects_matchup_window():
+    schedule = _schedule(1, {7: [_day(0), _day(2), _day(3), _day(6)]})
+    remaining = ESPNFantasyBasketballClient._games_remaining_by_player(
+        schedule, NOW, window_end=TODAY + timedelta(days=3)
+    )
+    assert remaining == {7: 3}
+
+
+def test_games_remaining_by_player_uses_tip_off_time_when_known():
+    started = (NOW - timedelta(hours=1)).isoformat()
+    upcoming = (NOW + timedelta(hours=3)).isoformat()
+    schedule = RosterScheduleSummary(
+        teamId=1,
+        scoringPeriod=CURRENT_PERIOD,
+        playerSchedules=[
+            PlayerSchedule(
+                playerId=7,
+                playerName="Player 7",
+                teamAbbreviation="BOS",
+                games=[
+                    PlayerScheduleGame(
+                        date=_day(0), opponent="MIA", is_home=True, datetimeISO=started
+                    ),
+                    PlayerScheduleGame(
+                        date=_day(0), opponent="MIA", is_home=True, datetimeISO=upcoming
+                    ),
+                    PlayerScheduleGame(date=_day(1), opponent="MIA", is_home=True),  # date only
+                ],
+                gamesThisWeek=3,
+                gamesNextWeek=0,
+            )
+        ],
+        totalGamesThisWeek=3,
+        averageGamesPerPlayer=3.0,
+    )
+    remaining = ESPNFantasyBasketballClient._games_remaining_by_player(schedule, NOW)
+    assert remaining == {7: 2}, "a game that has tipped off is no longer remaining"
 
 
 def test_games_remaining_by_player_skips_unparseable_dates():
     schedule = _schedule(1, {7: ["not-a-date", _day(1)]})
-    remaining = ESPNFantasyBasketballClient._games_remaining_by_player(schedule, TODAY)
+    remaining = ESPNFantasyBasketballClient._games_remaining_by_player(schedule, NOW)
     assert remaining == {7: 1}
