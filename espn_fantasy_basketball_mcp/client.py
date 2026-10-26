@@ -379,10 +379,10 @@ class ESPNFantasyBasketballClient:
             raise ValueError("Settings not found in API response")
 
         settings_data = data["settings"]
-        status_data = data.get("status", {})
+        status_data = data.get("status") or {}
 
         # Parse scoring settings
-        scoring_data = settings_data.get("scoringSettings", {})
+        scoring_data = settings_data.get("scoringSettings") or {}
         # Get stat ID mapping for human-readable category names
         stat_mapping = self._get_stat_id_mapping()
         scoring_items = []
@@ -408,7 +408,7 @@ class ESPNFantasyBasketballClient:
         )
 
         # Parse schedule settings
-        schedule_data = settings_data.get("scheduleSettings", {})
+        schedule_data = settings_data.get("scheduleSettings") or {}
         schedule_settings = ScheduleSettings(
             matchupPeriodCount=schedule_data.get("matchupPeriodCount", 0),
             matchupPeriodLength=schedule_data.get("matchupPeriodLength", 1),
@@ -420,7 +420,7 @@ class ESPNFantasyBasketballClient:
         )
 
         # Parse roster settings
-        roster_data = settings_data.get("rosterSettings", {})
+        roster_data = settings_data.get("rosterSettings") or {}
         # Get slot ID mapping for human-readable slot names
         slot_mapping = self._get_lineup_slot_id_mapping()
         lineup_slot_counts = {str(k): v for k, v in roster_data.get("lineupSlotCounts", {}).items()}
@@ -448,7 +448,7 @@ class ESPNFantasyBasketballClient:
         )
 
         # Parse acquisition settings
-        acquisition_data = settings_data.get("acquisitionSettings", {})
+        acquisition_data = settings_data.get("acquisitionSettings") or {}
         acquisition_settings = AcquisitionSettings(
             acquisitionType=acquisition_data.get("acquisitionType", "WAIVERS_TRADITIONAL"),
             waiverHours=acquisition_data.get("waiverHours", 24),
@@ -466,7 +466,7 @@ class ESPNFantasyBasketballClient:
         )
 
         # Parse trade settings
-        trade_data = settings_data.get("tradeSettings", {})
+        trade_data = settings_data.get("tradeSettings") or {}
         deadline_date = trade_data.get("deadlineDate")
         deadline_date_iso = None
         if deadline_date:
@@ -493,7 +493,7 @@ class ESPNFantasyBasketballClient:
         )
 
         # Parse draft settings
-        draft_data = settings_data.get("draftSettings", {})
+        draft_data = settings_data.get("draftSettings") or {}
         draft_date = draft_data.get("date")
         draft_settings = DraftSettings(
             type=draft_data.get("type"),
@@ -644,7 +644,7 @@ class ESPNFantasyBasketballClient:
         for team_data in data.get("teams", []):
             if team_data["id"] == team_id:
                 roster_entries = []
-                for entry in team_data.get("roster", {}).get("entries", []):
+                for entry in (team_data.get("roster") or {}).get("entries") or []:
                     # Build player data from the nested structure
                     player_data = entry["playerPoolEntry"]["player"]
 
@@ -656,7 +656,9 @@ class ESPNFantasyBasketballClient:
                     # So we prioritize player-level status first
                     injury_status = (
                         player_data.get("injuryStatus")
-                        or entry.get("playerPoolEntry", {}).get("player", {}).get("injuryStatus")
+                        or ((entry.get("playerPoolEntry") or {}).get("player") or {}).get(
+                            "injuryStatus"
+                        )
                         or entry.get(
                             "injuryStatus"
                         )  # Fall back to entry level if player level not available
@@ -857,8 +859,8 @@ class ESPNFantasyBasketballClient:
             # "03YYYY" = last 30 days
             # Prioritize current season (2026) over previous seasons
             if stat_id == current_season_id:
-                averages = stat_set.get("averages", {})
-                totals = stat_set.get("stats", {})
+                averages = stat_set.get("averages") or {}
+                totals = stat_set.get("stats") or {}
 
                 # ESPN stat ID mapping for basketball:
                 # 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB, 11=TO, 17=3PM, 19=FG%, 20=FT%, 40=MIN, 42=GP
@@ -977,7 +979,7 @@ class ESPNFantasyBasketballClient:
             player_info = player_data["player"]
 
             # Parse ownership data
-            ownership_data = player_data.get("ownership", {})
+            ownership_data = player_data.get("ownership") or {}
             percent_owned = ownership_data.get("percentOwned", 0)
             percent_change = ownership_data.get("percentChange", 0)
 
@@ -994,8 +996,8 @@ class ESPNFantasyBasketballClient:
                         # "00YYYY" = season actuals, "10YYYY" = projections
                         if stat_id.startswith("00"):
                             # Get averages if available, otherwise use totals
-                            averages = stat_set.get("averages", {})
-                            totals = stat_set.get("stats", {})
+                            averages = stat_set.get("averages") or {}
+                            totals = stat_set.get("stats") or {}
 
                             # Use averages preferentially (per-game stats)
                             source = averages if averages else totals
@@ -1017,7 +1019,7 @@ class ESPNFantasyBasketballClient:
                                 "threes": round(source.get("17", 0), 1),
                                 "turnovers": round(source.get("11", 0), 1),
                                 "minutes": round(source.get("40", 0), 1),
-                                "games_played": stat_set.get("stats", {}).get("42", 0),
+                                "games_played": (stat_set.get("stats") or {}).get("42", 0),
                             }
 
                             # Also grab fantasy points average if available
@@ -1072,35 +1074,33 @@ class ESPNFantasyBasketballClient:
         return players
 
     async def get_matchups(
-        self, scoring_period: int | None = None, team_id: int | None = None
+        self, matchup_period: int | None = None, team_id: int | None = None
     ) -> list[Matchup]:
-        """Get matchups for the league.
+        """Get matchups for one matchup period (week) of the league.
 
         Args:
-            scoring_period: Specific scoring period (defaults to current week if not provided)
+            matchup_period: Matchup period to return (defaults to the current one)
             team_id: Filter to only return matchups for this team (optional)
 
         Returns:
             List of Matchup objects
         """
         league_settings: LeagueSettings | None = None
+        scoring_period = matchup_period  # local name kept for the filtering code below
 
-        # Default to current scoring period if not provided
+        # Default to the current matchup period if not provided
         if scoring_period is None:
             try:
                 league_settings = await self.get_league_settings()
                 scoring_period = league_settings.status.currentMatchupPeriod
             except Exception as e:
-                logger.warning(f"Could not get current scoring period from league settings: {e}")
-                # Try to get it from the API response as fallback
-                # We'll fetch matchups without filtering first, then extract the current period
+                logger.warning(f"Could not get current matchup period from league settings: {e}")
                 scoring_period = None  # Will be determined from API response
 
+        # The schedule view returns every matchup period with cumulative scores; the
+        # scoringPeriodId query parameter is a day index and must not be set from the week.
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         params = {"view": "mMatchup"}
-
-        if scoring_period:
-            params["scoringPeriodId"] = str(scoring_period)
 
         data = await self._make_request(url, params)
 
@@ -1162,8 +1162,8 @@ class ESPNFantasyBasketballClient:
             # Now that scoring_period is guaranteed to be set, filter by it
             if schedule_item.get("matchupPeriodId") == scoring_period:
                 # Filter by team_id if provided
-                home_team_id = schedule_item.get("home", {}).get("teamId")
-                away_team_id = schedule_item.get("away", {}).get("teamId")
+                home_team_id = (schedule_item.get("home") or {}).get("teamId")
+                away_team_id = (schedule_item.get("away") or {}).get("teamId")
 
                 if team_id is not None:
                     if home_team_id != team_id and away_team_id != team_id:
@@ -1214,12 +1214,13 @@ class ESPNFantasyBasketballClient:
         Returns:
             MatchupTeam object with parsed data
         """
-        cumulative_score = team_data.get("cumulativeScore", {})
+        team_data = team_data or {}
+        cumulative_score = team_data.get("cumulativeScore") or {}
 
         # Convert stat IDs to human-readable category names
         # cumulativeScore has structure: {"scoreByStat": {"0": {"score": 409.0, ...}, ...}}
         all_category_scores = {}
-        score_by_stat = cumulative_score.get("scoreByStat", {})
+        score_by_stat = cumulative_score.get("scoreByStat") or {}
         if isinstance(score_by_stat, dict):
             for stat_id, stat_data in score_by_stat.items():
                 if isinstance(stat_data, dict) and "score" in stat_data:
@@ -1324,7 +1325,7 @@ class ESPNFantasyBasketballClient:
             league_settings = await self.get_league_settings()
 
         # Get matchups for the specified matchup period
-        matchups = await self.get_matchups(scoring_period=matchup_period, team_id=team_id)
+        matchups = await self.get_matchups(matchup_period=matchup_period, team_id=team_id)
 
         if not matchups:
             logger.warning(
@@ -1344,23 +1345,16 @@ class ESPNFantasyBasketballClient:
         if opponent_team_id is None:
             return None
 
-        # For future matchups, we need to estimate the scoring period
-        # Matchup periods typically correspond to weeks, so we can estimate
-        # For current/next week, use the latest scoring period
-        # For future weeks, estimate based on matchup period
-        current_matchup_period = league_settings.status.currentMatchupPeriod
-        latest_scoring_period = league_settings.status.latestScoringPeriod
-
-        if matchup_period == current_matchup_period:
-            # Current week - use latest scoring period
-            scoring_period = latest_scoring_period
-        elif matchup_period > current_matchup_period:
-            # Future week - estimate scoring period (usually matchup period + some offset)
-            # This is an approximation; ESPN's scoring periods may not align perfectly
-            scoring_period = latest_scoring_period + (matchup_period - current_matchup_period)
-        else:
-            # Past week - use matchup period as scoring period (approximation)
-            scoring_period = matchup_period
+        # Which day's rosters to show: today's for the current or a future week (future rosters
+        # cannot be known), the final day's for a past week.
+        status = league_settings.status
+        scoring_period = status.latestScoringPeriod
+        if matchup_period < status.currentMatchupPeriod:
+            window = await self.get_matchup_period_dates(matchup_period, league_settings)
+            anchor = await self._scoring_period_anchor(league_settings)
+            if window is not None and anchor is not None:
+                anchor_period, anchor_date = anchor
+                scoring_period = anchor_period + (window[1] - anchor_date).days
 
         # Get rosters for both teams concurrently
         your_roster, opponent_roster = await asyncio.gather(
@@ -1528,8 +1522,8 @@ class ESPNFantasyBasketballClient:
         free_throws_attempted = 0.0
 
         for schedule_item in data.get("schedule", []):
-            home_data = schedule_item.get("home", {})
-            away_data = schedule_item.get("away", {})
+            home_data = schedule_item.get("home") or {}
+            away_data = schedule_item.get("away") or {}
 
             # Check if this matchup involves our team
             home_team_id = home_data.get("teamId")
@@ -1543,8 +1537,8 @@ class ESPNFantasyBasketballClient:
 
             # Aggregate category scores and component stats
             if team_data.get("cumulativeScore"):
-                cumulative_score = team_data.get("cumulativeScore", {})
-                score_by_stat = cumulative_score.get("scoreByStat", {})
+                cumulative_score = team_data.get("cumulativeScore") or {}
+                score_by_stat = cumulative_score.get("scoreByStat") or {}
                 if isinstance(score_by_stat, dict):
                     for stat_id, stat_data in score_by_stat.items():
                         if isinstance(stat_data, dict) and "score" in stat_data:
@@ -1590,8 +1584,8 @@ class ESPNFantasyBasketballClient:
                 team_records[away_team_id] = {"wins": 0, "losses": 0, "ties": 0}
 
             # Get cumulativeScore data for both teams
-            home_cumulative = home_data.get("cumulativeScore", {})
-            away_cumulative = away_data.get("cumulativeScore", {})
+            home_cumulative = home_data.get("cumulativeScore") or {}
+            away_cumulative = away_data.get("cumulativeScore") or {}
 
             # Only count ties from completed matchups (exclude current matchup period)
             # This matches the timeline used for wins/losses from team.record.overall
@@ -1813,7 +1807,7 @@ class ESPNFantasyBasketballClient:
         params = {"view": "mDraftDetail"}
 
         data = await self._make_request(url, params)
-        draft_detail = data.get("draftDetail", {})
+        draft_detail = data.get("draftDetail") or {}
 
         picks = []
         for pick_data in draft_detail.get("picks", []):
@@ -1957,7 +1951,7 @@ class ESPNFantasyBasketballClient:
             # Get auction value from draft rankings
             auction_value = None
             rank = None
-            if player_data.get("draftRanksByRankType", {}).get("STANDARD"):
+            if (player_data.get("draftRanksByRankType") or {}).get("STANDARD"):
                 auction_value = player_data["draftRanksByRankType"]["STANDARD"].get(
                     "auctionValue", 0
                 )
@@ -2019,7 +2013,7 @@ class ESPNFantasyBasketballClient:
                 position_map = self._get_position_id_mapping()
                 for entry in data.get("players", []):
                     position = position_map.get(
-                        entry.get("player", {}).get("defaultPositionId", -1), "UNK"
+                        (entry.get("player") or {}).get("defaultPositionId", -1), "UNK"
                     )
                     position_counts[position] = position_counts.get(position, 0) + 1
             except Exception as e:  # noqa: BLE001
@@ -2210,7 +2204,7 @@ class ESPNFantasyBasketballClient:
             r.fantasyTeamId = on_team if on_team else None
             r.fantasyTeamName = team_names.get(on_team) if on_team else None
             r.percentOwned = (entry.get("ownership") or {}).get("percentOwned")
-            r.injuryStatus = entry.get("player", {}).get("injuryStatus") or r.injuryStatus
+            r.injuryStatus = (entry.get("player") or {}).get("injuryStatus") or r.injuryStatus
 
     @overload
     async def get_player_stats(self, player_id: int, timeframe: str = ...) -> PlayerStats: ...
@@ -2287,12 +2281,13 @@ class ESPNFantasyBasketballClient:
         found_player_ids: set[int] = set()
 
         for player_entry in data.get("players", []):
-            player_info = player_entry.get("player", {})
-            pid = player_info.get("id")
+            player_info = player_entry.get("player") or {}
+            entry_id = player_info.get("id")
 
-            if pid not in player_ids:
+            if not isinstance(entry_id, int) or entry_id not in player_ids:
                 continue  # Skip players not in our requested list
 
+            pid = entry_id
             found_player_ids.add(pid)
 
             # Parse stats for the requested timeframe
@@ -2355,8 +2350,8 @@ class ESPNFantasyBasketballClient:
             stat_id = str(stat_set.get("id", ""))
 
             if stat_id.startswith(target_prefix):
-                averages = stat_set.get("averages", {})
-                totals = stat_set.get("stats", {})
+                averages = stat_set.get("averages") or {}
+                totals = stat_set.get("stats") or {}
                 games_played = totals.get("42", 0)
 
                 stats_data = {}
@@ -3330,17 +3325,34 @@ class ESPNFantasyBasketballClient:
         results = await asyncio.gather(
             *(fetch_schedule(e) for e in with_team), return_exceptions=True
         )
-        for entry, result in zip(with_team, results, strict=True):
+        fetched = dict(zip((e.playerId for e in with_team), results, strict=True))
+        for entry in roster.entries:  # keep roster order
+            player = entry.playerPoolEntry.player
+            result = fetched.get(entry.playerId)
+            if result is None:
+                # Not on an NBA roster: show the player with zero games rather than omitting them
+                player_schedules.append(
+                    PlayerSchedule(
+                        playerId=player.id,
+                        playerName=player.fullName,
+                        teamAbbreviation="FA",
+                        games=[],
+                        gamesThisWeek=0,
+                        gamesNextWeek=0,
+                        note="Not on an NBA roster; cannot play",
+                    )
+                )
+                continue
             if isinstance(result, BaseException):
-                name = entry.playerPoolEntry.player.fullName
-                logger.warning(f"Failed to get schedule for player {name}: {result}")
+                logger.warning(f"Failed to get schedule for player {player.fullName}: {result}")
                 continue
             player_schedules.append(result)
             total_games_this_week += result.gamesThisWeek
             total_games_next_week += result.gamesNextWeek
 
-        # Calculate average
-        avg_games = total_games_this_week / len(player_schedules) if player_schedules else 0.0
+        # Calculate average over players who can play
+        playable = [ps for ps in player_schedules if ps.teamAbbreviation != "FA"]
+        avg_games = total_games_this_week / len(playable) if playable else 0.0
 
         # Determine scoring period if not provided
         determined_scoring_period = matchup_period

@@ -2,7 +2,16 @@
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+- `analyze_matchup` (and `get_matchups`) crashed with `'NoneType' object has no attribute 'get'`
+  for a matchup period that had not started: ESPN sends explicit nulls (`cumulativeScore: null`,
+  sometimes a null side) rather than omitting keys. Every nested lookup now treats null as empty.
+- `get_matchups` took a `scoring_period` argument that was really a matchup period, and also sent
+  it to ESPN as a scoring-period (day) index. Renamed to `matchup_period`; the day index is no
+  longer sent. Rosters inside `get_my_current_matchup`/`analyze_matchup` are today's for the
+  current or a future week and the final day's for a past week, instead of a per-week guess.
+- `get_roster_schedule` silently dropped players not on an NBA roster; they are now listed with
+  zero games, team `FA`, and a note, and are excluded from the average.
 
 ## [1.2.0] - 2026-10-26
 

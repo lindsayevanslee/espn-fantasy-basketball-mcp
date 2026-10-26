@@ -137,7 +137,7 @@ class TestMCPServerTools:
             ]
             mock_client_instance.get_matchups = AsyncMock(return_value=mock_matchup_objs)
 
-            result = await get_matchups(league_id=12345, year=2025, scoring_period=1)
+            result = await get_matchups(league_id=12345, year=2025, matchup_period=1)
 
             assert len(result) == 1
             assert result[0]["id"] == 1

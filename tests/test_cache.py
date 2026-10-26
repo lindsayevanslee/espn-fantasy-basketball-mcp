@@ -228,10 +228,10 @@ class TestRosterScheduleFanOut:
             summary = await client.get_roster_schedule_summary(8, "2026-10-26", "2026-11-02")
 
         assert sorted(fetched) == [f"{NBA}/teams/13/schedule", f"{NBA}/teams/7/schedule"]
-        assert [ps.playerId for ps in summary.playerSchedules] == [
-            1,
-            2,
-            3,
-        ]  # unsigned player 4 skipped
+        assert [ps.playerId for ps in summary.playerSchedules] == [1, 2, 3, 4]
         assert summary.playerSchedules[0].playerName == "P1"
+        unsigned = summary.playerSchedules[3]
+        assert (unsigned.teamAbbreviation, unsigned.gamesThisWeek) == ("FA", 0)
+        assert unsigned.note and "NBA roster" in unsigned.note
         assert summary.totalGamesThisWeek == 3
+        assert summary.averageGamesPerPlayer == 1.0, "average excludes players who cannot play"

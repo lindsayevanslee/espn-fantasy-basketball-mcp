@@ -210,3 +210,50 @@ class TestESPNFantasyBasketballClient:
 
             # Should return empty list on failure
             assert games == []
+
+
+class TestMatchupsWithNulls:
+    """ESPN sends explicit nulls for matchups that have not started; those must not crash."""
+
+    @pytest.fixture
+    def client(self):
+        return ESPNFantasyBasketballClient(league_id=12345, year=2027)
+
+    @pytest.mark.asyncio
+    async def test_future_matchup_with_null_scores_parses(self, client):
+        schedule = {
+            "schedule": [
+                {
+                    "id": 7,
+                    "matchupPeriodId": 2,
+                    "home": {"teamId": 8, "totalPoints": 0, "cumulativeScore": None},
+                    "away": {"teamId": 3, "totalPoints": 0, "cumulativeScore": None},
+                },
+                {"id": 8, "matchupPeriodId": 2, "home": {"teamId": 5}, "away": None},
+            ]
+        }
+        with (
+            patch.object(client, "_make_request", AsyncMock(return_value=schedule)) as req,
+            patch.object(client, "get_league_settings", AsyncMock(side_effect=ValueError("x"))),
+            patch.object(client, "get_league_teams", AsyncMock(return_value=[])),
+        ):
+            matchups = await client.get_matchups(matchup_period=2)
+
+        assert [m.id for m in matchups] == [7, 8]
+        assert matchups[0].home.teamId == 8 and matchups[0].home.categoryScores is None
+        assert matchups[1].away is None
+        # the week number is never sent to ESPN as a scoring period (day) index
+        assert "scoringPeriodId" not in req.await_args[0][1]
+
+    @pytest.mark.asyncio
+    async def test_team_filter_tolerates_null_side(self, client):
+        schedule = {
+            "schedule": [{"id": 1, "matchupPeriodId": 2, "home": {"teamId": 5}, "away": None}]
+        }
+        with (
+            patch.object(client, "_make_request", AsyncMock(return_value=schedule)),
+            patch.object(client, "get_league_settings", AsyncMock(side_effect=ValueError("x"))),
+            patch.object(client, "get_league_teams", AsyncMock(return_value=[])),
+        ):
+            assert await client.get_matchups(matchup_period=2, team_id=5)
+            assert await client.get_matchups(matchup_period=2, team_id=9) == []

@@ -340,8 +340,9 @@ class PlayerSchedule(BaseModel):
     playerName: str
     teamAbbreviation: str  # NBA team abbreviation
     games: list[PlayerScheduleGame]
-    gamesThisWeek: int  # Number of games in current scoring period
-    gamesNextWeek: int  # Number of games in next scoring period
+    gamesThisWeek: int  # Games in this matchup period (or week)
+    gamesNextWeek: int  # Games in the next matchup period (or week)
+    note: str | None = None  # e.g. "Not on an NBA roster; cannot play"
 
 
 class RosterScheduleSummary(BaseModel):
