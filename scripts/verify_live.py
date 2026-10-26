@@ -4,21 +4,24 @@
 Runs a handful of real requests through the same client the MCP tools use and prints a
 PASS / FAIL / SKIP report. Nothing is written to ESPN. Cookie values are never printed.
 
-Usage (from the repository root, with the same variables you give Claude Desktop):
+Usage (from the repository root):
 
-    export ESPN_LEAGUE_ID=... ESPN_TEAM_ID=... ESPN_S2=... ESPN_SWID=...
     uv run python scripts/verify_live.py
 
-Optional: ESPN_YEAR (otherwise the computed current season), MY_TIMEZONE.
-Tip: keep the cookies out of your shell history by putting them in a .env file (gitignored)
-and running `set -a; source .env; set +a` first.
+Credentials are taken from the environment (ESPN_LEAGUE_ID, ESPN_TEAM_ID, ESPN_S2, ESPN_SWID,
+and optionally ESPN_YEAR, MY_TIMEZONE). Anything not set there is read from the `env` block of
+this server's entry in your Claude Desktop config, so if Claude Desktop already works you need
+no extra setup. Override the config location with --config PATH, or pick a specific server entry
+with --server NAME.
 
 Exit code: 0 if no check failed, 1 if any failed, 2 if configuration is missing.
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
+import json
 import os
 import sys
 import traceback
@@ -30,6 +33,74 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from espn_fantasy_basketball import _default_season  # noqa: E402
 from espn_fantasy_basketball_mcp.client import ESPNFantasyBasketballClient  # noqa: E402
+
+ENV_KEYS = ("ESPN_LEAGUE_ID", "ESPN_TEAM_ID", "ESPN_S2", "ESPN_SWID", "ESPN_YEAR", "MY_TIMEZONE")
+
+
+def default_claude_config_paths() -> list[Path]:
+    """Where Claude Desktop keeps claude_desktop_config.json on each platform."""
+    home = Path.home()
+    return [
+        home / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json",
+        Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
+        / "Claude"
+        / "claude_desktop_config.json",
+        home / ".config" / "Claude" / "claude_desktop_config.json",
+    ]
+
+
+def pick_server(
+    servers: dict[str, Any], preferred: str | None
+) -> tuple[str, dict[str, str]] | None:
+    """Choose the MCP server entry whose env block configures this project.
+
+    Preference: an explicitly named server; otherwise the entry whose args mention this
+    repository; otherwise the first entry with ESPN_LEAGUE_ID in its env.
+    """
+    if preferred:
+        entry = servers.get(preferred)
+        return (preferred, dict(entry.get("env", {}))) if isinstance(entry, dict) else None
+    repo_dir = str(Path(__file__).resolve().parent.parent)
+    with_league = [
+        (name, dict(entry.get("env", {})))
+        for name, entry in servers.items()
+        if isinstance(entry, dict) and "ESPN_LEAGUE_ID" in entry.get("env", {})
+    ]
+    for name, env in with_league:
+        args = " ".join(str(a) for a in servers[name].get("args", []))
+        if repo_dir in args or "espn_fantasy_basketball" in args:
+            return name, env
+    return with_league[0] if with_league else None
+
+
+def load_claude_desktop_env(config_path: str | None, server: str | None) -> str | None:
+    """Fill missing ESPN_* / MY_TIMEZONE variables from the Claude Desktop config.
+
+    Existing environment variables always win. Returns a description of what was used
+    (file, server name, variable names), or None if nothing was loaded. Never logs values.
+    """
+    missing = [k for k in ENV_KEYS if not os.getenv(k)]
+    if not missing:
+        return None
+    paths = [Path(config_path).expanduser()] if config_path else default_claude_config_paths()
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"       could not read {path}: {exc}")
+            continue
+        chosen = pick_server(data.get("mcpServers", {}), server)
+        if not chosen:
+            continue
+        name, env = chosen
+        loaded = [k for k in missing if env.get(k)]
+        for k in loaded:
+            os.environ[k] = str(env[k])
+        return f"{path} -> mcpServers['{name}'] supplied {loaded}"
+    return None
+
 
 # Teams whose abbreviations differ between ESPN endpoints. These are the ones the
 # abbreviation bug affected; the rest of the league was already fine.
@@ -109,7 +180,22 @@ async def next_game_dates(
 
 
 async def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--config", help="path to claude_desktop_config.json (default: platform location)"
+    )
+    parser.add_argument("--server", help="name of the mcpServers entry to read env from")
+    args = parser.parse_args()
+
     report = Report()
+
+    section("Configuration")
+    source = load_claude_desktop_env(args.config, args.server)
+    report.info(
+        source or "all variables taken from the environment; Claude Desktop config not read"
+    )
 
     league_id = os.getenv("ESPN_LEAGUE_ID")
     team_id_raw = os.getenv("ESPN_TEAM_ID")
@@ -117,14 +203,20 @@ async def main() -> int:
     swid = os.getenv("ESPN_SWID")
     if not league_id or not team_id_raw:
         print(__doc__)
-        print("ESPN_LEAGUE_ID and ESPN_TEAM_ID are required.")
+        print(
+            "ESPN_LEAGUE_ID and ESPN_TEAM_ID are required, in the environment or in your Claude Desktop config."
+        )
+        print("Looked for the config at:")
+        for path in (
+            [Path(args.config).expanduser()] if args.config else default_claude_config_paths()
+        ):
+            print(f"  {'found' if path.is_file() else 'missing'}: {path}")
         return 2
     team_id = int(team_id_raw)
 
     year_env = os.getenv("ESPN_YEAR")
     year = int(year_env) if year_env else _default_season()
 
-    section("Configuration")
     report.info(
         f"league_id={league_id} team_id={team_id} timezone={os.getenv('MY_TIMEZONE', 'America/New_York (default)')}"
     )
