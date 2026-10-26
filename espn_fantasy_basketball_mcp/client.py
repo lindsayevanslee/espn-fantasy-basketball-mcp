@@ -1,21 +1,38 @@
 """ESPN Fantasy Basketball API client."""
 
 import asyncio
-import difflib
 import json
 import logging
 import os
 import time
-import unicodedata
 from datetime import date, datetime, timedelta
 from typing import Any, overload
 from zoneinfo import ZoneInfo
 
 import httpx
 
+from .analysis import analyze_matchup as analyze_matchup_impl
+from .analysis import player_availability
+from .constants import (
+    ABBREV_ALIASES,
+    AVAILABILITY_FACTORS,
+    LINEUP_SLOT_NAMES,
+    POSITION_NAMES,
+    PRO_TEAM_ABBREVS,
+    SHOOTING_THRESHOLDS,
+    SLOT_BENCH,
+    SLOT_IR,
+    STAT_ID_TO_CATEGORY,
+    normalize_nba_abbrev,
+)
+from .dates import (
+    date_for_scoring_period,
+    games_remaining_by_player,
+    matchup_period_window,
+    week_boundaries,
+)
 from .models import (
     AcquisitionSettings,
-    CategoryProjection,
     CurrentMatchup,
     DraftPick,
     DraftRecommendation,
@@ -32,7 +49,6 @@ from .models import (
     PlayerDraftInfo,
     PlayerOwnership,
     PlayerPoolEntry,
-    PlayerRecommendation,
     PlayerSchedule,
     PlayerScheduleGame,
     PlayerSearchResult,
@@ -52,6 +68,7 @@ from .models import (
     TradeSettings,
     TrendingPlayer,
 )
+from .search import SEARCH_MIN_SCORE, name_match_score, normalize_name
 
 logger = logging.getLogger(__name__)
 
@@ -1304,904 +1321,77 @@ class ESPNFantasyBasketballClient:
             playoff=matchup.playoff,
         )
 
-    # (helps_at, hurts_below) on the 0-100 scale, roughly league-average bands.
-    _SHOOTING_THRESHOLDS: dict[str, tuple[float, float]] = {
-        "fieldGoalPercentage": (48.0, 43.0),
-        "freeThrowPercentage": (80.0, 70.0),
-    }
+    # Pure helpers live in constants.py, dates.py, search.py and analysis.py. These aliases keep
+    # the class API (and the test surface) stable.
+    _SHOOTING_THRESHOLDS = SHOOTING_THRESHOLDS
+    _AVAILABILITY_FACTORS = AVAILABILITY_FACTORS
+    _SLOT_BENCH = SLOT_BENCH
+    _SLOT_IR = SLOT_IR
+    _SEARCH_MIN_SCORE = SEARCH_MIN_SCORE
+    _ABBREV_ALIASES = ABBREV_ALIASES
 
-    # Share of remaining games a player is expected to play, by ESPN injury status.
-    _AVAILABILITY_FACTORS: dict[str, float] = {
-        "ACTIVE": 1.0,
-        "NORMAL": 1.0,
-        "DAY_TO_DAY": 1.0,
-        "QUESTIONABLE": 1.0,
-        "PROBABLE": 1.0,
-        "DOUBTFUL": 0.5,
-        "OUT": 0.0,
-        "SUSPENSION": 0.0,
-        "SUSPENDED": 0.0,
-    }
-    _SLOT_BENCH = 12
-    _SLOT_IR = 13
-
-    @classmethod
-    def _availability(cls, entry: RosterEntry) -> tuple[str, float]:
-        """Classify how available a rostered player is for the remaining games.
-
-        Returns a (label, factor) pair. The factor scales the player's remaining games in
-        projections: 1.0 for healthy and day-to-day players, 0.5 for doubtful, 0.0 for players
-        who cannot score (OUT, suspended, in the IR slot, or unsigned/"FA").
-        """
-        player = entry.playerPoolEntry.player
-        if player.proTeamAbbrev == "FA" or player.proTeamId == 0:
-            return "FA", 0.0
-        if entry.lineupSlotId == cls._SLOT_IR:
-            return "IR", 0.0
-        status = (entry.injuryStatus or player.injuryStatus or "ACTIVE").upper()
-        label = "SUSPENDED" if status == "SUSPENSION" else status
-        return label, cls._AVAILABILITY_FACTORS.get(status, 1.0)
+    @staticmethod
+    def _availability(entry: RosterEntry) -> tuple[str, float]:
+        return player_availability(entry)
 
     @staticmethod
     def _games_remaining_by_player(
         schedule: RosterScheduleSummary, now: datetime, window_end: date | None = None
     ) -> dict[int, int]:
-        """Count each player's games that have not started yet, within the matchup window.
+        return games_remaining_by_player(schedule, now, window_end)
 
-        Games already played (or in progress) are reflected in the matchup's current category
-        scores, so projecting them again would double count. Games after ``window_end`` belong
-        to a later matchup period and are excluded; the schedule summaries deliberately fetch an
-        extra week so ``gamesNextWeek`` can be reported.
+    @staticmethod
+    def _date_for_scoring_period(
+        scoring_period: int, anchor_period: int, anchor_date: date
+    ) -> date:
+        return date_for_scoring_period(scoring_period, anchor_period, anchor_date)
 
-        A game counts as remaining when its tip-off (``datetimeISO``) is later than ``now``.
-        When only the date is known, a game dated today or later counts.
+    @staticmethod
+    def _matchup_period_window(
+        matchup_period: int,
+        season_start: date,
+        matchup_periods: dict[str, list[int]],
+        week_start_day: int = 0,
+    ) -> tuple[date, date] | None:
+        return matchup_period_window(matchup_period, season_start, matchup_periods, week_start_day)
 
-        Args:
-            schedule: Roster schedule summary for one fantasy team
-            now: Timezone-aware current time
-            window_end: Last date (inclusive) of the matchup period, or None for no bound
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        return normalize_name(name)
 
-        Returns:
-            Mapping of playerId -> number of remaining games
-        """
-        today = now.date()
-        remaining: dict[int, int] = {}
-        for player_schedule in schedule.playerSchedules:
-            count = 0
-            for game in player_schedule.games:
-                try:
-                    game_day = date.fromisoformat(game.date)
-                except ValueError:
-                    continue
-                if window_end is not None and game_day > window_end:
-                    continue
-                tip_off: datetime | None = None
-                if game.datetimeISO:
-                    try:
-                        tip_off = datetime.fromisoformat(game.datetimeISO)
-                    except ValueError:
-                        tip_off = None
-                if tip_off is not None and tip_off.tzinfo is not None and now.tzinfo is not None:
-                    if tip_off > now:
-                        count += 1
-                elif game_day >= today:
-                    count += 1
-            remaining[player_schedule.playerId] = count
-        return remaining
+    @classmethod
+    def _name_match_score(cls, query: str, full_name: str) -> float:
+        return name_match_score(query, full_name)
+
+    @staticmethod
+    def _normalize_nba_abbrev(nba_abbrev: str) -> str:
+        return normalize_nba_abbrev(nba_abbrev)
+
+    @staticmethod
+    def _get_stat_id_mapping() -> dict[str, str]:
+        return dict(STAT_ID_TO_CATEGORY)
+
+    @staticmethod
+    def _get_lineup_slot_id_mapping() -> dict[int, str]:
+        return dict(LINEUP_SLOT_NAMES)
+
+    @staticmethod
+    def _get_pro_team_id_to_abbrev() -> dict[int, str]:
+        return dict(PRO_TEAM_ABBREVS)
+
+    @staticmethod
+    def _get_position_id_mapping() -> dict[int, str]:
+        return dict(POSITION_NAMES)
+
+    def _get_week_boundaries(self, date_str: str, week_start_day: int = 0) -> tuple[str, str]:
+        return week_boundaries(date_str, week_start_day)
 
     async def analyze_matchup(
         self, team_id: int, matchup_period: int | None = None
     ) -> MatchupAnalysis:
-        """Analyze a matchup and provide strategic recommendations.
-
-        By default, analyzes the next matchup (current + 1). Can also analyze
-        any other matchup period by specifying matchup_period.
-
-        This provides comprehensive analysis including:
-        - Category win/loss projections
-        - Close categories where decisions matter
-        - Player recommendations based on category needs
-        - Games remaining analysis
-
-        Args:
-            team_id: Your team ID
-            matchup_period: Matchup period to analyze (defaults to next matchup).
-                          Use None for next matchup, or specify a period number (e.g., 1, 2, 3...)
-
-        Returns:
-            MatchupAnalysis object with detailed matchup analysis
-
-        Raises:
-            ValueError: If team_id is invalid or no matchup found
-        """
-        # Determine which matchup period to analyze
-        league_settings = await self.get_league_settings()
-        current_matchup_period = league_settings.status.currentMatchupPeriod
-
-        if matchup_period is None:
-            # Default to next matchup
-            target_matchup_period = current_matchup_period + 1
-        else:
-            target_matchup_period = matchup_period
-
-        # Get matchup data for the specified period, passing league_settings to avoid duplicate call
-        matchup = await self.get_matchup_for_period(
-            team_id, target_matchup_period, verbose=True, league_settings=league_settings
-        )
-        if not matchup:
-            period_desc = "next" if matchup_period is None else f"period {matchup_period}"
-            raise ValueError(f"No matchup found for team {team_id} in {period_desc} matchup")
-
-        # Use league settings already fetched
-        scoring_stat_ids = self._get_scoring_stat_ids(league_settings)
-        stat_mapping = self._get_stat_id_mapping()
-
-        # Get current category scores
-        your_category_scores = matchup.yourTeam.categoryScores or {}
-        opponent_category_scores = matchup.opponentTeam.categoryScores or {}
-
-        # Get roster schedules to determine games remaining
-        # Use proper scoring period dates instead of simple date estimation
-        from datetime import datetime, timedelta
-
-        # Get actual dates for the matchup period using scoring period mapping
-        # Matchup periods typically correspond to scoring periods, but we need to map correctly
-        # For now, use the matchup period as the scoring period to get dates
-        # Calendar window of the matchup period, from ESPN's matchupPeriods mapping
-        window = await self.get_matchup_period_dates(target_matchup_period, league_settings)
-        matchup_end: date | None = None  # last day of the matchup period, for games-remaining
-        if window is not None:
-            start_date, matchup_end = window[0].isoformat(), window[1]
-            end_date = window[1].isoformat()
-        else:
-            # Last resort: assume 7-day weeks around today
-            logger.warning("Could not determine matchup period dates; estimating from today")
-            weeks_offset = target_matchup_period - current_matchup_period
-            start_dt = datetime.now() + timedelta(weeks=weeks_offset)
-            start_date = start_dt.strftime("%Y-%m-%d")
-            end_date = (start_dt + timedelta(days=6)).strftime("%Y-%m-%d")
-            matchup_end = date.fromisoformat(end_date)
-
-        opponent_team_id = matchup.opponentTeam.teamId
-        if not opponent_team_id:
-            raise ValueError("Opponent team ID not found in matchup")
-
-        # Use the matchup period as scoring period for schedule lookup; both teams concurrently
-        your_schedule, opponent_schedule = await asyncio.gather(
-            self.get_roster_schedule_summary(team_id, start_date, end_date, target_matchup_period),
-            self.get_roster_schedule_summary(
-                opponent_team_id, start_date, end_date, target_matchup_period
-            ),
-        )
-
-        # Get player stats for all players (projections and recent performance)
-        your_player_ids = [entry.playerId for entry in matchup.yourRoster.entries]
-        opponent_player_ids = [entry.playerId for entry in matchup.opponentRoster.entries]
-        all_player_ids = your_player_ids + opponent_player_ids
-
-        # Get projections and recent stats
-        player_projections = {}
-        player_recent_stats = {}
-        if all_player_ids:
-            try:
-                projections_list, recent_list = await asyncio.gather(
-                    self.get_player_stats(all_player_ids, "projections"),
-                    self.get_player_stats(all_player_ids, "last_7"),
-                )
-
-                # Normalize to lists
-                if isinstance(projections_list, list):
-                    for stats in projections_list:
-                        player_projections[stats.playerId] = stats
-                else:
-                    player_projections[projections_list.playerId] = projections_list
-
-                if isinstance(recent_list, list):
-                    for stats in recent_list:
-                        player_recent_stats[stats.playerId] = stats
-                else:
-                    player_recent_stats[recent_list.playerId] = recent_list
-            except Exception as e:
-                logger.warning(f"Could not get player stats for analysis: {e}")
-
-        # Calculate category projections
-        category_projections = []
-        categories_winning = []
-        categories_losing = []
-        categories_tied = []
-        close_categories = []
-
-        # Current category wins/losses/ties are tallied in the loop below
-        current_category_wins = 0
-        current_category_losses = 0
-        current_category_ties = 0
-
-        # Games already played are reflected in the current category scores, so projections
-        # must only add games on or after today. Count them once per player for both rosters.
-        now = datetime.now(ZoneInfo(self._get_timezone()))
-        your_games_left = self._games_remaining_by_player(your_schedule, now, matchup_end)
-        opponent_games_left = self._games_remaining_by_player(opponent_schedule, now, matchup_end)
-        your_games_remaining = sum(your_games_left.values())
-        opponent_games_remaining = sum(opponent_games_left.values())
-
-        # Discount remaining games by availability: an OUT, suspended, IR, or unsigned player
-        # contributes nothing, a DOUBTFUL player half. Projections use these expected games.
-        your_availability = {e.playerId: self._availability(e) for e in matchup.yourRoster.entries}
-        opponent_availability = {
-            e.playerId: self._availability(e) for e in matchup.opponentRoster.entries
-        }
-        your_expected = {
-            pid: games * your_availability.get(pid, ("ACTIVE", 1.0))[1]
-            for pid, games in your_games_left.items()
-        }
-        opponent_expected = {
-            pid: games * opponent_availability.get(pid, ("ACTIVE", 1.0))[1]
-            for pid, games in opponent_games_left.items()
-        }
-        your_expected_games = round(sum(your_expected.values()), 1)
-        opponent_expected_games = round(sum(opponent_expected.values()), 1)
-
-        for stat_id in scoring_stat_ids:
-            category_name = stat_mapping.get(str(stat_id))
-            if not category_name:
-                continue
-
-            your_current = your_category_scores.get(category_name, 0.0)
-            opponent_current = opponent_category_scores.get(category_name, 0.0)
-            current_lead = your_current - opponent_current
-
-            # Special handling for percentage categories
-            is_percentage_category = category_name in ["fieldGoalPercentage", "freeThrowPercentage"]
-
-            # For percentage categories, we need to calculate from FGM/FGA or FTM/FTA totals
-            if is_percentage_category:
-                # Get component stats to calculate current percentages accurately
-                # These should contain FGM/FGA/FTM/FTA counts (stat IDs 13, 14, 15, 16)
-                your_component_stats = matchup.yourTeam.componentStats or {}
-                opponent_component_stats = matchup.opponentTeam.componentStats or {}
-
-                # Also try to get raw data from cumulativeScore if available
-                # This ensures we get actual counts even if componentStats is missing or incorrect
-                your_cumulative_score = matchup.yourTeam.cumulativeScore or {}
-                opponent_cumulative_score = matchup.opponentTeam.cumulativeScore or {}
-                your_score_by_stat = (
-                    your_cumulative_score.get("scoreByStat", {})
-                    if isinstance(your_cumulative_score, dict)
-                    else {}
-                )
-                opponent_score_by_stat = (
-                    opponent_cumulative_score.get("scoreByStat", {})
-                    if isinstance(opponent_cumulative_score, dict)
-                    else {}
-                )
-
-                if category_name == "fieldGoalPercentage":
-                    # Get FGM/FGA counts - try componentStats first, then raw API data
-                    your_fgm_raw = your_component_stats.get("fieldGoalsMade", 0.0)
-                    your_fga_raw = your_component_stats.get("fieldGoalsAttempted", 0.0)
-                    opponent_fgm_raw = opponent_component_stats.get("fieldGoalsMade", 0.0)
-                    opponent_fga_raw = opponent_component_stats.get("fieldGoalsAttempted", 0.0)
-
-                    # If componentStats doesn't have valid counts, try reading from raw API response
-                    if your_fgm_raw < 1.0 or your_fga_raw < 1.0:
-                        your_fgm_stat = your_score_by_stat.get("13", {})
-                        your_fga_stat = your_score_by_stat.get("14", {})
-                        if isinstance(your_fgm_stat, dict) and "score" in your_fgm_stat:
-                            your_fgm_raw = your_fgm_stat["score"]
-                        if isinstance(your_fga_stat, dict) and "score" in your_fga_stat:
-                            your_fga_raw = your_fga_stat["score"]
-
-                    if opponent_fgm_raw < 1.0 or opponent_fga_raw < 1.0:
-                        opponent_fgm_stat = opponent_score_by_stat.get("13", {})
-                        opponent_fga_stat = opponent_score_by_stat.get("14", {})
-                        if isinstance(opponent_fgm_stat, dict) and "score" in opponent_fgm_stat:
-                            opponent_fgm_raw = opponent_fgm_stat["score"]
-                        if isinstance(opponent_fga_stat, dict) and "score" in opponent_fga_stat:
-                            opponent_fga_raw = opponent_fga_stat["score"]
-
-                    # Validate that we have actual counts, not percentages
-                    # Counts should be large numbers (>= 1), percentages are < 1
-                    # If values look like percentages, treat as missing and use categoryScores percentage
-                    your_fgm = your_fgm_raw if your_fgm_raw >= 1.0 else 0.0
-                    your_fga = your_fga_raw if your_fga_raw >= 1.0 else 0.0
-                    opponent_fgm = opponent_fgm_raw if opponent_fgm_raw >= 1.0 else 0.0
-                    opponent_fga = opponent_fga_raw if opponent_fga_raw >= 1.0 else 0.0
-
-                    # Recalculate current percentages from totals if available
-                    # This ensures we're using the correct current percentage
-                    if your_fga > 0:
-                        your_current = your_fgm / your_fga
-                    else:
-                        # If no FGA counts available, use the percentage from categoryScores
-                        your_current = your_category_scores.get(category_name, 0.0)
-
-                    if opponent_fga > 0:
-                        opponent_current = opponent_fgm / opponent_fga
-                    else:
-                        # If no FGA counts available, use the percentage from categoryScores
-                        opponent_current = opponent_category_scores.get(category_name, 0.0)
-
-                    # Start projected totals from current counts
-                    # Projected = (currentFGM + projectedFGM) / (currentFGA + projectedFGA)
-                    your_projected_fgm = your_fgm
-                    your_projected_fga = your_fga
-                    opponent_projected_fgm = opponent_fgm
-                    opponent_projected_fga = opponent_fga
-
-                    # Add projected contributions for games remaining (not yet tipped off)
-                    for entry in matchup.yourRoster.entries:
-                        player_id = entry.playerId
-                        games_left = your_expected.get(player_id, 0.0)
-
-                        if games_left > 0 and player_id in player_projections:
-                            proj = player_projections[player_id]
-                            # Try to get FGM/FGA from projections
-                            # Note: PlayerStats may not include these, so we estimate from FG% and attempts
-                            fgm_per_game = getattr(proj, "fieldGoalsMade", None)
-                            fga_per_game = getattr(proj, "fieldGoalsAttempted", None)
-
-                            # If not available, estimate from FG% and points (rough estimate)
-                            if fgm_per_game is None or fga_per_game is None:
-                                fg_pct = getattr(proj, "fieldGoalPercentage", None)
-                                points_per_game = getattr(proj, "points", None) or 0.0
-                                # Normalize percentage to decimal (PlayerStats stores as whole number 47.8, need 0.478)
-                                if fg_pct is not None:
-                                    if fg_pct > 1.0:
-                                        fg_pct = (
-                                            fg_pct / 100.0
-                                        )  # Convert from whole number to decimal
-                                # Rough estimate: assume ~2 points per FGM (accounting for 3s and FTs)
-                                if fg_pct and fg_pct > 0:
-                                    estimated_fgm = points_per_game / 2.0  # Rough estimate
-                                    estimated_fga = estimated_fgm / fg_pct if fg_pct > 0 else 0.0
-                                    fgm_per_game = (
-                                        fgm_per_game if fgm_per_game is not None else estimated_fgm
-                                    )
-                                    fga_per_game = (
-                                        fga_per_game if fga_per_game is not None else estimated_fga
-                                    )
-
-                            if fgm_per_game is not None and fga_per_game is not None:
-                                your_projected_fgm += fgm_per_game * games_left
-                                your_projected_fga += fga_per_game * games_left
-
-                    # Add projected contributions for opponent
-                    for entry in matchup.opponentRoster.entries:
-                        player_id = entry.playerId
-                        games_left = opponent_expected.get(player_id, 0.0)
-
-                        if games_left > 0 and player_id in player_projections:
-                            proj = player_projections[player_id]
-                            # Try to get FGM/FGA from projections
-                            fgm_per_game = getattr(proj, "fieldGoalsMade", None)
-                            fga_per_game = getattr(proj, "fieldGoalsAttempted", None)
-
-                            # If not available, estimate from FG% and points
-                            if fgm_per_game is None or fga_per_game is None:
-                                fg_pct = getattr(proj, "fieldGoalPercentage", None)
-                                points_per_game = getattr(proj, "points", None) or 0.0
-                                # Normalize percentage to decimal (PlayerStats stores as whole number 47.8, need 0.478)
-                                if fg_pct is not None:
-                                    if fg_pct > 1.0:
-                                        fg_pct = (
-                                            fg_pct / 100.0
-                                        )  # Convert from whole number to decimal
-                                if fg_pct and fg_pct > 0:
-                                    estimated_fgm = points_per_game / 2.0  # Rough estimate
-                                    estimated_fga = estimated_fgm / fg_pct if fg_pct > 0 else 0.0
-                                    fgm_per_game = (
-                                        fgm_per_game if fgm_per_game is not None else estimated_fgm
-                                    )
-                                    fga_per_game = (
-                                        fga_per_game if fga_per_game is not None else estimated_fga
-                                    )
-
-                            if fgm_per_game is not None and fga_per_game is not None:
-                                opponent_projected_fgm += fgm_per_game * games_left
-                                opponent_projected_fga += fga_per_game * games_left
-
-                    # Calculate projected percentages using weighted average formula
-                    # Projected = (currentFGM + projectedFGM) / (currentFGA + projectedFGA)
-                    if your_projected_fga > 0:
-                        your_projected = your_projected_fgm / your_projected_fga
-                    else:
-                        # If no FGA projected, use current percentage
-                        your_projected = your_current
-
-                    if opponent_projected_fga > 0:
-                        opponent_projected = opponent_projected_fgm / opponent_projected_fga
-                    else:
-                        # If no FGA projected, use current percentage
-                        opponent_projected = opponent_current
-
-                elif category_name == "freeThrowPercentage":
-                    # Get FTM/FTA counts - try componentStats first, then raw API data
-                    your_ftm_raw = your_component_stats.get("freeThrowsMade", 0.0)
-                    your_fta_raw = your_component_stats.get("freeThrowsAttempted", 0.0)
-                    opponent_ftm_raw = opponent_component_stats.get("freeThrowsMade", 0.0)
-                    opponent_fta_raw = opponent_component_stats.get("freeThrowsAttempted", 0.0)
-
-                    # If componentStats doesn't have valid counts, try reading from raw API response
-                    if your_ftm_raw < 1.0 or your_fta_raw < 1.0:
-                        your_ftm_stat = your_score_by_stat.get("15", {})
-                        your_fta_stat = your_score_by_stat.get("16", {})
-                        if isinstance(your_ftm_stat, dict) and "score" in your_ftm_stat:
-                            your_ftm_raw = your_ftm_stat["score"]
-                        if isinstance(your_fta_stat, dict) and "score" in your_fta_stat:
-                            your_fta_raw = your_fta_stat["score"]
-
-                    if opponent_ftm_raw < 1.0 or opponent_fta_raw < 1.0:
-                        opponent_ftm_stat = opponent_score_by_stat.get("15", {})
-                        opponent_fta_stat = opponent_score_by_stat.get("16", {})
-                        if isinstance(opponent_ftm_stat, dict) and "score" in opponent_ftm_stat:
-                            opponent_ftm_raw = opponent_ftm_stat["score"]
-                        if isinstance(opponent_fta_stat, dict) and "score" in opponent_fta_stat:
-                            opponent_fta_raw = opponent_fta_stat["score"]
-
-                    # Validate that we have actual counts, not percentages
-                    # Counts should be large numbers (>= 1), percentages are < 1
-                    # If values look like percentages, treat as missing and use categoryScores percentage
-                    your_ftm = your_ftm_raw if your_ftm_raw >= 1.0 else 0.0
-                    your_fta = your_fta_raw if your_fta_raw >= 1.0 else 0.0
-                    opponent_ftm = opponent_ftm_raw if opponent_ftm_raw >= 1.0 else 0.0
-                    opponent_fta = opponent_fta_raw if opponent_fta_raw >= 1.0 else 0.0
-
-                    # Recalculate current percentages from totals if available
-                    if your_fta > 0:
-                        your_current = your_ftm / your_fta
-                    else:
-                        # If no FTA counts available, use the percentage from categoryScores
-                        your_current = your_category_scores.get(category_name, 0.0)
-
-                    if opponent_fta > 0:
-                        opponent_current = opponent_ftm / opponent_fta
-                    else:
-                        # If no FTA counts available, use the percentage from categoryScores
-                        opponent_current = opponent_category_scores.get(category_name, 0.0)
-
-                    # Start projected totals from current counts
-                    # Projected = (currentFTM + projectedFTM) / (currentFTA + projectedFTA)
-                    your_projected_ftm = your_ftm
-                    your_projected_fta = your_fta
-                    opponent_projected_ftm = opponent_ftm
-                    opponent_projected_fta = opponent_fta
-
-                    # Add projected contributions based on games remaining
-                    # For current week, only count games that haven't been played yet
-                    for entry in matchup.yourRoster.entries:
-                        player_id = entry.playerId
-                        games_left = your_expected.get(player_id, 0.0)
-
-                        if games_left > 0 and player_id in player_projections:
-                            proj = player_projections[player_id]
-                            # Try to get FTM/FTA from projections
-                            ftm_per_game = getattr(proj, "freeThrowsMade", None)
-                            fta_per_game = getattr(proj, "freeThrowsAttempted", None)
-
-                            # If not available, estimate from FT% and points/assists (players who drive get more FTs)
-                            if ftm_per_game is None or fta_per_game is None:
-                                ft_pct = getattr(proj, "freeThrowPercentage", None)
-                                points_per_game = getattr(proj, "points", None) or 0.0
-                                # Normalize percentage to decimal (PlayerStats stores as whole number 75.3, need 0.753)
-                                if ft_pct is not None:
-                                    if ft_pct > 1.0:
-                                        ft_pct = (
-                                            ft_pct / 100.0
-                                        )  # Convert from whole number to decimal
-                                # Rough estimate: assume ~20% of points come from FTs, so ~0.2 * points = FTM
-                                if ft_pct and ft_pct > 0:
-                                    estimated_ftm = points_per_game * 0.2  # Rough estimate
-                                    estimated_fta = estimated_ftm / ft_pct if ft_pct > 0 else 0.0
-                                    ftm_per_game = (
-                                        ftm_per_game if ftm_per_game is not None else estimated_ftm
-                                    )
-                                    fta_per_game = (
-                                        fta_per_game if fta_per_game is not None else estimated_fta
-                                    )
-
-                            if ftm_per_game is not None and fta_per_game is not None:
-                                your_projected_ftm += ftm_per_game * games_left
-                                your_projected_fta += fta_per_game * games_left
-
-                    # Add projected contributions for opponent
-                    for entry in matchup.opponentRoster.entries:
-                        player_id = entry.playerId
-                        games_left = opponent_expected.get(player_id, 0.0)
-
-                        if games_left > 0 and player_id in player_projections:
-                            proj = player_projections[player_id]
-                            # Try to get FTM/FTA from projections
-                            ftm_per_game = getattr(proj, "freeThrowsMade", None)
-                            fta_per_game = getattr(proj, "freeThrowsAttempted", None)
-
-                            # If not available, estimate from FT% and points
-                            if ftm_per_game is None or fta_per_game is None:
-                                ft_pct = getattr(proj, "freeThrowPercentage", None)
-                                points_per_game = getattr(proj, "points", None) or 0.0
-                                # Normalize percentage to decimal (PlayerStats stores as whole number 75.3, need 0.753)
-                                if ft_pct is not None:
-                                    if ft_pct > 1.0:
-                                        ft_pct = (
-                                            ft_pct / 100.0
-                                        )  # Convert from whole number to decimal
-                                if ft_pct and ft_pct > 0:
-                                    estimated_ftm = points_per_game * 0.2  # Rough estimate
-                                    estimated_fta = estimated_ftm / ft_pct if ft_pct > 0 else 0.0
-                                    ftm_per_game = (
-                                        ftm_per_game if ftm_per_game is not None else estimated_ftm
-                                    )
-                                    fta_per_game = (
-                                        fta_per_game if fta_per_game is not None else estimated_fta
-                                    )
-
-                            if ftm_per_game is not None and fta_per_game is not None:
-                                opponent_projected_ftm += ftm_per_game * games_left
-                                opponent_projected_fta += fta_per_game * games_left
-
-                    # Calculate projected percentages using weighted average formula
-                    # Projected = (currentFTM + projectedFTM) / (currentFTA + projectedFTA)
-                    if your_projected_fta > 0:
-                        your_projected = your_projected_ftm / your_projected_fta
-                    else:
-                        # If no FTA projected, use current percentage
-                        your_projected = your_current
-
-                    if opponent_projected_fta > 0:
-                        opponent_projected = opponent_projected_ftm / opponent_projected_fta
-                    else:
-                        # If no FTA projected, use current percentage
-                        opponent_projected = opponent_current
-
-                # Recalculate current_lead with accurate percentages
-                current_lead = your_current - opponent_current
-
-            else:
-                # For non-percentage categories, use additive projection
-                # Always calculate projections based on games remaining and player averages
-                your_projected_add = 0.0
-                opponent_projected_add = 0.0
-
-                # Calculate projections for your team
-                for entry in matchup.yourRoster.entries:
-                    player_id = entry.playerId
-                    games_left = your_expected.get(player_id, 0.0)
-
-                    if games_left > 0 and player_id in player_projections:
-                        proj = player_projections[player_id]
-                        # Get per-game average for this category
-                        category_value = getattr(proj, category_name, None)
-                        if category_value is not None:
-                            # Add projected contribution: per-game average * games remaining
-                            your_projected_add += category_value * games_left
-
-                # Calculate projections for opponent team
-                for entry in matchup.opponentRoster.entries:
-                    player_id = entry.playerId
-                    games_left = opponent_expected.get(player_id, 0.0)
-
-                    if games_left > 0 and player_id in player_projections:
-                        proj = player_projections[player_id]
-                        category_value = getattr(proj, category_name, None)
-                        if category_value is not None:
-                            # Add projected contribution: per-game average * games remaining
-                            opponent_projected_add += category_value * games_left
-
-                # Projections = current score + (games remaining × player averages)
-                your_projected = your_current + your_projected_add
-                opponent_projected = opponent_current + opponent_projected_add
-
-            projected_lead = (
-                your_projected - opponent_projected
-                if your_projected is not None and opponent_projected is not None
-                else None
-            )
-
-            # Determine projected result with appropriate thresholds
-            projected_result = None
-            margin = None
-            is_close = False
-
-            if projected_lead is not None:
-                margin = abs(projected_lead)
-
-                # Use much smaller threshold for percentage categories
-                if is_percentage_category:
-                    # For percentages, use 0.002 (0.2 percentage points) as threshold
-                    threshold = 0.002
-                    is_close = margin <= threshold
-
-                    if projected_lead > 0.002:
-                        projected_result = "win"
-                        categories_winning.append(category_name)
-                    elif projected_lead < -0.002:
-                        projected_result = "loss"
-                        categories_losing.append(category_name)
-                    else:
-                        projected_result = "tie"
-                        categories_tied.append(category_name)
-                else:
-                    # For non-percentage categories, use original logic
-                    threshold = max(abs(your_current) * 0.05, 2.0)  # 5% or minimum 2.0
-                    is_close = margin <= threshold
-
-                    if projected_lead > 0.1:
-                        projected_result = "win"
-                        categories_winning.append(category_name)
-                    elif projected_lead < -0.1:
-                        projected_result = "loss"
-                        categories_losing.append(category_name)
-                    else:
-                        projected_result = "tie"
-                        categories_tied.append(category_name)
-
-                if is_close:
-                    close_categories.append(category_name)
-
-            # Track current category wins/losses/ties with appropriate thresholds
-            if is_percentage_category:
-                # Use smaller threshold for percentage categories
-                if current_lead > 0.002:
-                    current_category_wins += 1
-                elif current_lead < -0.002:
-                    current_category_losses += 1
-                else:
-                    current_category_ties += 1
-            else:
-                # Use original threshold for non-percentage categories
-                if current_lead > 0.1:
-                    current_category_wins += 1
-                elif current_lead < -0.1:
-                    current_category_losses += 1
-                else:
-                    current_category_ties += 1
-
-            # Always include projections, even if they equal current (for future matchups, current is 0)
-            category_projections.append(
-                CategoryProjection(
-                    category=category_name,
-                    yourCurrent=your_current,
-                    opponentCurrent=opponent_current,
-                    yourProjected=your_projected,
-                    opponentProjected=opponent_projected,
-                    currentLead=current_lead,
-                    projectedLead=projected_lead,
-                    projectedResult=projected_result,
-                    margin=margin,
-                    isClose=is_close,
-                )
-            )
-
-        # Generate player recommendations and lineup warnings
-        player_recommendations = []
-        lineup_warnings: list[str] = []
-
-        for entry in matchup.yourRoster.entries:
-            player_id = entry.playerId
-            player = entry.playerPoolEntry.player
-            games_remaining = your_games_left.get(player_id, 0)
-            availability, factor = your_availability.get(player_id, ("ACTIVE", 1.0))
-            slot_name = entry.lineupSlotName or self._get_lineup_slot_id_mapping().get(
-                entry.lineupSlotId, f"SLOT_{entry.lineupSlotId}"
-            )
-            is_starter = entry.lineupSlotId not in (self._SLOT_BENCH, self._SLOT_IR)
-
-            # A starter who cannot play is a dead lineup slot; say so explicitly.
-            if is_starter and factor == 0.0:
-                if availability == "FA":
-                    lineup_warnings.append(
-                        f"{player.fullName} ({slot_name}) is not on an NBA roster and cannot "
-                        "score; replace or move to bench"
-                    )
-                elif games_remaining > 0:
-                    lineup_warnings.append(
-                        f"{player.fullName} ({slot_name}) is {availability} with "
-                        f"{games_remaining} game(s) left; move to bench and start a healthy player"
-                    )
-            elif (
-                is_starter
-                and games_remaining > 0
-                and availability not in ("ACTIVE", "NORMAL", "PROBABLE")
-            ):
-                lineup_warnings.append(
-                    f"{player.fullName} ({slot_name}) is {availability}; check status before tip-off"
-                )
-
-            # Skip players who cannot play or have no games left
-            if games_remaining == 0 or factor == 0.0:
-                continue
-
-            # Get player stats
-            proj_stats = player_projections.get(player_id)
-
-            if not proj_stats:
-                continue
-
-            # Determine which categories this player helps with
-            categories_helped = []
-            categories_hurt = []
-            priority_score = 5  # Base priority
-
-            # Check each close category or category we're losing
-            relevant_categories = set(close_categories + categories_losing)
-
-            for category in relevant_categories:
-                category_value = getattr(proj_stats, category, None)
-                if category_value is None:
-                    continue
-
-                # Check if this player helps in this category
-                if category == "turnovers":
-                    # Lower turnovers is better
-                    if category_value < 3.0:  # Low turnover player
-                        categories_helped.append(category)
-                        priority_score += 2
-                    elif category_value > 4.0:  # High turnover player
-                        categories_hurt.append(category)
-                        priority_score -= 1
-                elif category in ["fieldGoalPercentage", "freeThrowPercentage"]:
-                    # Higher percentage is better. PlayerStats stores percentages on a
-                    # 0-100 scale (e.g. 47.8); tolerate a 0-1 fraction just in case.
-                    pct = category_value * 100.0 if category_value <= 1.0 else category_value
-                    good, poor = self._SHOOTING_THRESHOLDS[category]
-                    if pct >= good:
-                        categories_helped.append(category)
-                        priority_score += 1
-                    elif pct < poor:
-                        categories_hurt.append(category)
-                        priority_score -= 1
-                else:
-                    # Higher is better for most categories
-                    # Compare to league average (rough estimates)
-                    thresholds = {
-                        "points": 15.0,
-                        "rebounds": 6.0,
-                        "assists": 4.0,
-                        "steals": 1.0,
-                        "blocks": 0.8,
-                        "threePointMade": 1.5,
-                    }
-                    threshold = thresholds.get(category, 5.0)
-
-                    if category_value >= threshold:
-                        categories_helped.append(category)
-                        priority_score += 2
-                    elif category_value < threshold * 0.7:
-                        categories_hurt.append(category)
-                        priority_score -= 1
-
-            # Boost priority for players with more games remaining
-            if games_remaining >= 3:
-                priority_score += 2
-            elif games_remaining == 2:
-                priority_score += 1
-
-            # Discount uncertain availability
-            if availability == "DOUBTFUL":
-                priority_score -= 2
-            elif availability in ("DAY_TO_DAY", "QUESTIONABLE"):
-                priority_score -= 1
-
-            # Boost priority if player helps in multiple categories
-            if len(categories_helped) >= 3:
-                priority_score += 2
-            elif len(categories_helped) >= 2:
-                priority_score += 1
-
-            # Cap priority between 1-10
-            priority_score = max(1, min(10, priority_score))
-
-            # Build reasoning
-            reasoning_parts = []
-            if categories_helped:
-                reasoning_parts.append(f"Strong in: {', '.join(categories_helped)}")
-            if games_remaining >= 3:
-                reasoning_parts.append(f"{games_remaining} games remaining")
-            if availability not in ("ACTIVE", "NORMAL"):
-                reasoning_parts.append(f"Status: {availability}")
-            if not reasoning_parts:
-                reasoning_parts.append("Active player")
-
-            reasoning = ". ".join(reasoning_parts)
-
-            # Get lineup slot name
-            lineup_slot_name = None
-            if entry.lineupSlotName:
-                lineup_slot_name = entry.lineupSlotName
-            else:
-                lineup_slot_mapping = self._get_lineup_slot_id_mapping()
-                lineup_slot_name = lineup_slot_mapping.get(
-                    entry.lineupSlotId, f"SLOT_{entry.lineupSlotId}"
-                )
-
-            player_recommendations.append(
-                PlayerRecommendation(
-                    playerId=player_id,
-                    playerName=player.fullName,
-                    position=player.defaultPosition,
-                    lineupSlotId=entry.lineupSlotId,
-                    lineupSlotName=lineup_slot_name,
-                    gamesRemaining=games_remaining,
-                    availability=availability,
-                    expectedGames=round(games_remaining * factor, 1),
-                    priority=priority_score,
-                    reasoning=reasoning,
-                    categoriesHelped=categories_helped,
-                    categoriesHurt=categories_hurt,
-                    injuryStatus=entry.injuryStatus,
-                    todaysGame=entry.todaysGame,
-                )
-            )
-
-        # Sort recommendations by priority (highest first)
-        player_recommendations.sort(key=lambda x: x.priority, reverse=True)
-
-        # Generate strategy notes
-        strategy_notes = []
-
-        # Calculate projected category record
-        projected_category_wins = len(categories_winning)
-        projected_category_losses = len(categories_losing)
-
-        if projected_category_wins > projected_category_losses:
-            strategy_notes.append(
-                f"Projected to win {projected_category_wins}-{projected_category_losses}"
-            )
-        elif projected_category_losses > projected_category_wins:
-            strategy_notes.append(
-                f"Currently trailing, projected {projected_category_wins}-{projected_category_losses}"
-            )
-        else:
-            strategy_notes.append(
-                f"Projected tie at {projected_category_wins}-{projected_category_wins}"
-            )
-
-        if close_categories:
-            strategy_notes.append(
-                f"Focus on {len(close_categories)} close categories: {', '.join(close_categories)}"
-            )
-
-        games_edge = round(your_expected_games - opponent_expected_games, 1)
-        if games_edge > 0:
-            strategy_notes.append(
-                f"You have {games_edge:g} more expected games remaining than your opponent - advantage"
-            )
-        elif games_edge < 0:
-            strategy_notes.append(
-                f"Opponent has {-games_edge:g} more expected games remaining - consider streaming"
-            )
-        if lineup_warnings:
-            strategy_notes.append(f"{len(lineup_warnings)} lineup warning(s): see lineupWarnings")
-
-        if categories_losing:
-            strategy_notes.append(
-                f"Prioritize players who help in: {', '.join(categories_losing[:3])}"
-            )
-
-        return MatchupAnalysis(
-            matchupId=matchup.matchupId,
-            scoringPeriod=matchup.scoringPeriod,
-            yourTeamId=team_id,
-            opponentTeamId=opponent_team_id,
-            yourTeamName=matchup.yourTeam.teamName,
-            opponentTeamName=matchup.opponentTeam.teamName,
-            categoryProjections=category_projections,
-            categoriesWinning=categories_winning,
-            categoriesLosing=categories_losing,
-            categoriesTied=categories_tied,
-            closeCategories=close_categories,
-            playerRecommendations=player_recommendations,
-            yourGamesRemaining=your_games_remaining,
-            opponentGamesRemaining=opponent_games_remaining,
-            yourExpectedGames=your_expected_games,
-            opponentExpectedGames=opponent_expected_games,
-            currentCategoryWins=current_category_wins,
-            currentCategoryLosses=current_category_losses,
-            currentCategoryTies=current_category_ties,
-            projectedCategoryWins=projected_category_wins,
-            projectedCategoryLosses=projected_category_losses,
-            strategyNotes=strategy_notes,
-            lineupWarnings=lineup_warnings,
-        )
+        """Analyze a matchup: category projections, close categories, start/sit priorities and
+        lineup warnings. See analysis.analyze_matchup for the full description."""
+        return await analyze_matchup_impl(self, team_id, matchup_period)
 
     async def get_team_season_stats(self, team_id: int) -> TeamSeasonStats:
         """Get team statistics aggregated across the entire season.
@@ -2872,51 +2062,6 @@ class ESPNFantasyBasketballClient:
         }
 
     # ------------------------------------------------------------------ player search
-    # Fuzzy (difflib) matches below this are noise: live, "Jokic" scored 0.5 against
-    # "Jamorko Pickett" and "Josh Okogie".
-    _SEARCH_MIN_SCORE = 0.6
-
-    @staticmethod
-    def _normalize_name(name: str) -> str:
-        """Lower-case, strip accents and punctuation, collapse whitespace."""
-        decomposed = unicodedata.normalize("NFKD", name)
-        ascii_only = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-        cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in ascii_only)
-        return " ".join(cleaned.casefold().split())
-
-    @classmethod
-    def _name_match_score(cls, query: str, full_name: str) -> float:
-        """Score how well a query matches a player name (0-1).
-
-        Exact name 1.0; query equal to a name token (usually the surname) 0.95; every query
-        token a prefix of some name token in order ("steph curry" -> "Stephen Curry") 0.9;
-        query a substring 0.85; otherwise difflib similarity capped at 0.8, so typos still
-        rank but never above a structural match.
-        """
-        q = cls._normalize_name(query)
-        n = cls._normalize_name(full_name)
-        if not q or not n:
-            return 0.0
-        if q == n:
-            return 1.0
-        name_tokens = n.split()
-        query_tokens = q.split()
-        if len(query_tokens) == 1 and q in name_tokens:
-            return 0.95
-        if len(query_tokens) <= len(name_tokens):
-            remaining = list(name_tokens)
-            ok = True
-            for qt in query_tokens:
-                idx = next((i for i, nt in enumerate(remaining) if nt.startswith(qt)), None)
-                if idx is None:
-                    ok = False
-                    break
-                remaining = remaining[idx + 1 :]
-            if ok:
-                return 0.9
-        if q in n:
-            return 0.85
-        return min(0.8, difflib.SequenceMatcher(None, q, n).ratio())
 
     async def get_pro_players(self) -> list[dict[str, Any]]:
         """All active NBA players known to ESPN Fantasy for this season (league-independent).
@@ -3232,90 +2377,6 @@ class ESPNFantasyBasketballClient:
 
         return stats
 
-    @staticmethod
-    def _get_stat_id_mapping() -> dict[str, str]:
-        """Get mapping of ESPN stat IDs to human-readable category names.
-
-        ESPN stat ID mapping: 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB
-
-        Returns:
-            Dictionary mapping stat ID strings to category names
-        """
-        return {
-            "0": "points",  # Points
-            "1": "blocks",  # Blocks
-            "2": "steals",  # Steals
-            "3": "assists",  # Assists
-            "4": "offensiveRebounds",  # Offensive Rebounds (less common in matchups)
-            "6": "rebounds",  # Rebounds (total rebounds)
-            "11": "turnovers",  # Turnovers
-            "13": "fieldGoalsMade",  # Field Goals Made
-            "14": "fieldGoalsAttempted",  # Field Goals Attempted
-            "15": "freeThrowsMade",  # Free Throws Made
-            "16": "freeThrowsAttempted",  # Free Throws Attempted
-            "17": "threePointMade",  # 3PM
-            "19": "fieldGoalPercentage",  # FG%
-            "20": "freeThrowPercentage",  # FT%
-            "40": "minutes",  # Minutes
-            "gamesPlayed": "gamesPlayed",
-        }
-
-    @staticmethod
-    def _get_lineup_slot_id_mapping() -> dict[int, str]:
-        """Get mapping of ESPN lineup slot IDs to human-readable slot names.
-
-        This includes both position slots (0-6) and special slots (7, 11-13).
-        Position IDs and lineup slot IDs use the same values for positions.
-
-        Returns:
-            Dictionary mapping slot ID integers to slot names
-        """
-        return {
-            0: "PG",  # Point Guard
-            1: "SG",  # Shooting Guard
-            2: "SF",  # Small Forward
-            3: "PF",  # Power Forward
-            4: "C",  # Center
-            5: "G",  # Guard (PG or SG)
-            6: "F",  # Forward (SF or PF)
-            7: "UTIL",  # Utility
-            11: "UTIL",  # Utility (alternate)
-            12: "BENCH",  # Bench
-            13: "IR",  # Injured Reserve
-        }
-
-    # ESPN's site API (scoreboard, team schedules) and some fantasy payloads use short or
-    # non-standard codes. Everything this client emits or uses as a lookup key goes through
-    # _normalize_nba_abbrev so that today's-game lookups, schedule lookups, and the static
-    # proTeamId map all agree on one spelling.
-    _ABBREV_ALIASES: dict[str, str] = {
-        "GS": "GSW",  # Golden State Warriors
-        "NO": "NOP",  # New Orleans Pelicans
-        "NY": "NYK",  # New York Knicks
-        "SA": "SAS",  # San Antonio Spurs
-        "UTAH": "UTA",  # Utah Jazz
-        "WSH": "WAS",  # Washington Wizards
-        "PHO": "PHX",  # Phoenix Suns
-        "BRK": "BKN",  # Brooklyn Nets
-        "CHO": "CHA",  # Charlotte Hornets
-    }
-
-    @classmethod
-    def _normalize_nba_abbrev(cls, nba_abbrev: str) -> str:
-        """Normalize any NBA team abbreviation variant to the canonical 3-letter code.
-
-        Canonical codes are the ones in _get_pro_team_id_to_abbrev (GSW, NOP, NYK, SAS,
-        UTA, WAS, ...). Unknown codes are returned upper-cased and unchanged.
-
-        Args:
-            nba_abbrev: Abbreviation from any ESPN endpoint
-
-        Returns:
-            Canonical abbreviation
-        """
-        code = (nba_abbrev or "").strip().upper()
-        return cls._ABBREV_ALIASES.get(code, code)
-
     def _parse_todays_games(
         self, nba_data: dict[str, Any]
     ) -> tuple[dict[str, TodaysGame], dict[int, str]]:
@@ -3420,52 +2481,6 @@ class ESPNFantasyBasketballClient:
 
         return games_map, team_id_to_abbrev
 
-    @staticmethod
-    def _get_pro_team_id_to_abbrev() -> dict[int, str]:
-        """Get mapping of ESPN Fantasy proTeamId to team abbreviation.
-
-        This mapping is based on ESPN Fantasy Basketball's proTeamId system.
-        The ID -> team identity was manually validated against the ESPN Fantasy UI.
-        Abbreviations are the canonical codes that _normalize_nba_abbrev produces, so
-        values here can be used directly as keys into the today's-games cache.
-
-        Returns:
-            Dictionary mapping ESPN Fantasy proTeamId to team abbreviation
-        """
-
-        return {
-            1: "ATL",  # Atlanta Hawks
-            2: "BOS",  # Boston Celtics
-            3: "NOP",  # New Orleans Pelicans
-            4: "CHI",  # Chicago Bulls
-            5: "CLE",  # Cleveland Cavaliers
-            6: "DAL",  # Dallas Mavericks
-            7: "DEN",  # Denver Nuggets
-            8: "DET",  # Detroit Pistons
-            9: "GSW",  # Golden State Warriors
-            10: "HOU",  # Houston Rockets
-            11: "IND",  # Indiana Pacers
-            12: "LAC",  # LA Clippers
-            13: "LAL",  # Los Angeles Lakers
-            14: "MIA",  # Miami Heat
-            15: "MIL",  # Milwaukee Bucks
-            16: "MIN",  # Minnesota Timberwolves
-            17: "BKN",  # Brooklyn Nets
-            18: "NYK",  # New York Knicks
-            19: "ORL",  # Orlando Magic
-            20: "PHI",  # Philadelphia 76ers
-            21: "PHX",  # Phoenix Suns
-            22: "POR",  # Portland Trail Blazers
-            23: "SAC",  # Sacramento Kings
-            24: "SAS",  # San Antonio Spurs
-            25: "OKC",  # Oklahoma City Thunder
-            26: "UTA",  # Utah Jazz
-            27: "WAS",  # Washington Wizards
-            28: "TOR",  # Toronto Raptors
-            29: "MEM",  # Memphis Grizzlies
-            30: "CHA",  # Charlotte Hornets
-        }
-
     def _resolve_pro_team_abbrev(
         self,
         pro_team_id: int | None,
@@ -3508,28 +2523,6 @@ class ESPNFantasyBasketballClient:
         # Fallback to static mapping
         pro_team_id_mapping = self._get_pro_team_id_to_abbrev()
         return pro_team_id_mapping.get(pro_team_id)
-
-    @staticmethod
-    def _get_position_id_mapping() -> dict[int, str]:
-        """Get mapping of ESPN position IDs to human-readable position names.
-
-        ESPN uses 1-based indexing for defaultPositionId:
-        1=PG, 2=SG, 3=SF, 4=PF, 5=C
-
-        Note: eligibleSlots uses 0-based indexing (0=PG, 1=SG, etc.)
-
-        Returns:
-            Dictionary mapping position ID integers to position names
-        """
-        return {
-            1: "PG",  # Point Guard
-            2: "SG",  # Shooting Guard
-            3: "SF",  # Small Forward
-            4: "PF",  # Power Forward
-            5: "C",  # Center
-            6: "G",  # Guard (PG or SG)
-            7: "F",  # Forward (SF or PF)
-        }
 
     def _get_scoring_stat_ids(self, league_settings: LeagueSettings | None = None) -> set[int]:
         """Get set of stat IDs that are scoring categories for this league.
@@ -3888,13 +2881,6 @@ class ESPNFantasyBasketballClient:
         return trending_players[:limit]
 
     # ------------------------------------------------------------------ matchup period dates
-    @staticmethod
-    def _date_for_scoring_period(
-        scoring_period: int, anchor_period: int, anchor_date: date
-    ) -> date:
-        """ESPN scoring periods are consecutive calendar days, so one known (period, date) pair
-        places every other period."""
-        return anchor_date + timedelta(days=scoring_period - anchor_period)
 
     async def _scoring_period_anchor(
         self, league_settings: LeagueSettings, today: date | None = None
@@ -3917,50 +2903,6 @@ class ESPNFantasyBasketballClient:
         if first_game is not None:
             return status.firstScoringPeriod or 1, first_game.date()
         return None
-
-    @staticmethod
-    def _matchup_period_window(
-        matchup_period: int,
-        season_start: date,
-        matchup_periods: dict[str, list[int]],
-        week_start_day: int = 0,
-    ) -> tuple[date, date] | None:
-        """Calendar window of a matchup period given opening night and ESPN's period mapping.
-
-        ESPN's scheduleSettings.matchupPeriods is week-indexed: each entry lists the week
-        number(s) a matchup period covers, so a normal period has one element and a two-week
-        All-Star period has two. (Verified live: period 1 was [1] while the daily scoring
-        period counter read 6.) Period 1 starts on opening night and ends at the end of that
-        calendar week; every later period is whole weeks from the next day.
-
-        Some leagues may instead list one scoring period per day; if any entry is longer than
-        four, the lists are treated as daily and the window is their min/max day.
-        """
-        if matchup_period < 1:
-            return None
-        if matchup_periods and str(matchup_period) not in matchup_periods:
-            return None  # beyond the league's schedule
-
-        daily = any(len(v) > 4 for v in matchup_periods.values())
-        if daily:
-            days = matchup_periods[str(matchup_period)]
-            return (
-                season_start + timedelta(days=min(days) - 1),
-                season_start + timedelta(days=max(days) - 1),
-            )
-
-        def weeks_in(period: int) -> int:
-            entry = matchup_periods.get(str(period))
-            return max(1, len(entry)) if entry else 1
-
-        # ESPN weeks end the day before week_start_day (Sunday for Monday starts).
-        days_to_week_end = (week_start_day - 1 - season_start.weekday()) % 7
-        start = season_start
-        end = season_start + timedelta(days=days_to_week_end, weeks=weeks_in(1) - 1)
-        for period in range(2, matchup_period + 1):
-            start = end + timedelta(days=1)
-            end = start + timedelta(days=7 * weeks_in(period) - 1)
-        return start, end
 
     async def get_matchup_period_dates(
         self,
@@ -4075,26 +3017,6 @@ class ESPNFantasyBasketballClient:
         # Default to Monday (most common for fantasy basketball)
         logger.debug("Using default week start: Monday")
         return 0  # Monday
-
-    def _get_week_boundaries(self, date: str, week_start_day: int = 0) -> tuple[str, str]:
-        """Get week boundaries for a given date based on week start day.
-
-        Args:
-            date: Date in YYYY-MM-DD format
-            week_start_day: Weekday number (0=Monday, 6=Sunday)
-
-        Returns:
-            Tuple of (week_start_date, week_end_date) in YYYY-MM-DD format
-        """
-        from datetime import datetime, timedelta
-
-        dt = datetime.fromisoformat(date)
-        # Get the start day of the week
-        days_since_start = (dt.weekday() - week_start_day) % 7
-        week_start = dt - timedelta(days=days_since_start)
-        week_end = week_start + timedelta(days=6)
-
-        return week_start.strftime("%Y-%m-%d"), week_end.strftime("%Y-%m-%d")
 
     async def get_player_schedule(
         self,
