@@ -24,7 +24,9 @@ STAT_ID_TO_CATEGORY: dict[str, str] = {
 }
 
 
-# Lineup slot IDs. Position slots (0-6), utility (7, 11), bench (12), injured reserve (13).
+# Lineup slot IDs. Observed live: 0-6, 11, 12, 13. Slots 7-10 are inferred from the order of
+# ESPN's roster-settings table (SG/SF, G/F, PF/C, F/C sit between F and UTIL) and match the
+# espn-api library's table; no league seen so far uses them, so they are unverified by data.
 LINEUP_SLOT_NAMES: dict[int, str] = {
     0: "PG",  # Point Guard
     1: "SG",  # Shooting Guard
@@ -56,6 +58,11 @@ POSITION_NAMES: dict[int, str] = {
     7: "F",  # Forward (SF or PF)
 }
 
+
+# rosterSettings.positionLimits is keyed one higher than defaultPositionId. Observed live: a league
+# whose UI shows "No Limit" for PG-PF and a maximum of 4 centers returned {1: 0, 2: -1, 3: -1,
+# 4: -1, 5: -1, 6: 4}. Key 1 matches nothing in the UI and is left unnamed.
+POSITION_LIMIT_NAMES: dict[int, str] = {2: "PG", 3: "SG", 4: "SF", 5: "PF", 6: "C"}
 
 # ESPN Fantasy proTeamId -> canonical abbreviation. The ID -> team identity was validated against
 # the ESPN Fantasy UI. Abbreviations are the canonical codes normalize_nba_abbrev produces, so

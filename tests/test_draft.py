@@ -404,7 +404,8 @@ class TestDraftSettingsAware:
                         "12": 3,
                         "13": 2,
                     },
-                    "positionLimits": {"1": -1, "2": -1, "3": -1, "4": -1, "5": 4},
+                    # as returned live for a league whose UI shows PG-PF "No Limit" and C max 4
+                    "positionLimits": {"1": 0, "2": -1, "3": -1, "4": -1, "5": -1, "6": 4},
                     "lineupLocktimeType": "INDIVIDUAL_GAME",
                 },
                 "scheduleSettings": {
@@ -438,6 +439,7 @@ class TestDraftSettingsAware:
             "3": ["2026-11-02", "2026-11-15"],  # two-week period
         }
         assert settings.rosterSettings.positionLimitNames == {
+            "POS_1": 0,
             "PG": -1,
             "SG": -1,
             "SF": -1,

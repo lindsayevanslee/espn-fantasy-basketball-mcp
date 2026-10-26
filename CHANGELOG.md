@@ -3,9 +3,12 @@
 ## [Unreleased]
 
 ### Fixed
-- Lineup slot 7 was labelled UTIL; per ESPN's slot scheme it is SG/SF. Slots 8 (G/F), 9 (PF/C)
-  and 10 (F/C) are now named too, and only slot 11 is UTIL. (Pending confirmation against a live
-  roster; `scripts/verify_live.py` now prints raw slot IDs beside names for that purpose.)
+- Lineup slot 7 was labelled UTIL. Live data confirmed UTIL is slot 11; slots 7-10 are named
+  SG/SF, G/F, PF/C, F/C from the order of ESPN's roster-settings table (unverified by data, as no
+  league seen uses them). `scripts/verify_live.py` prints raw slot IDs beside names.
+- `rosterSettings.positionLimitNames` uses ESPN's actual key scheme for position limits, which is
+  one higher than player position IDs (2=PG ... 6=C), confirmed against a league UI showing a
+  maximum of 4 centers.
 
 ### Added
 - `get_league_settings` is easier to read correctly: `scheduleSettings.matchupPeriodDates` gives
