@@ -22,6 +22,8 @@ PRO_PLAYERS = [
     {"id": 6, "fullName": "Kevin Porter Jr.", "defaultPositionId": 2, "proTeamId": 0},
     {"id": 7, "fullName": "Jalen Williams", "defaultPositionId": 3, "proTeamId": 25},
     {"id": 8, "fullName": "Jaylen Williams", "defaultPositionId": 4, "proTeamId": 25},
+    {"id": 9, "fullName": "Jamorko Pickett", "defaultPositionId": 3, "proTeamId": 7},
+    {"id": 10, "fullName": "Josh Okogie", "defaultPositionId": 2, "proTeamId": 26},
 ]
 
 
@@ -70,6 +72,13 @@ class TestSearchPlayers:
         assert steph.playerId == 3
         assert steph.defaultPosition == "PG"
         assert steph.proTeamAbbrev == "GSW"
+
+    @pytest.mark.asyncio
+    async def test_weak_fuzzy_matches_are_dropped(self, client):
+        """Live, 'Jokic' pulled in Jamorko Pickett and Josh Okogie at score 0.5."""
+        with patch.object(client, "get_pro_players", AsyncMock(return_value=PRO_PLAYERS)):
+            results = await client.search_players("Jokic", limit=5, include_league_status=False)
+        assert [r.fullName for r in results] == ["Nikola Jokic"]
 
     @pytest.mark.asyncio
     async def test_unsigned_player_shows_fa(self, client):

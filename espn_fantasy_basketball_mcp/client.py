@@ -2788,6 +2788,10 @@ class ESPNFantasyBasketballClient:
         }
 
     # ------------------------------------------------------------------ player search
+    # Fuzzy (difflib) matches below this are noise: live, "Jokic" scored 0.5 against
+    # "Jamorko Pickett" and "Josh Okogie".
+    _SEARCH_MIN_SCORE = 0.6
+
     @staticmethod
     def _normalize_name(name: str) -> str:
         """Lower-case, strip accents and punctuation, collapse whitespace."""
@@ -2855,7 +2859,7 @@ class ESPNFantasyBasketballClient:
                 league or which fantasy team owns them (one extra request)
 
         Returns:
-            Matches sorted by score, best first. Empty if nothing scores at least 0.5.
+            Matches sorted by score, best first. Empty if nothing scores at least 0.6.
         """
         if not query or not query.strip():
             raise ValueError("query must not be empty")
@@ -2871,7 +2875,7 @@ class ESPNFantasyBasketballClient:
             ),
             key=lambda sp: (-sp[0], sp[1].get("fullName", "")),
         )
-        top = [(score, p) for score, p in scored[:limit] if score >= 0.5]
+        top = [(score, p) for score, p in scored[:limit] if score >= self._SEARCH_MIN_SCORE]
 
         position_map = self._get_position_id_mapping()
         results = [
