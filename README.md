@@ -362,8 +362,8 @@ uv run python scripts/verify_live.py
 It reads `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_S2`, `ESPN_SWID`, `ESPN_YEAR`, and `MY_TIMEZONE`
 from the environment, and anything not set there from the `env` block of this server's entry in
 your Claude Desktop config. If Claude Desktop already works, no extra setup is needed. Use
-`--config PATH` if your config lives somewhere unusual, or `--server NAME` if you have several
-ESPN entries. Alternatively copy `.env.example` to `.env` (gitignored) and load it with
+`--config PATH` if your config lives somewhere unusual, `--server NAME` if you have several
+ESPN entries, or `--year 2027` to check a specific season regardless of `ESPN_YEAR`. Alternatively copy `.env.example` to `.env` (gitignored) and load it with
 `set -a; source .env; set +a`.
 
 It prints a PASS/FAIL report covering: the season your settings resolve to, today's NBA
