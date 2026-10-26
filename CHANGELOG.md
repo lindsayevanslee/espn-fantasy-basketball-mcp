@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- `get_player_stats` (and everything built on it) now returns per-game `fieldGoalsMade`,
+  `fieldGoalsAttempted`, `freeThrowsMade`, and `freeThrowsAttempted` from ESPN stat IDs 13–16.
+  `analyze_matchup` uses them to project FG% and FT% as made/attempted; the points-based estimate
+  is now only a fallback when ESPN has no projection for a player.
 - `analyze_matchup` is availability-aware. Players who are OUT, suspended, in the IR slot, or
   not on an NBA roster (`FA`) contribute no games to projections and are never recommended;
   DOUBTFUL players count for half. New fields: `yourExpectedGames`/`opponentExpectedGames`,

@@ -90,6 +90,10 @@ class TestStatisticalAnalysisClient:
                                     "40": 35.0,  # Minutes
                                     "19": 0.485,  # FG%
                                     "20": 0.850,  # FT%
+                                    "13": 9.1,  # FGM
+                                    "14": 18.8,  # FGA
+                                    "15": 5.0,  # FTM
+                                    "16": 6.1,  # FTA
                                 },
                                 "stats": {
                                     "42": 50,  # Games played
@@ -114,6 +118,9 @@ class TestStatisticalAnalysisClient:
             assert stats.rebounds == 8.2
             assert stats.assists == 6.1
             assert stats.fantasyPoints == 45.8
+            assert stats.fieldGoalPercentage == 48.5
+            assert (stats.fieldGoalsMade, stats.fieldGoalsAttempted) == (9.1, 18.8)
+            assert (stats.freeThrowsMade, stats.freeThrowsAttempted) == (5.0, 6.1)
 
     @pytest.mark.asyncio
     async def test_get_player_stats_player_not_found(self, client):

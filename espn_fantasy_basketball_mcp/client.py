@@ -2884,6 +2884,10 @@ class ESPNFantasyBasketballClient:
                     turnovers=stats_dict.get("turnovers"),
                     fieldGoalPercentage=stats_dict.get("fg_pct"),
                     freeThrowPercentage=stats_dict.get("ft_pct"),
+                    fieldGoalsMade=stats_dict.get("fgm"),
+                    fieldGoalsAttempted=stats_dict.get("fga"),
+                    freeThrowsMade=stats_dict.get("ftm"),
+                    freeThrowsAttempted=stats_dict.get("fta"),
                     fantasyPoints=stats_dict.get("fantasyAvg"),
                 )
             )
@@ -2942,6 +2946,12 @@ class ESPNFantasyBasketballClient:
                         "ft_pct": round(averages.get("20", 0) * 100, 1)
                         if averages.get("20")
                         else None,
+                        # 13=FGM 14=FGA 15=FTM 16=FTA; per game, so percentages can be
+                        # projected as made/attempted instead of estimated from points
+                        "fgm": round(averages.get("13", 0), 2),
+                        "fga": round(averages.get("14", 0), 2),
+                        "ftm": round(averages.get("15", 0), 2),
+                        "fta": round(averages.get("16", 0), 2),
                     }
                 elif totals and games_played > 0:
                     gp = games_played
@@ -2957,6 +2967,10 @@ class ESPNFantasyBasketballClient:
                         "turnovers": round(totals.get("11", 0) / gp, 1),
                         "fg_pct": round(totals.get("19", 0) * 100, 1) if totals.get("19") else None,
                         "ft_pct": round(totals.get("20", 0) * 100, 1) if totals.get("20") else None,
+                        "fgm": round(totals.get("13", 0) / gp, 2),
+                        "fga": round(totals.get("14", 0) / gp, 2),
+                        "ftm": round(totals.get("15", 0) / gp, 2),
+                        "fta": round(totals.get("16", 0) / gp, 2),
                     }
 
                 if "appliedAverage" in stat_set:
