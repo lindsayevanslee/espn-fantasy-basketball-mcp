@@ -157,7 +157,7 @@ Get the current state of your draft including all picks made so far.
 # Get draft status
 draft_status = await get_draft_status(
     league_id=123456,
-    year=2025,
+    year=2027,  # ESPN season ID = year the season ends in
     espn_s2="your_espn_s2_cookie",  # for private leagues
     swid="your_swid_cookie"         # for private leagues
 )
@@ -168,7 +168,8 @@ draft_status = await get_draft_status(
 - `drafted`: Whether draft is completed
 - `picks`: Array of all picks made so far with player details
 - `currentPickNumber`: Next pick number
-- `currentNominatingTeam`: Which team is nominating next
+- `currentNominatingTeam`: Team on the clock, from the league's draft order (auction nominations cycle; snake drafts reverse in even rounds)
+- `draftType`: `AUCTION` or `SNAKE`
 
 ### 💰 **should_i_bid**
 Get AI-powered recommendation on whether to bid for the current player being nominated.
@@ -179,7 +180,7 @@ recommendation = await should_i_bid(
     current_player_id=12345,        # Player being nominated
     team_id=1,                      # Your team ID (optional, uses ESPN_TEAM_ID env var)
     league_id=123456,               # Optional, uses ESPN_LEAGUE_ID env var
-    year=2025,                      # Optional, uses ESPN_YEAR env var
+    year=2027,                      # Optional; ESPN season ID = year the season ends in
     espn_s2="your_espn_s2_cookie",  # Optional, uses ESPN_S2 env var
     swid="your_swid_cookie"         # Optional, uses ESPN_SWID env var
 )
@@ -201,7 +202,7 @@ Get recommendation on which player to nominate when it's your turn.
 recommendation = await who_should_i_target_next(
     team_id=1,                      # Your team ID (optional, uses ESPN_TEAM_ID env var)
     league_id=123456,               # Optional, uses ESPN_LEAGUE_ID env var
-    year=2025,                      # Optional, uses ESPN_YEAR env var
+    year=2027,                      # Optional; ESPN season ID = year the season ends in
     espn_s2="your_espn_s2_cookie",  # Optional, uses ESPN_S2 env var
     swid="your_swid_cookie"         # Optional, uses ESPN_SWID env var
 )
@@ -223,7 +224,7 @@ Analyze your current draft progress, spending patterns, and punt strategy.
 analysis = await analyze_my_draft_strategy(
     team_id=1,                      # Your team ID (optional, uses ESPN_TEAM_ID env var)
     league_id=123456,               # Optional, uses ESPN_LEAGUE_ID env var
-    year=2025,                      # Optional, uses ESPN_YEAR env var
+    year=2027,                      # Optional; ESPN season ID = year the season ends in
     espn_s2="your_espn_s2_cookie",  # Optional, uses ESPN_S2 env var
     swid="your_swid_cookie"         # Optional, uses ESPN_SWID env var
 )
@@ -231,9 +232,10 @@ analysis = await analyze_my_draft_strategy(
 
 **Returns:**
 - `team_summary`: Your current roster and spending
-  - `totalSpent`: Money spent so far
-  - `playersCount`: Number of players drafted
-  - `remainingBudget`: Money left to spend
+  - `totalSpent`, `remainingBudget`, `budget`: Spending against the league's auction budget
+  - `playersCount`, `rosterSize`, `remainingSlots`: Roster progress against the league's roster size (IR excluded)
+  - `positionCounts`: Drafted players by position
+  - `draftType`: `AUCTION` or `SNAKE`
 - `punt_analysis`: Strategy analysis and recommendations
 - `budget_per_remaining_player`: Average $ per remaining roster spot
 
@@ -244,7 +246,7 @@ Get list of top available players with auction values and rankings.
 # Get best available players
 players = await get_available_players(
     league_id=123456,
-    year=2025,
+    year=2027,  # ESPN season ID = year the season ends in
     limit=25,                       # Number of players to return
     espn_s2="your_espn_s2_cookie",
     swid="your_swid_cookie"
@@ -379,7 +381,7 @@ exits non-zero if any check fails.
 
 GitHub Actions (`.github/workflows/test.yml`) runs on every push and on pull requests into `main`, across Python 3.10–3.12. It installs from `uv.lock` (`uv sync --locked`) so CI uses exactly the versions committed here, and it runs the same four checks as `scripts/check.sh`. The workflow has read-only repository permissions and uses no secrets.
 
-Coverage is enforced with `fail_under` in `pyproject.toml`. It is currently set low (40%) because the matchup, schedule, and settings code added in 2025 does not have tests yet. Raise it as tests are added.
+Coverage is enforced with `fail_under` in `pyproject.toml` (currently 70%, with coverage around 74%). It is a ratchet: raise it as tests are added, never lower it.
 
 ### Project Structure
 
@@ -451,50 +453,43 @@ This MCP server uses the following ESPN API endpoints:
 5. **Data Completeness**: Some fields like team `location` are not provided by ESPN's API
 6. **Season Dependency**: API behavior may vary between active and inactive seasons
 
-### Alternative APIs You May Need
+### Not Available From ESPN's Fantasy API
 
-1. **NBA Player Stats & Advanced Metrics**
-   - **NBA Stats API**: `https://stats.nba.com/stats/` (official but rate limited)
-   - **Basketball Reference**: Web scraping required
-   - **RapidAPI Sports**: Paid API with comprehensive NBA data
+The server covers everything ESPN exposes for a league: settings, rosters, free agents, matchups
+and box scores, player stats and projections, draft state, and NBA schedules. It does not have
+player news or injury details beyond ESPN's status codes, advanced metrics, play-by-play, or
+daily-fantasy data. Ask Claude for those from its own knowledge or another source, and it should
+say which is which.
 
-2. **Real-time NBA Data**
-   - **ESPN NBA API**: `https://site.api.espn.com/apis/site/v2/sports/basketball/nba` (used for schedule)
-   - **NBA Data API**: `https://data.nba.net/prod/` (official but limited)
+### ESPN ID Reference
 
-3. **Advanced Fantasy Analytics**
-   - **FantasyLabs API**: Paid service with projections and ownership data
-   - **DraftKings API**: For DFS ownership and salaries
-   - **Hashtag Basketball**: Free projections (web scraping required)
+Every tool response carries human-readable names next to ESPN's numeric IDs, so you rarely need
+these. ESPN uses three different numberings:
 
-4. **Player News & Injuries**
-   - **ESPN News API**: Limited access
-   - **The Athletic API**: Requires subscription
-   - **Reddit API**: r/fantasybball for community insights
+**Lineup slot IDs** (`lineupSlotId`, `eligibleSlots`, `lineupSlotCounts`): 0 PG, 1 SG, 2 SF,
+3 PF, 4 C, 5 G, 6 F, 7 SG/SF, 8 G/F, 9 PF/C, 10 F/C, 11 UTIL, 12 Bench, 13 IR. Slots 0–6 and
+11–13 were confirmed against a live league; 7–10 are inferred from the order of ESPN's roster
+settings page and no league seen so far uses them.
 
-### Position IDs Reference
+**Player position IDs** (`defaultPositionId`): 1 PG, 2 SG, 3 SF, 4 PF, 5 C.
 
-ESPN uses the following position IDs:
-- 0: Point Guard (PG)
-- 1: Shooting Guard (SG) 
-- 2: Small Forward (SF)
-- 3: Power Forward (PF)
-- 4: Center (C)
-- 5: Guard (G)
-- 6: Forward (F)
-- 12: Bench
-- 13: IR (Injured Reserve)
+**Position-limit keys** (`rosterSettings.positionLimits`): 2 PG, 3 SG, 4 SF, 5 PF, 6 C, where
+`-1` means no limit. Confirmed against a league whose settings page shows a maximum of 4 centers.
+
+**Pro team IDs** (`proTeamId`): 1–30, with 0 meaning the player is not on an NBA roster (`FA`).
+See `espn_fantasy_basketball_mcp/constants.py` for the full table.
 
 ## Example Usage
 
 ### Via MCP Tools (in Claude Desktop)
 
-Once configured, you can ask Claude to:
-- "Get all teams in my fantasy basketball league"
-- "Show me the roster for the Lakers team"
-- "What free agents are available?"
-- "Show me this week's matchups"
-- "What NBA games are today?"
+Once configured, you can ask Claude things like:
+- "How is my matchup going this week, and who should I start?" (`analyze_matchup`)
+- "Which of my players have games left this week?" (`get_roster_schedule`)
+- "Find Jokic's player ID and tell me who owns him" (`search_players`)
+- "Compare Jalen Williams and Cason Wallace over the last 30 days" (`search_players` + `compare_players`)
+- "What free agents are trending up?" (`get_trending_players`)
+- "What are my league's roster and waiver rules?" (`get_league_settings`)
 
 ### Direct Python Usage
 
@@ -504,7 +499,7 @@ from espn_fantasy_basketball_mcp.client import ESPNFantasyBasketballClient
 # Initialize client
 client = ESPNFantasyBasketballClient(
     league_id=12345,
-    year=2025,
+    year=2027,  # ESPN season ID = year the season ends in; omit to auto-detect
     espn_s2="your_espn_s2_cookie",  # For private leagues
     swid="your_swid_cookie"         # For private leagues
 )
@@ -523,6 +518,10 @@ matchups = await client.get_matchups()
 
 # Get today's NBA games
 nba_games = await client.get_nba_schedule()
+
+# Find a player by name, then analyze your current matchup
+jokic = (await client.search_players("Jokic", limit=1))[0]
+analysis = await client.analyze_matchup(team_id=1, matchup_period=1)
 ```
 
 ## Troubleshooting
