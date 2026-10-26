@@ -444,7 +444,11 @@ class ScheduleSettings(BaseModel):
 
     matchupPeriodCount: int
     matchupPeriodLength: int
-    matchupPeriods: dict[str, list[int]]  # Maps matchup period to scoring periods
+    # ESPN's raw mapping of matchup period -> week number(s). It is week-indexed, NOT a list of
+    # daily scoring periods: a normal period has one entry, a two-week period two. Use
+    # matchupPeriodDates for calendar dates.
+    matchupPeriods: dict[str, list[int]]
+    matchupPeriodDates: dict[str, list[str]] | None = None  # period -> [first_day, last_day]
     periodTypeId: int
     playoffTeamCount: int
     playoffMatchupPeriodLength: int
@@ -459,6 +463,7 @@ class RosterSettings(BaseModel):
         None  # Maps slot ID to human-readable slot name (e.g., "0" -> "PG", "12" -> "BENCH")
     )
     positionLimits: dict[str, int]  # Maps position ID to max count (-1 = unlimited)
+    positionLimitNames: dict[str, int] | None = None  # Same limits keyed by position name
     lineupLocktimeType: str  # When lineups lock
     rosterSize: int | None = None  # Total roster spots excluding IR (sum of lineupSlotCounts)
     rosterLocktimeType: str | None = None
@@ -472,7 +477,11 @@ class AcquisitionSettings(BaseModel):
     acquisitionType: str  # "WAIVERS_TRADITIONAL", "FREE_AGENT", etc.
     waiverHours: int
     waiverProcessDays: list[str]  # Days waivers process (e.g., ["SUNDAY"])
-    waiverProcessHour: int  # Hour (0-23) waivers process
+    waiverProcessHour: int  # Hour (0-23) waivers process, in ESPN's Eastern time
+    waiverProcessHourTimezone: str = "America/New_York"  # ESPN's canonical timezone
+    waiverProcessTimeLocal: str | None = (
+        None  # Same time in MY_TIMEZONE, e.g. "07:00 America/Chicago"
+    )
     matchupAcquisitionLimit: float  # Max acquisitions per matchup
     matchupLimitPerScoringPeriod: bool
     acquisitionLimit: int = -1  # Season limit (-1 = unlimited)

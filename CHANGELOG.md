@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+- Lineup slot 7 was labelled UTIL; per ESPN's slot scheme it is SG/SF. Slots 8 (G/F), 9 (PF/C)
+  and 10 (F/C) are now named too, and only slot 11 is UTIL. (Pending confirmation against a live
+  roster; `scripts/verify_live.py` now prints raw slot IDs beside names for that purpose.)
+
+### Added
+- `get_league_settings` is easier to read correctly: `scheduleSettings.matchupPeriodDates` gives
+  each matchup period's first and last calendar day (the raw `matchupPeriods` is week-indexed and
+  was being misread as daily), `rosterSettings.positionLimitNames` keys the position limits by
+  name, and `acquisitionSettings.waiverProcessTimeLocal` converts ESPN's Eastern-time waiver hour
+  to `MY_TIMEZONE`.
+
 ### Removed
 - The legacy low-level `espn_fantasy_basketball_mcp/server.py`, unused since the FastMCP entry
   point replaced it.

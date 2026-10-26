@@ -433,11 +433,13 @@ class ESPNFantasyBasketballClient:
             for slot_id, count in lineup_slot_counts.items()
             if str(slot_id) != str(self._SLOT_IR)
         )
+        position_limits = {str(k): v for k, v in roster_data.get("positionLimits", {}).items()}
         roster_settings = RosterSettings(
             lineupSlotCounts=lineup_slot_counts,
             lineupSlotNames=lineup_slot_names if lineup_slot_names else None,
             rosterSize=roster_size or None,
-            positionLimits={str(k): v for k, v in roster_data.get("positionLimits", {}).items()},
+            positionLimits=position_limits,
+            positionLimitNames=self._name_position_limits(position_limits),
             lineupLocktimeType=roster_data.get("lineupLocktimeType", "FIRSTGAME_WEEKLY"),
             rosterLocktimeType=roster_data.get("rosterLocktimeType"),
             isBenchUnlimited=roster_data.get("isBenchUnlimited", False),
@@ -457,6 +459,9 @@ class ESPNFantasyBasketballClient:
             ),
             acquisitionLimit=acquisition_data.get("acquisitionLimit", -1),
             minimumBid=acquisition_data.get("minimumBid", 0),
+            waiverProcessTimeLocal=self._eastern_hour_to_local(
+                acquisition_data.get("waiverProcessHour")
+            ),
         )
 
         # Parse trade settings
@@ -508,7 +513,7 @@ class ESPNFantasyBasketballClient:
             transactionScoringPeriod=status_data.get("transactionScoringPeriod"),
         )
 
-        return LeagueSettings(
+        league_settings = LeagueSettings(
             leagueId=data.get("id", self.league_id),
             leagueName=settings_data.get("name", ""),
             seasonId=data.get("seasonId", self.year),
@@ -521,6 +526,63 @@ class ESPNFantasyBasketballClient:
             draftSettings=draft_settings,
             status=status,
         )
+
+        # Calendar dates for every matchup period, so readers need not interpret the raw
+        # week-indexed matchupPeriods mapping themselves.
+        try:
+            anchor = await self._scoring_period_anchor(league_settings)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Could not anchor scoring periods: {e}")
+            anchor = None
+        if anchor is not None:
+            anchor_period, anchor_date = anchor
+            season_start = date_for_scoring_period(
+                status.firstScoringPeriod or 1, anchor_period, anchor_date
+            )
+            week_start_day = self._infer_week_start_day(league_settings)
+            period_dates: dict[str, list[str]] = {}
+            for key in schedule_settings.matchupPeriods:
+                try:
+                    window = matchup_period_window(
+                        int(key), season_start, schedule_settings.matchupPeriods, week_start_day
+                    )
+                except ValueError:
+                    continue
+                if window is not None:
+                    period_dates[key] = [window[0].isoformat(), window[1].isoformat()]
+            schedule_settings.matchupPeriodDates = period_dates or None
+
+        return league_settings
+
+    @staticmethod
+    def _name_position_limits(position_limits: dict[str, int]) -> dict[str, int] | None:
+        """Key ESPN's positionLimits by position name.
+
+        The keys are position IDs. When they all fit the 1-based defaultPositionId scheme
+        (1=PG ... 5=C) that is used; otherwise the lineup slot names are tried.
+        """
+        if not position_limits:
+            return None
+        try:
+            ids = [int(k) for k in position_limits]
+        except ValueError:
+            return None
+        table = POSITION_NAMES if all(i in POSITION_NAMES for i in ids) else LINEUP_SLOT_NAMES
+        named = {table.get(i, f"POS_{i}"): position_limits[str(i)] for i in ids}
+        return named
+
+    def _eastern_hour_to_local(self, hour: int | None) -> str | None:
+        """Express an ESPN hour-of-day (Eastern time) in MY_TIMEZONE, e.g. "07:00 America/Chicago"."""
+        if hour is None:
+            return None
+        try:
+            eastern = datetime.now(ZoneInfo("America/New_York")).replace(
+                hour=int(hour), minute=0, second=0, microsecond=0
+            )
+            local = eastern.astimezone(ZoneInfo(self._get_timezone()))
+            return f"{local:%H:%M} {self._get_timezone()}"
+        except (ValueError, OSError):
+            return None
 
     async def get_team_roster(self, team_id: int, scoring_period: int | None = None) -> Roster:
         """Get roster for a specific team with player stats included.

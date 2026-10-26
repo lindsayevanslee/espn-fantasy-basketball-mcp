@@ -33,8 +33,11 @@ LINEUP_SLOT_NAMES: dict[int, str] = {
     4: "C",  # Center
     5: "G",  # Guard (PG or SG)
     6: "F",  # Forward (SF or PF)
-    7: "UTIL",  # Utility
-    11: "UTIL",  # Utility (alternate)
+    7: "SG/SF",  # Swingman
+    8: "G/F",  # Guard/Forward
+    9: "PF/C",  # Big
+    10: "F/C",  # Forward/Center
+    11: "UTIL",  # Utility
     12: "BENCH",  # Bench
     13: "IR",  # Injured Reserve
 }
