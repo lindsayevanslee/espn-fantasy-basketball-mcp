@@ -119,8 +119,28 @@ The following environment variables can be configured:
 - **ESPN_S2**: ESPN authentication cookie for private leagues (required for private leagues)
 - **ESPN_SWID**: ESPN SWID cookie for private leagues (required for private leagues)
 - **MY_TIMEZONE**: Timezone for date/time conversions (optional, defaults to `America/New_York`)
+- **ESPN_MCP_DISABLE_CACHE**: Set to `1` to bypass the response cache (see [Caching](#caching))
 
 The `MY_TIMEZONE` variable controls how dates and times are converted from UTC in API responses. All ISO datetime strings (such as game times, acquisition dates, and trade deadlines) will be converted to this timezone. Use standard IANA timezone names (e.g., `America/Los_Angeles`, `America/Chicago`, `Europe/London`). If not set, the default is `America/New_York`.
+
+### Caching
+
+ESPN responses are cached in memory for the life of the server process and shared across tool
+calls. Each endpoint has its own lifetime, chosen by how fast the data changes:
+
+| Data | Lifetime |
+|---|---|
+| NBA team season schedule | 6 hours |
+| League settings | 10 minutes |
+| League team list | 5 minutes |
+| Today's NBA scoreboard | 60 seconds |
+| Everything else (rosters, matchups, players, draft) | 15 seconds |
+
+The 15-second lifetime for live data exists only to collapse the many identical requests a single
+tool call makes (for example `analyze_matchup` fetching league settings once per player). It is
+short enough that a roster move shows up on your next question. Concurrent identical requests
+share one in-flight fetch, and failed requests are never cached. Set `ESPN_MCP_DISABLE_CACHE=1`
+to turn the cache off.
 
 ## Draft Tools Usage
 
@@ -501,7 +521,7 @@ nba_games = await client.get_nba_schedule()
 3. **Wrong season or empty data**: Check `ESPN_YEAR` if you set it. ESPN names seasons by the year they end in, so the 2026-27 season is `2027`. Unset, the server infers the current season from the date
 4. **Authentication errors**: Check that your `espn_s2` and `SWID` cookies are correct and not expired
 5. **Empty results**: Some data may not be available during off-season or for certain league settings
-6. **Rate limiting**: ESPN may temporarily block requests if you make too many in quick succession. `analyze_matchup` in particular makes many requests
+6. **Rate limiting**: ESPN may temporarily block requests if you make too many in quick succession. The response cache keeps repeated calls cheap; `scripts/verify_live.py` reports how many requests a run made
 
 ### Debug Mode
 

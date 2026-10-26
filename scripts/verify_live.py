@@ -153,7 +153,11 @@ class Report:
         counts = {s: sum(1 for r in self.rows if r[0] == s) for s in ("PASS", "FAIL", "SKIP")}
         print("\n" + "=" * 72)
         print(f"PASS {counts['PASS']}   FAIL {counts['FAIL']}   SKIP {counts['SKIP']}")
-        print(f"HTTP requests made: {_RequestCounter.count}")
+        stats = ESPNFantasyBasketballClient.cache_stats()
+        print(
+            f"HTTP requests made: {_RequestCounter.count}   "
+            f"cache hits: {stats['hits']}  misses: {stats['misses']}"
+        )
         if counts["FAIL"]:
             print("Failed checks:")
             for s, name, detail in self.rows:

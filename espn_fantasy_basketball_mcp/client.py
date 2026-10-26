@@ -1,7 +1,10 @@
 """ESPN Fantasy Basketball API client."""
 
+import asyncio
+import json
 import logging
 import os
+import time
 from datetime import date, datetime
 from typing import Any, overload
 from zoneinfo import ZoneInfo
@@ -136,10 +139,96 @@ class ESPNFantasyBasketballClient:
             # Fallback to original date string
             return utc_date_str
 
+    # ------------------------------------------------------------------ response cache
+    # One process-wide cache shared by every client instance (the MCP server creates a new
+    # client per tool call, so a per-instance cache would never be reused). Entries are keyed
+    # by URL, query, filter header and account, and expire per endpoint: slow-changing data is
+    # kept for minutes, live data only long enough to de-duplicate the many identical requests
+    # a single tool call makes. Concurrent identical requests share one in-flight fetch.
+    # Set ESPN_MCP_DISABLE_CACHE=1 to bypass the cache entirely.
+    _response_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+    _inflight: dict[str, tuple[asyncio.AbstractEventLoop, "asyncio.Task[dict[str, Any]]"]] = {}
+    _cache_hits: int = 0
+    _cache_misses: int = 0
+    _CACHE_MAX_ENTRIES = 512
+
+    # Lifetimes in seconds. Settings and team lists change rarely; an NBA team's season
+    # schedule almost never; the scoreboard changes as games tip off; everything else (rosters,
+    # matchups, players, draft) is live and is only de-duplicated within a burst of calls.
+    TTL_SETTINGS = 600.0
+    TTL_TEAMS = 300.0
+    TTL_NBA_TEAM_SCHEDULE = 6 * 3600.0
+    TTL_SCOREBOARD = 60.0
+    TTL_LIVE = 15.0
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Drop every cached response and reset the hit/miss counters."""
+        cls._response_cache.clear()
+        cls._inflight.clear()
+        cls._cache_hits = 0
+        cls._cache_misses = 0
+
+    @classmethod
+    def cache_stats(cls) -> dict[str, int]:
+        """Return hit/miss counters and the number of cached responses."""
+        return {
+            "hits": cls._cache_hits,
+            "misses": cls._cache_misses,
+            "entries": len(cls._response_cache),
+        }
+
+    @staticmethod
+    def _cache_enabled() -> bool:
+        return os.getenv("ESPN_MCP_DISABLE_CACHE", "").strip().lower() not in ("1", "true", "yes")
+
+    @classmethod
+    def _cache_ttl(cls, url: str, params: dict[str, Any] | None) -> float:
+        """Pick the cache lifetime for a request from its endpoint and view."""
+        if url.endswith("/scoreboard"):
+            return cls.TTL_SCOREBOARD
+        if "/teams/" in url and url.endswith("/schedule"):
+            return cls.TTL_NBA_TEAM_SCHEDULE
+        view = (params or {}).get("view")
+        views = set(view) if isinstance(view, list) else ({view} if view else set())
+        if views == {"mSettings"}:
+            return cls.TTL_SETTINGS
+        if views == {"mTeam"}:
+            return cls.TTL_TEAMS
+        return cls.TTL_LIVE
+
+    def _cache_key(
+        self, url: str, params: dict[str, Any] | None, headers: dict[str, str] | None
+    ) -> str:
+        normalized_headers = {k.lower(): v for k, v in (headers or {}).items()}
+        return json.dumps(
+            [
+                url,
+                params or {},
+                normalized_headers.get("x-fantasy-filter"),
+                self.cookies.get("SWID"),
+            ],
+            sort_keys=True,
+            default=str,
+        )
+
+    @classmethod
+    def _store(cls, key: str, ttl: float, data: dict[str, Any]) -> None:
+        now = time.monotonic()
+        if len(cls._response_cache) >= cls._CACHE_MAX_ENTRIES:
+            for stale in [k for k, (exp, _) in cls._response_cache.items() if exp <= now]:
+                cls._response_cache.pop(stale, None)
+            while len(cls._response_cache) >= cls._CACHE_MAX_ENTRIES:
+                oldest = min(cls._response_cache, key=lambda k: cls._response_cache[k][0])
+                cls._response_cache.pop(oldest, None)
+        cls._response_cache[key] = (now + ttl, data)
+
     async def _make_request(
         self, url: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None
     ) -> dict[str, Any]:
-        """Make HTTP request to ESPN API.
+        """GET an ESPN endpoint, serving repeats from the response cache.
+
+        The returned dict may be shared with other callers; treat it as read-only.
 
         Args:
             url: Full URL to request
@@ -157,6 +246,42 @@ class ESPNFantasyBasketballClient:
         if not url.startswith("https://"):
             raise ValueError(f"Only HTTPS URLs are allowed. Got: {url}")
 
+        if not self._cache_enabled():
+            return await self._fetch(url, params, headers)
+
+        cls = type(self)
+        key = self._cache_key(url, params, headers)
+
+        cached = cls._response_cache.get(key)
+        if cached is not None and cached[0] > time.monotonic():
+            cls._cache_hits += 1
+            return cached[1]
+
+        loop = asyncio.get_running_loop()
+        inflight = cls._inflight.get(key)
+        if inflight is not None and inflight[0] is loop and not inflight[1].done():
+            cls._cache_hits += 1
+            return await asyncio.shield(inflight[1])
+
+        cls._cache_misses += 1
+        task = loop.create_task(self._fetch(url, params, headers))
+        cls._inflight[key] = (loop, task)
+        try:
+            data = await task
+        finally:
+            current = cls._inflight.get(key)
+            if current is not None and current[1] is task:
+                cls._inflight.pop(key, None)
+
+        ttl = self._cache_ttl(url, params)
+        if ttl > 0:
+            self._store(key, ttl, data)
+        return data
+
+    async def _fetch(
+        self, url: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """Perform the actual HTTP GET. Errors are logged and re-raised, never cached."""
         try:
             # Set a reasonable timeout (30 seconds)
             timeout = httpx.Timeout(30.0)
@@ -1119,10 +1244,10 @@ class ESPNFantasyBasketballClient:
             # Past week - use matchup period as scoring period (approximation)
             scoring_period = matchup_period
 
-        # Get rosters for both teams
-        your_roster = await self.get_team_roster(team_id, scoring_period=scoring_period)
-        opponent_roster = await self.get_team_roster(
-            opponent_team_id, scoring_period=scoring_period
+        # Get rosters for both teams concurrently
+        your_roster, opponent_roster = await asyncio.gather(
+            self.get_team_roster(team_id, scoring_period=scoring_period),
+            self.get_team_roster(opponent_team_id, scoring_period=scoring_period),
         )
 
         # Apply slim roster if not verbose
@@ -1292,16 +1417,16 @@ class ESPNFantasyBasketballClient:
             end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime("%Y-%m-%d")
             matchup_end = date.fromisoformat(end_date)
 
-        # Use the matchup period as scoring period for schedule lookup
-        your_schedule = await self.get_roster_schedule_summary(
-            team_id, start_date, end_date, target_matchup_period
-        )
         opponent_team_id = matchup.opponentTeam.teamId
         if not opponent_team_id:
             raise ValueError("Opponent team ID not found in matchup")
 
-        opponent_schedule = await self.get_roster_schedule_summary(
-            opponent_team_id, start_date, end_date, target_matchup_period
+        # Use the matchup period as scoring period for schedule lookup; both teams concurrently
+        your_schedule, opponent_schedule = await asyncio.gather(
+            self.get_roster_schedule_summary(team_id, start_date, end_date, target_matchup_period),
+            self.get_roster_schedule_summary(
+                opponent_team_id, start_date, end_date, target_matchup_period
+            ),
         )
 
         # Get player stats for all players (projections and recent performance)
@@ -1314,8 +1439,10 @@ class ESPNFantasyBasketballClient:
         player_recent_stats = {}
         if all_player_ids:
             try:
-                projections_list = await self.get_player_stats(all_player_ids, "projections")
-                recent_list = await self.get_player_stats(all_player_ids, "last_7")
+                projections_list, recent_list = await asyncio.gather(
+                    self.get_player_stats(all_player_ids, "projections"),
+                    self.get_player_stats(all_player_ids, "last_7"),
+                )
 
                 # Normalize to lists
                 if isinstance(projections_list, list):
@@ -3779,27 +3906,29 @@ class ESPNFantasyBasketballClient:
         total_games_this_week = 0
         total_games_next_week = 0
 
-        # Get schedule for each player on the roster
-        for entry in roster.entries:
+        # Get every player's schedule concurrently. Players without an NBA team (proTeamId 0,
+        # i.e. unsigned) are skipped. Teammates share one cached/in-flight schedule request.
+        async def fetch_schedule(entry: RosterEntry) -> PlayerSchedule:
             player = entry.playerPoolEntry.player
-            nba_team_id = player.proTeamId
+            assert player.proTeamId is not None  # filtered below
+            schedule = await self.get_player_schedule(
+                player.id, player.proTeamId, start_date, end_date
+            )
+            schedule.playerName = player.fullName  # use the roster's name
+            return schedule
 
-            if not nba_team_id:
-                # Player doesn't have NBA team (e.g., injured reserve, not assigned)
+        with_team = [e for e in roster.entries if e.playerPoolEntry.player.proTeamId]
+        results = await asyncio.gather(
+            *(fetch_schedule(e) for e in with_team), return_exceptions=True
+        )
+        for entry, result in zip(with_team, results, strict=True):
+            if isinstance(result, BaseException):
+                name = entry.playerPoolEntry.player.fullName
+                logger.warning(f"Failed to get schedule for player {name}: {result}")
                 continue
-
-            try:
-                schedule = await self.get_player_schedule(
-                    player.id, nba_team_id, start_date, end_date
-                )
-                # Update player name with actual name from roster
-                schedule.playerName = player.fullName
-                player_schedules.append(schedule)
-                total_games_this_week += schedule.gamesThisWeek
-                total_games_next_week += schedule.gamesNextWeek
-            except Exception as e:
-                logger.warning(f"Failed to get schedule for player {player.fullName}: {e}")
-                continue
+            player_schedules.append(result)
+            total_games_this_week += result.gamesThisWeek
+            total_games_next_week += result.gamesNextWeek
 
         # Calculate average
         avg_games = total_games_this_week / len(player_schedules) if player_schedules else 0.0
