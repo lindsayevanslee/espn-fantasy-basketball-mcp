@@ -15,8 +15,10 @@ An MCP server (FastMCP, Python 3.10+) exposing ESPN Fantasy Basketball data as t
 - `espn_fantasy_basketball.py`: the tool definitions and the `main()` transport switch.
 - `espn_fantasy_basketball_mcp/client.py`: ESPN API client and all analysis logic.
 - `espn_fantasy_basketball_mcp/models.py`: Pydantic models for everything the tools return.
-- `espn_fantasy_basketball_mcp/http_transport.py`: Streamable HTTP transport with bearer-token
-  auth, used when the server is hosted for claude.ai / the Claude mobile app.
+- `espn_fantasy_basketball_mcp/http_transport.py`: Streamable HTTP transport and its auth gate,
+  used when the server is hosted for claude.ai / the Claude mobile app (`MCP_AUTH_MODE`).
+- `espn_fantasy_basketball_mcp/oauth.py`: the single-user OAuth 2.1 sign-in (stateless, signed
+  tokens) that `oauth` mode plugs into the MCP SDK's auth routes.
 - `espn_fantasy_basketball_mcp/server.py` is legacy and unused; do not extend it.
 
 ## Conventions
@@ -38,4 +40,6 @@ An MCP server (FastMCP, Python 3.10+) exposing ESPN Fantasy Basketball data as t
   them, or put them in test fixtures or example output. `.env` is gitignored for a reason.
 - The HTTP transport must never accept a token from the URL, and must refuse to start without
   one. Keep `tests/test_http_transport.py` covering both.
+- OAuth: never widen the redirect-URI allowlist in `oauth.py` beyond Claude's callback and
+  loopback, never skip PKCE, and keep `tests/test_oauth.py` driving the full flow end to end.
 - Do not add tools that write to ESPN (trades, adds/drops) without an explicit request.

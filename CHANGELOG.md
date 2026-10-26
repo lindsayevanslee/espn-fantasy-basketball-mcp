@@ -9,13 +9,17 @@
   URL) with an open `/healthz`. A `Dockerfile` packages it for Cloud Run, Fly.io, Railway, or
   Render. Claude Desktop is unaffected: stdio remains the default.
   (`espn_fantasy_basketball_mcp/http_transport.py`, `tests/test_http_transport.py`.)
+- `MCP_AUTH_MODE=oauth` adds a single-user OAuth 2.1 sign-in (`espn_fantasy_basketball_mcp/oauth.py`)
+  so the hosted server can be added to claude.ai as a custom connector on any account: Claude
+  registers itself (DCR), the owner pastes `MCP_AUTH_TOKEN` on a login page once, and PKCE-bound
+  codes are exchanged for 1-hour access tokens and 30-day refresh tokens. Clients, codes and
+  tokens are HMAC-signed rather than stored, so it needs no database and survives scale-to-zero.
+  Client registration only accepts Claude's callback URL and loopback callbacks. Requires
+  `MCP_PUBLIC_URL`. Also serves the RFC 9728 metadata at the path the SDK's own 401 points to,
+  which the SDK does not. (`tests/test_oauth.py` drives the full flow in-process.)
 - Claude Code cloud sessions (claude.ai/code and the Claude mobile app's Code tab) now install
   the locked dependencies at startup via `.claude/hooks/session-start.sh`, so tests and linters
   work from the first message. `CLAUDE.md` records the project conventions for those sessions.
-
-### Planned
-- An OAuth 2.1 login for the remote server, for accounts where claude.ai's request-header
-  authentication beta is not enabled.
 
 ### Fixed
 - The default season is now computed from today's date instead of being hard-coded to 2025.

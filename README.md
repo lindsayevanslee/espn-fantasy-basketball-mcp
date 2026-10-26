@@ -126,7 +126,9 @@ These apply only when serving the tools over HTTP for claude.ai and the Claude m
 [Using the server from the Claude mobile app](#using-the-server-from-the-claude-mobile-app-remote-mcp)):
 
 - **MCP_TRANSPORT**: `stdio` (default, for Claude Desktop and Claude Code) or `streamable-http`.
-- **MCP_AUTH_TOKEN**: Required in HTTP mode. A random secret of at least 32 characters that every request must present as `Authorization: Bearer <token>`. The server refuses to start over HTTP without it.
+- **MCP_AUTH_TOKEN**: Required in HTTP mode. A random secret of at least 32 characters. In `bearer` mode every request must present it as `Authorization: Bearer <token>`; in `oauth` mode it is the passphrase you type on the sign-in page and the key that signs the tokens. The server refuses to start over HTTP without it.
+- **MCP_AUTH_MODE**: `bearer` (default) or `oauth`. Use `oauth` for claude.ai and the Claude mobile app; see the section above for when each applies.
+- **MCP_PUBLIC_URL**: Required in `oauth` mode. The HTTPS origin the server is reached at, with no path, e.g. `https://espn-fantasy-mcp-abc123-uc.a.run.app`. The MCP endpoint is that plus `/mcp`.
 - **MCP_HOST**: Bind address in HTTP mode. Defaults to `127.0.0.1`; the Docker image sets `0.0.0.0`.
 - **PORT**: Bind port in HTTP mode. Defaults to `8000`; the Docker image sets `8080`, and hosting platforms that inject `PORT` are honoured.
 
@@ -139,21 +141,26 @@ supports that with a second transport:
 
 - `MCP_TRANSPORT=streamable-http` serves the same tools at `/mcp` over MCP's Streamable HTTP
   transport (`espn_fantasy_basketball_mcp/http_transport.py`).
-- Every request must carry `Authorization: Bearer <MCP_AUTH_TOKEN>`. Anything else gets a `401`
-  before it reaches the server. The server refuses to start over HTTP with no token, and tokens
-  are never accepted in the URL. `GET /healthz` is open for platform health checks.
-- Your ESPN cookies live only in the hosted server's environment. Anyone holding the bearer
-  token can read your league, so treat the token like a password.
+- Every request must carry a valid `Authorization: Bearer` token or it gets a `401` before it
+  reaches any tool. The server refuses to start over HTTP without `MCP_AUTH_TOKEN`, tokens are
+  never accepted in the URL, and `GET /healthz` is open for platform health checks.
+- Two ways to prove you hold `MCP_AUTH_TOKEN`, chosen with `MCP_AUTH_MODE`:
+  - **`oauth`** (use this for claude.ai and the Claude app): the server runs a tiny single-user
+    OAuth 2.1 sign-in (`espn_fantasy_basketball_mcp/oauth.py`). When you add the connector,
+    Claude opens a page on your server, you paste the token once, and Claude receives short-lived
+    access tokens plus a refresh token. This is the standard flow every custom connector
+    supports, so it works regardless of account or plan.
+  - **`bearer`** (default): the token itself is sent on every request. Only for clients that can
+    attach a fixed header: Claude Code (`claude mcp add --transport http ... --header
+    "Authorization: Bearer ..."`) and claude.ai accounts that have the **Request headers** beta
+    in the connector dialog. Most accounts do not; if yours only shows **Name** and **URL**, use
+    `oauth`.
+- Your ESPN cookies live only in the hosted server's environment. Anyone who knows
+  `MCP_AUTH_TOKEN` can sign in and read your league, so treat it like a password.
 
 The Claude app itself is only a client: once you have added the connector on claude.ai in a
 browser, it is available in the mobile app automatically. You cannot add connectors from the
 phone.
-
-> **Before you start**: request-header authentication for custom connectors is a beta that
-> Anthropic has not enabled for every account. Open **Customize > Connectors > Add custom
-> connector** on claude.ai and check whether the dialog has a **Request headers** section. If it
-> does, everything below works. If it does not, see [If there is no Request headers
-> section](#if-there-is-no-request-headers-section) before deploying anything.
 
 ### 1. Try it locally
 
@@ -176,6 +183,11 @@ curl -s localhost:8080/healthz
 ```
 
 (`.env` is the file described in `.env.example`; it never leaves your machine.)
+
+To try the sign-in flow locally, add `MCP_AUTH_MODE=oauth MCP_PUBLIC_URL=http://localhost:8000`
+(plain `http` is accepted only for localhost) and open
+`http://localhost:8000/.well-known/oauth-authorization-server` to see the discovery document
+Claude reads.
 
 ### 2. Host it with HTTPS
 
@@ -200,17 +212,27 @@ gcloud run deploy espn-fantasy-mcp --source . --region us-central1 \
 ```
 
 `--allow-unauthenticated` only disables Google's own IAM gate on the URL; the server still
-rejects every request without your bearer token. If the deploy reports that the service account
+rejects every request without a valid token. If the deploy reports that the service account
 cannot read a secret, grant it the *Secret Manager Secret Accessor* role on those secrets. The
-command prints a `https://....run.app` URL; your MCP URL is that plus `/mcp`. Check it:
+command prints a `https://....run.app` URL. The OAuth sign-in needs to know that URL, so turn it
+on as a second step now that you have it:
 
 ```bash
-curl -s https://YOUR-SERVICE.run.app/healthz
+gcloud run services update espn-fantasy-mcp --region us-central1 \
+  --update-env-vars "MCP_AUTH_MODE=oauth,MCP_PUBLIC_URL=https://YOUR-SERVICE.run.app"
+```
+
+Your MCP URL is the service URL plus `/mcp`. Check the deployment:
+
+```bash
+curl -s https://YOUR-SERVICE.run.app/healthz                                  # {"status":"ok"}
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://YOUR-SERVICE.run.app/mcp   # 401
+curl -s https://YOUR-SERVICE.run.app/.well-known/oauth-protected-resource   # "resource": ".../mcp"
 ```
 
 On Fly.io the equivalent is `fly launch --no-deploy`, `fly secrets set MCP_AUTH_TOKEN=... ESPN_S2=... ESPN_SWID=...`,
-set the non-secret variables in `fly.toml` under `[env]`, then `fly deploy`.
+the non-secret variables (including `MCP_AUTH_MODE=oauth` and `MCP_PUBLIC_URL=https://<app>.fly.dev`)
+in `fly.toml` under `[env]`, then `fly deploy`.
 
 ### 3. Add it to Claude as a custom connector
 
@@ -219,39 +241,49 @@ under **Organization settings > Connectors**):
 
 1. Go to **Customize > Connectors** and click **Add custom connector**.
 2. Name it (for example `ESPN Fantasy Basketball`) and enter the **MCP server URL**:
-   `https://YOUR-SERVICE.run.app/mcp`.
-3. Under **Authentication** choose **No sign-in**. (The server has no OAuth login page; the
-   header below is the credential.)
-4. Open **Request headers**, pick the `authorization` header, and enter the value
-   `Bearer <your MCP_AUTH_TOKEN>`, with the word `Bearer` and a space in front of the token.
-   Claude sends the value exactly as typed. Mark it **Required**.
-5. Click **Add**.
+   `https://YOUR-SERVICE.run.app/mcp`. Leave any OAuth client ID/secret fields under
+   **Advanced settings** empty: Claude registers itself with the server automatically. If your
+   dialog asks, choose **Sign in now** and **Register automatically**.
+3. Click **Add**, then **Connect**. Claude opens your server's sign-in page.
+4. Paste your `MCP_AUTH_TOKEN` into the passphrase box and press **Allow**. You are sent back
+   to claude.ai and the connector shows as connected.
 
-Authentication settings cannot be edited later: to rotate the token, redeploy with a new
-`MCP_AUTH_TOKEN`, remove the connector, and add it again.
+That is the only time you type the token. Claude keeps a refresh token and renews access on
+its own for 30 days, after which it asks you to sign in again. To cut off access at any time,
+deploy a new `MCP_AUTH_TOKEN`: every existing token stops working immediately.
+
+If your dialog *does* have a **Request headers** section you may instead deploy with
+`MCP_AUTH_MODE=bearer` (the default), choose **No sign-in**, pick the `authorization` header,
+and enter `Bearer <your MCP_AUTH_TOKEN>` as its value. Either mode is equally secure; `oauth` is
+recommended because it works for every account.
 
 Then, on your phone, open the Claude app, start a chat, tap **+**, choose **Connectors**, and
 turn the connector on. Ask something like *"Using my ESPN connector, how is my matchup looking
 this week?"*; the first call will ask you to allow the tool.
 
-### If there is no Request headers section
+### How the sign-in works, and its limits
 
-Your account is not in the beta yet. Do **not** work around it by deploying with no
-authentication or by putting the token in the URL: either one exposes your ESPN account to
-anyone who finds the URL. The supported alternatives are:
+Claude follows the MCP authorization spec: your server answers an unauthenticated request with
+`401` and a pointer to its discovery documents, Claude registers itself as an OAuth client
+(Dynamic Client Registration), sends you to `/authorize`, which shows the passphrase page, and
+exchanges the resulting code for tokens using PKCE. The MCP SDK provides those endpoints and all
+of the protocol checks; this repo adds the login page and a provider that needs **no database**:
+clients, codes and tokens are HMAC-signed payloads keyed from `MCP_AUTH_TOKEN`, so the server
+works on hosts that restart or scale to zero. Client registration is restricted to Claude's
+callback URL and the loopback callback Claude Code uses, so no third party can register a
+client that receives your codes.
 
-- Ask [Claude support](https://support.claude.com/en/articles/9015913-how-to-get-support) to
-  enable request-header authentication for your account, and keep using Claude Desktop in the
-  meantime.
-- Add an OAuth 2.1 login to this server. Claude's connector flow supports Dynamic Client
-  Registration and PKCE, and the MCP SDK ships the server-side routes, so the remaining work
-  is a small authorization server with a single-user login page. That is a planned follow-up
-  and is tracked in the changelog; it is not implemented yet.
+Being stateless has two consequences: a refresh token stays valid until it expires (30 days)
+even after a newer one is issued, and the only way to revoke access is to change
+`MCP_AUTH_TOKEN`, which revokes everything at once. Both are acceptable for a server with one
+owner; if you ever share the server, move to a real user store.
 
 ### Security notes for the hosted server
 
-- The bearer token is the only thing between the internet and your league. Generate it
-  randomly (the command above), never commit it, and keep it out of chat logs.
+- `MCP_AUTH_TOKEN` is the only thing between the internet and your league. Generate it
+  randomly (the command above), never commit it, and keep it out of chat logs. The sign-in page
+  logs failed attempts with their source IP; a 32-character random token is not guessable
+  online, but keep an eye on the logs anyway.
 - Claude's requests to your server come from Anthropic's published range
   `160.79.104.0/21`. If your host lets you restrict inbound traffic, allowing only that range
   adds a second layer.
@@ -530,13 +562,15 @@ espn-fantasy-basketball-mcp/
 │   ├── __init__.py
 │   ├── client.py                   # ESPN API client and analysis logic
 │   ├── models.py                   # Pydantic data models
-│   ├── http_transport.py           # Streamable HTTP transport + bearer-token auth (remote use)
+│   ├── http_transport.py           # Streamable HTTP transport + auth gate (remote use)
+│   ├── oauth.py                    # Single-user OAuth 2.1 sign-in for claude.ai connectors
 │   └── server.py                   # Legacy low-level MCP server (unused; kept for reference)
 ├── tests/                          # Test suite (all ESPN calls are mocked; no network needed)
 │   ├── test_client.py             # Client tests
 │   ├── test_draft.py              # Draft client tests
 │   ├── test_draft_server.py       # Draft tool tests
-│   ├── test_http_transport.py     # HTTP transport, auth gate, and MCP-over-HTTP tests
+│   ├── test_http_transport.py     # HTTP transport, bearer auth gate, and MCP-over-HTTP tests
+│   ├── test_oauth.py              # OAuth discovery, registration, login, PKCE, token tests
 │   ├── test_matchup_analysis.py   # Matchup analysis tests
 │   ├── test_models.py             # Model tests
 │   ├── test_pro_teams.py          # NBA team abbreviation tests
