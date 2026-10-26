@@ -248,19 +248,20 @@ async def get_free_agents(
 async def get_matchups(
     league_id: int | None = None,
     year: int | None = None,
-    scoring_period: int | None = None,
+    matchup_period: int | None = None,
     team_id: int | None = None,
     espn_s2: str | None = None,
     swid: str | None = None,
 ) -> list[dict]:
     """Get matchups/schedule for an ESPN Fantasy Basketball league.
 
-    Defaults to current scoring period and your team (from ESPN_TEAM_ID env var) if not specified.
+    Defaults to the current matchup period and your team (from ESPN_TEAM_ID env var) if not specified.
 
     Args:
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
-        scoring_period: Specific scoring period to get matchups for (optional, defaults to current week)
+        matchup_period: Matchup period (week) to get matchups for (optional, defaults to the current one).
+            Use get_league_settings -> status.currentMatchupPeriod for the current week.
         team_id: Filter to only return matchups for this team (optional, defaults to ESPN_TEAM_ID env var)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
@@ -275,11 +276,11 @@ async def get_matchups(
     team_id = _get_team_id(team_id)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
 
-    # Convert scoring_period to int if it's a string (MCP client may pass strings)
-    if scoring_period is not None:
-        scoring_period = int(scoring_period) if isinstance(scoring_period, str) else scoring_period
+    # Convert matchup_period to int if it's a string (MCP client may pass strings)
+    if matchup_period is not None:
+        matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
 
-    matchups = await client.get_matchups(scoring_period, team_id)
+    matchups = await client.get_matchups(matchup_period, team_id)
     return [matchup.model_dump() for matchup in matchups]
 
 
