@@ -17,6 +17,7 @@ from .constants import (
     ABBREV_ALIASES,
     AVAILABILITY_FACTORS,
     LINEUP_SLOT_NAMES,
+    POSITION_LIMIT_NAMES,
     POSITION_NAMES,
     PRO_TEAM_ABBREVS,
     SHOOTING_THRESHOLDS,
@@ -556,19 +557,19 @@ class ESPNFantasyBasketballClient:
 
     @staticmethod
     def _name_position_limits(position_limits: dict[str, int]) -> dict[str, int] | None:
-        """Key ESPN's positionLimits by position name.
+        """Key ESPN's positionLimits by position name (see constants.POSITION_LIMIT_NAMES).
 
-        The keys are position IDs. When they all fit the 1-based defaultPositionId scheme
-        (1=PG ... 5=C) that is used; otherwise the lineup slot names are tried.
+        -1 means no limit. Keys ESPN uses that have no known name are reported as POS_<id>.
         """
         if not position_limits:
             return None
-        try:
-            ids = [int(k) for k in position_limits]
-        except ValueError:
-            return None
-        table = POSITION_NAMES if all(i in POSITION_NAMES for i in ids) else LINEUP_SLOT_NAMES
-        named = {table.get(i, f"POS_{i}"): position_limits[str(i)] for i in ids}
+        named: dict[str, int] = {}
+        for key, limit in position_limits.items():
+            try:
+                name = POSITION_LIMIT_NAMES.get(int(key), f"POS_{key}")
+            except ValueError:
+                name = f"POS_{key}"
+            named[name] = limit
         return named
 
     def _eastern_hour_to_local(self, hour: int | None) -> str | None:
