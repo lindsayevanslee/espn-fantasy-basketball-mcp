@@ -749,6 +749,29 @@ async def analyze_matchup(
     return analysis.model_dump()
 
 
+def main() -> None:
+    """Run the server over the transport named by MCP_TRANSPORT.
+
+    * ``stdio`` (default): for Claude Desktop and Claude Code on the same machine.
+    * ``streamable-http``: for use as a remote MCP server (claude.ai, the Claude mobile app).
+      Requires ``MCP_AUTH_TOKEN``; see ``espn_fantasy_basketball_mcp/http_transport.py``.
+    """
+    transport = os.getenv("MCP_TRANSPORT", "stdio").strip().lower()
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    elif transport in ("streamable-http", "http"):
+        from espn_fantasy_basketball_mcp.http_transport import HttpConfig, run_http
+
+        try:
+            config = HttpConfig.from_env()
+        except ValueError as exc:
+            raise SystemExit(f"Configuration error: {exc}") from None
+        run_http(mcp, config)
+    else:
+        raise SystemExit(
+            f"Unknown MCP_TRANSPORT={transport!r}. Use 'stdio' (default) or 'streamable-http'."
+        )
+
+
 if __name__ == "__main__":
-    # Run the server
-    mcp.run(transport="stdio")
+    main()

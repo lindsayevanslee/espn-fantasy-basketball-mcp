@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+- The server can now be used from the Claude mobile app and claude.ai as a remote MCP server.
+  `MCP_TRANSPORT=streamable-http` serves the tools over Streamable HTTP at `/mcp`, gated by a
+  bearer token (`MCP_AUTH_TOKEN`, required; constant-time comparison; never accepted in the
+  URL) with an open `/healthz`. A `Dockerfile` packages it for Cloud Run, Fly.io, Railway, or
+  Render. Claude Desktop is unaffected: stdio remains the default.
+  (`espn_fantasy_basketball_mcp/http_transport.py`, `tests/test_http_transport.py`.)
+- Claude Code cloud sessions (claude.ai/code and the Claude mobile app's Code tab) now install
+  the locked dependencies at startup via `.claude/hooks/session-start.sh`, so tests and linters
+  work from the first message. `CLAUDE.md` records the project conventions for those sessions.
+
+### Planned
+- An OAuth 2.1 login for the remote server, for accounts where claude.ai's request-header
+  authentication beta is not enabled.
+
 ### Fixed
 - The default season is now computed from today's date instead of being hard-coded to 2025.
   ESPN labels a season by the year it ends in, so October–December map to the next year.
