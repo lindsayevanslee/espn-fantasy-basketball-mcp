@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+- Draft tools no longer assume a 12-team, $200, 13-spot league. Budget comes from
+  `draftSettings.auctionBudget`, roster size from `rosterSettings.lineupSlotCounts` (IR excluded),
+  and the team on the clock from `draftSettings.pickOrder` (auction nominations cycle; snake
+  drafts reverse in even rounds). `TeamDraftSummary` reports `budget`, `rosterSize`,
+  `remainingSlots`, `draftType`, and real `positionCounts`; league settings expose
+  `draftSettings` and `rosterSettings.rosterSize`. The bid reserve now keeps $1 per *other*
+  unfilled slot rather than one too many.
+- `get_available_players` and `get_trending_players` send the `x-fantasy-filter` header (free
+  agents only, sorted by ESPN draft rank / ownership) instead of receiving ESPN's arbitrary
+  default slice. Trending players are ranked by ownership change before the limit is applied.
+
 ### Changed
 - Matchup period dates are now derived from ESPN's own data instead of 7-day weeks counted
   from a Lakers game: opening night comes from the daily scoring-period counter

@@ -186,11 +186,20 @@ class TestDraftClient:
             ]
         }
 
-        with patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request:
-            # Mock both API calls - first for draft status, then for players
+        with (
+            patch.object(client, "_make_request", new_callable=AsyncMock) as mock_request,
+            patch.object(
+                client, "get_league_settings", AsyncMock(side_effect=ValueError("no settings"))
+            ),
+        ):
+            # First call fetches players (with a filter header), second fetches the draft
             mock_request.side_effect = [mock_players_response, mock_draft_response]
 
             players = await client.get_available_players(10)
+
+            headers = mock_request.await_args_list[0][0][2]
+            assert '"filterStatus"' in headers["x-fantasy-filter"]
+            assert '"sortDraftRanks"' in headers["x-fantasy-filter"]
 
             assert len(players) == 1  # Only undrafted player
             assert players[0].playerId == 12345
@@ -337,3 +346,186 @@ class TestDraftClient:
             assert analysis["playersCount"] == 7
             assert "strategy" in analysis
             assert "recommendation" in analysis
+
+
+class TestDraftSettingsAware:
+    """Draft tools read budget, roster size and pick order from league settings."""
+
+    @pytest.fixture
+    def client(self):
+        return ESPNFantasyBasketballClient(league_id=12345, year=2027)
+
+    @pytest.mark.parametrize(
+        ("pick", "draft_type", "expected"),
+        [
+            (1, "AUCTION", 10),
+            (3, "AUCTION", 30),
+            (4, "AUCTION", 10),  # auction nominations cycle, never reverse
+            (4, "SNAKE", 30),  # snake reverses in round 2
+            (6, "SNAKE", 10),
+            (7, "SNAKE", 10),  # round 3 forwards again
+            (1, None, 10),
+        ],
+    )
+    def test_team_on_the_clock(self, pick, draft_type, expected):
+        order = [10, 20, 30]
+        assert ESPNFantasyBasketballClient._team_on_the_clock(pick, order, draft_type) == expected
+
+    def test_team_on_the_clock_without_order(self):
+        assert ESPNFantasyBasketballClient._team_on_the_clock(5, [], "AUCTION") is None
+
+    @pytest.mark.asyncio
+    async def test_settings_expose_draft_and_roster_size(self, client):
+        payload = {
+            "id": 12345,
+            "seasonId": 2027,
+            "settings": {
+                "name": "L",
+                "size": 12,
+                "draftSettings": {
+                    "type": "AUCTION",
+                    "auctionBudget": 300,
+                    "pickOrder": [8, 3, 5],
+                    "keeperCount": 2,
+                    "date": 1760000000000,
+                },
+                "rosterSettings": {
+                    # 10 starters + 3 bench + 2 IR -> roster size 13
+                    "lineupSlotCounts": {
+                        "0": 1,
+                        "1": 1,
+                        "2": 1,
+                        "3": 1,
+                        "4": 1,
+                        "5": 1,
+                        "6": 1,
+                        "11": 3,
+                        "12": 3,
+                        "13": 2,
+                    },
+                    "positionLimits": {},
+                    "lineupLocktimeType": "INDIVIDUAL_GAME",
+                },
+            },
+            "status": {"currentMatchupPeriod": 1, "latestScoringPeriod": 6, "isActive": True},
+        }
+        with patch.object(client, "_make_request", AsyncMock(return_value=payload)):
+            settings = await client.get_league_settings()
+        assert settings.draftSettings.type == "AUCTION"
+        assert settings.draftSettings.auctionBudget == 300
+        assert settings.draftSettings.pickOrder == [8, 3, 5]
+        assert settings.draftSettings.keeperCount == 2
+        assert settings.draftSettings.dateISO is not None
+        assert settings.rosterSettings.rosterSize == 13
+
+    @pytest.mark.asyncio
+    async def test_summary_uses_league_budget_roster_and_positions(self, client):
+        from espn_fantasy_basketball_mcp.models import DraftPick, DraftStatus, Team
+
+        status = DraftStatus(
+            inProgress=True,
+            drafted=False,
+            draftType="AUCTION",
+            picks=[
+                DraftPick(
+                    id=1,
+                    playerId=1,
+                    teamId=8,
+                    bidAmount=60,
+                    overallPickNumber=1,
+                    roundId=1,
+                    roundPickNumber=1,
+                ),
+                DraftPick(
+                    id=2,
+                    playerId=2,
+                    teamId=8,
+                    bidAmount=40,
+                    overallPickNumber=2,
+                    roundId=1,
+                    roundPickNumber=2,
+                ),
+                DraftPick(
+                    id=3,
+                    playerId=3,
+                    teamId=9,
+                    bidAmount=50,
+                    overallPickNumber=3,
+                    roundId=1,
+                    roundPickNumber=3,
+                ),
+            ],
+        )
+        settings = type(
+            "S",
+            (),
+            {
+                "draftSettings": type("D", (), {"auctionBudget": 300, "type": "AUCTION"})(),
+                "rosterSettings": type("R", (), {"rosterSize": 14})(),
+            },
+        )()
+        positions_payload = {
+            "players": [
+                {"id": 1, "player": {"id": 1, "defaultPositionId": 5}},  # C
+                {"id": 2, "player": {"id": 2, "defaultPositionId": 1}},  # PG
+            ]
+        }
+        with (
+            patch.object(client, "get_draft_status", AsyncMock(return_value=status)),
+            patch.object(
+                client,
+                "get_league_teams",
+                AsyncMock(return_value=[Team(id=8, abbrev="X", name="Me")]),
+            ),
+            patch.object(client, "get_league_settings", AsyncMock(return_value=settings)),
+            patch.object(client, "_make_request", AsyncMock(return_value=positions_payload)) as req,
+        ):
+            summary = await client.get_team_draft_summary(8)
+
+        assert summary.budget == 300 and summary.rosterSize == 14
+        assert summary.totalSpent == 100 and summary.remainingBudget == 200
+        assert summary.playersCount == 2 and summary.remainingSlots == 12
+        assert summary.positionCounts == {"C": 1, "PG": 1}
+        assert summary.draftType == "AUCTION"
+        assert '"filterIds"' in req.await_args[0][2]["x-fantasy-filter"]
+
+    @pytest.mark.asyncio
+    async def test_summary_falls_back_to_defaults_without_settings(self, client):
+        from espn_fantasy_basketball_mcp.models import DraftStatus
+
+        with (
+            patch.object(
+                client,
+                "get_draft_status",
+                AsyncMock(return_value=DraftStatus(inProgress=False, drafted=False, picks=[])),
+            ),
+            patch.object(client, "get_league_teams", AsyncMock(return_value=[])),
+            patch.object(client, "get_league_settings", AsyncMock(side_effect=ValueError("down"))),
+        ):
+            summary = await client.get_team_draft_summary(8)
+        assert (summary.budget, summary.rosterSize, summary.remainingSlots) == (200, 13, 13)
+        assert summary.teamName == "Team 8"
+
+    @pytest.mark.asyncio
+    async def test_trending_sends_free_agent_filter_and_ranks_by_change(self, client):
+        payload = {
+            "players": [
+                {
+                    "player": {"id": i, "fullName": f"P{i}", "defaultPositionId": 1},
+                    "ownership": {"percentChange": c},
+                }
+                for i, c in ((1, 2.0), (2, 9.0), (3, 0.5), (4, -3.0), (5, 5.0))
+            ]
+        }
+        with patch.object(client, "_make_request", AsyncMock(return_value=payload)) as req:
+            up = await client.get_trending_players("up", 2)
+        assert [p.playerId for p in up] == [2, 5], "ranked by change, then cut to limit"
+        headers = req.await_args[0][2]["x-fantasy-filter"]
+        assert '"filterStatus"' in headers and '"FREEAGENT"' in headers
+
+    @pytest.mark.asyncio
+    async def test_trending_validates_arguments(self, client):
+        with pytest.raises(ValueError, match="direction"):
+            await client.get_trending_players("sideways", 5)
+        with pytest.raises(ValueError, match="limit"):
+            await client.get_trending_players("up", 0)

@@ -146,7 +146,7 @@ to turn the cache off.
 
 ## Draft Tools Usage
 
-The live draft assistant tools are designed for auction drafts and help answer key questions during your draft:
+The live draft assistant tools are designed for auction drafts and help answer key questions during your draft. Budget, roster size, and nomination order are read from your league's settings, so they work for any league configuration.
 
 > **💡 Pro Tip**: These tools work seamlessly with Claude Desktop! Ask Claude questions like "Should I bid on this player?" or "Who should I target next?" and it will use these tools automatically to give you expert draft advice.
 

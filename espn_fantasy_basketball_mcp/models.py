@@ -376,7 +376,8 @@ class DraftStatus(BaseModel):
     completeDate: int | None = None
     picks: list[DraftPick]
     currentPickNumber: int | None = None
-    currentNominatingTeam: int | None = None
+    currentNominatingTeam: int | None = None  # From the league's pickOrder (None if unknown)
+    draftType: str | None = None  # "AUCTION" or "SNAKE"
 
 
 class PlayerDraftInfo(BaseModel):
@@ -396,7 +397,11 @@ class TeamDraftSummary(BaseModel):
     totalSpent: int
     playersCount: int
     remainingBudget: int
-    positionCounts: dict[str, int] = {}
+    budget: int = 200  # League auction budget (from draftSettings.auctionBudget)
+    rosterSize: int = 13  # Roster spots excluding IR (from rosterSettings.lineupSlotCounts)
+    remainingSlots: int | None = None  # rosterSize - playersCount
+    draftType: str | None = None  # "AUCTION" or "SNAKE"
+    positionCounts: dict[str, int] = {}  # Drafted players by default position
     categories: dict[str, float] = {}  # Projected category totals
 
 
@@ -455,6 +460,7 @@ class RosterSettings(BaseModel):
     )
     positionLimits: dict[str, int]  # Maps position ID to max count (-1 = unlimited)
     lineupLocktimeType: str  # When lineups lock
+    rosterSize: int | None = None  # Total roster spots excluding IR (sum of lineupSlotCounts)
     rosterLocktimeType: str | None = None
     isBenchUnlimited: bool = False
     moveLimit: int = -1  # -1 = unlimited
@@ -486,6 +492,17 @@ class TradeSettings(BaseModel):
     allowOutOfUniverse: bool = False
 
 
+class DraftSettings(BaseModel):
+    """League draft configuration."""
+
+    type: str | None = None  # "AUCTION" or "SNAKE"
+    auctionBudget: int | None = None
+    pickOrder: list[int] = []  # Team IDs in draft (and auction nomination) order
+    keeperCount: int = 0
+    date: int | None = None  # Epoch ms
+    dateISO: str | None = None  # Draft date in MY_TIMEZONE
+
+
 class LeagueStatus(BaseModel):
     """Current league status."""
 
@@ -509,4 +526,5 @@ class LeagueSettings(BaseModel):
     rosterSettings: RosterSettings
     acquisitionSettings: AcquisitionSettings
     tradeSettings: TradeSettings
+    draftSettings: DraftSettings = DraftSettings()
     status: LeagueStatus

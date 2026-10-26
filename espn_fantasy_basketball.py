@@ -475,11 +475,15 @@ async def analyze_my_draft_strategy(
     team_summary = await client.get_team_draft_summary(team_id)
     punt_analysis = await client.analyze_punt_strategy(team_id)
 
+    remaining_slots = team_summary.remainingSlots
+    if remaining_slots is None:
+        remaining_slots = max(0, team_summary.rosterSize - team_summary.playersCount)
+
     return {
         "team_summary": team_summary.model_dump(),
         "punt_analysis": punt_analysis,
         "budget_per_remaining_player": round(
-            team_summary.remainingBudget / max(1, 13 - team_summary.playersCount), 2
+            team_summary.remainingBudget / max(1, remaining_slots), 2
         ),
     }
 
