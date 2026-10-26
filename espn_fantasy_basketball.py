@@ -749,6 +749,42 @@ async def analyze_matchup(
     return analysis.model_dump()
 
 
+@mcp.tool()
+async def search_players(
+    query: str,
+    limit: int = 5,
+    include_league_status: bool = True,
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+) -> list[dict]:
+    """Find ESPN player IDs by name. Use this before any tool that needs a player_id.
+
+    Matching is forgiving: last name only ("Jokic"), partial first names ("steph curry"),
+    accents ("Dončić"), and small typos all work. Results are sorted best match first.
+
+    Args:
+        query: Player name or part of one
+        limit: Maximum number of matches to return (1-25, default 5)
+        include_league_status: Also report whether each match is a free agent in your league
+            or which fantasy team owns them (default True; costs one extra request)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        List of matches with playerId, fullName, matchScore (1.0 = exact), defaultPosition,
+        proTeamAbbrev ("FA" if unsigned), injuryStatus, and when include_league_status is set:
+        isFreeAgent, fantasyTeamId, fantasyTeamName, percentOwned.
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    results = await client.search_players(query, limit, include_league_status)
+    return [r.model_dump() for r in results]
+
+
 if __name__ == "__main__":
     # Run the server
     mcp.run(transport="stdio")

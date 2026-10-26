@@ -183,6 +183,21 @@ class MatchupAnalysis(BaseModel):
     lineupWarnings: list[str] = []  # Starters who cannot play (OUT, suspended, unsigned, on IR)
 
 
+class PlayerSearchResult(BaseModel):
+    """A player matched by name, with their status in this league when known."""
+
+    playerId: int
+    fullName: str
+    matchScore: float  # 1.0 = exact name match
+    defaultPosition: str | None = None
+    proTeamAbbrev: str | None = None  # "FA" if not on an NBA roster
+    injuryStatus: str | None = None
+    isFreeAgent: bool | None = None  # True if no fantasy team owns the player (None if unknown)
+    fantasyTeamId: int | None = None
+    fantasyTeamName: str | None = None
+    percentOwned: float | None = None
+
+
 class PlayerOwnership(BaseModel):
     percentOwned: float | None = None
     percentChange: float | None = None
