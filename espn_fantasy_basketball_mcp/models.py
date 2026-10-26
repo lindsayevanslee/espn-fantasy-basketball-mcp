@@ -20,8 +20,12 @@ class PlayerStats(BaseModel):
     steals: float | None = None
     blocks: float | None = None
     threePointMade: float | None = None
-    fieldGoalPercentage: float | None = None
-    freeThrowPercentage: float | None = None
+    fieldGoalPercentage: float | None = None  # 0-100 scale (e.g. 47.8)
+    freeThrowPercentage: float | None = None  # 0-100 scale
+    fieldGoalsMade: float | None = None  # per game; lets FG% be projected as made/attempted
+    fieldGoalsAttempted: float | None = None
+    freeThrowsMade: float | None = None
+    freeThrowsAttempted: float | None = None
     turnovers: float | None = None
     minutes: float | None = None
     fantasyPoints: float | None = None

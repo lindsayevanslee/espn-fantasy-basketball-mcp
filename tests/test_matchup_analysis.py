@@ -360,3 +360,80 @@ async def test_unavailable_players_do_not_project_and_starters_are_flagged(monke
 )
 def test_availability_classification(entry, expected):
     assert ESPNFantasyBasketballClient._availability(entry) == expected
+
+
+@pytest.mark.asyncio
+async def test_percentage_projection_uses_made_and_attempted(monkeypatch):
+    """FG% projects as (current made + proj made*games) / (current att + proj att*games)."""
+    monkeypatch.setenv("MY_TIMEZONE", "UTC")
+    client = ESPNFantasyBasketballClient(league_id=12345, year=2027)
+    settings = _settings([19])  # FG% only
+
+    matchup = CurrentMatchup(
+        matchupId=1,
+        scoringPeriod=30,
+        yourTeam=MatchupTeam(
+            teamId=1,
+            teamName="Me",
+            categoryScores={"fieldGoalPercentage": 0.5},
+            componentStats={"fieldGoalsMade": 100.0, "fieldGoalsAttempted": 200.0},
+        ),
+        opponentTeam=MatchupTeam(
+            teamId=2,
+            teamName="Them",
+            categoryScores={"fieldGoalPercentage": 0.45},
+            componentStats={"fieldGoalsMade": 90.0, "fieldGoalsAttempted": 200.0},
+        ),
+        yourRoster=_roster(1, [101]),
+        opponentRoster=_roster(2, [201]),
+    )
+    my_schedule = _schedule(1, {101: [_day(1)]})  # 1 game left
+    their_schedule = _schedule(2, {201: [_day(1), _day(2)]})  # 2 games left
+
+    projections = [
+        # 10/20 per game keeps my team at exactly 50%
+        _stats(
+            101,
+            "projections",
+            points=25.0,
+            fieldGoalPercentage=50.0,
+            fieldGoalsMade=10.0,
+            fieldGoalsAttempted=20.0,
+        ),
+        # a 20% shooter with volume drags the opponent down: (90+8)/(200+40)
+        _stats(
+            201,
+            "projections",
+            points=10.0,
+            fieldGoalPercentage=20.0,
+            fieldGoalsMade=4.0,
+            fieldGoalsAttempted=20.0,
+        ),
+    ]
+    recent = [_stats(pid, "last_7") for pid in (101, 201)]
+
+    async def fake_stats(player_ids, timeframe):
+        return projections if timeframe == "projections" else recent
+
+    async def fake_schedule(team_id, start, end, period):
+        return my_schedule if team_id == 1 else their_schedule
+
+    with (
+        patch.object(client, "get_league_settings", AsyncMock(return_value=settings)),
+        patch.object(client, "get_matchup_for_period", AsyncMock(return_value=matchup)),
+        patch.object(
+            client, "_get_scoring_period_dates", AsyncMock(return_value=(_day(-3), _day(3)))
+        ),
+        patch.object(client, "get_roster_schedule_summary", side_effect=fake_schedule),
+        patch.object(client, "get_player_stats", side_effect=fake_stats),
+    ):
+        analysis = await client.analyze_matchup(team_id=1, matchup_period=CURRENT_PERIOD)
+
+    fg = next(c for c in analysis.categoryProjections if c.category == "fieldGoalPercentage")
+    assert fg.yourCurrent == pytest.approx(0.5)
+    assert fg.yourProjected == pytest.approx(110 / 220)
+    assert fg.opponentProjected == pytest.approx(98 / 240)
+    assert fg.projectedResult == "win"
+    # The old points-based estimate (points/2 made, made/pct attempted) would have given
+    # player 201 5 made on 25 attempts per game: (90+10)/(200+50) = 0.400, not 0.408.
+    assert fg.opponentProjected != pytest.approx(100 / 250)
