@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- ESPN responses are cached in memory, process-wide, with per-endpoint lifetimes (NBA team
+  schedules 6h, league settings 10m, team list 5m, scoreboard 60s, live data 15s). Concurrent
+  identical requests share one fetch; errors are never cached. `ESPN_MCP_DISABLE_CACHE=1` turns
+  it off. Rosters, roster schedules, and player stats inside a matchup analysis are now fetched
+  concurrently. A live `analyze_matchup` run went from about 107 requests to a handful.
+
 ### Fixed
 - The default season is now computed from today's date instead of being hard-coded to 2025.
   ESPN labels a season by the year it ends in, so October–December map to the next year.
