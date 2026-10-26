@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.2.0] - 2026-10-26
+
 ### Fixed
 - Lineup slot 7 was labelled UTIL. Live data confirmed UTIL is slot 11; slots 7-10 are named
   SG/SF, G/F, PF/C, F/C from the order of ESPN's roster-settings table (unverified by data, as no
