@@ -1,0 +1,11 @@
+# Keeps the GitHub Actions used by CI up to date. Python dependencies are pinned in uv.lock and
+# updated by hand (uv lock --upgrade) so that the lockfile and CI stay in step.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]

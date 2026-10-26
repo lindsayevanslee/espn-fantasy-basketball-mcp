@@ -388,20 +388,30 @@ espn-fantasy-basketball-mcp/
 ├── espn_fantasy_basketball.py      # Main MCP server using FastMCP
 ├── espn_fantasy_basketball_mcp/    # Core library package
 │   ├── __init__.py
-│   ├── client.py                   # ESPN API client and analysis logic
-│   ├── models.py                   # Pydantic data models
-│   └── server.py                   # Legacy low-level MCP server (unused; kept for reference)
+│   ├── client.py                   # ESPN API client: requests, cache, fetchers, draft, stats
+│   ├── analysis.py                 # Matchup analysis: projections, start/sit, lineup warnings
+│   ├── constants.py                # Stat IDs, slot/position names, pro team codes, thresholds
+│   ├── dates.py                    # Scoring/matchup period calendar math, games remaining
+│   ├── search.py                   # Player name matching
+│   └── models.py                   # Pydantic data models
 ├── tests/                          # Test suite (all ESPN calls are mocked; no network needed)
+│   ├── test_cache.py              # Response cache and request de-duplication
 │   ├── test_client.py             # Client tests
 │   ├── test_draft.py              # Draft client tests
 │   ├── test_draft_server.py       # Draft tool tests
+│   ├── test_matchup_analysis.py   # analyze_matchup projections and recommendations
+│   ├── test_matchup_periods.py    # Matchup period -> calendar date mapping
 │   ├── test_models.py             # Model tests
+│   ├── test_pro_teams.py          # Team abbreviations and today's-game lookups
+│   ├── test_search.py             # Player search
 │   ├── test_server.py             # Server tool tests
 │   ├── test_statistics.py         # Player stats / comparison / trade client tests
-│   └── test_statistics_server.py  # Player stats tool tests
+│   ├── test_statistics_server.py  # Player stats tool tests
+│   └── test_verify_live.py        # Credential loading for the live verification script
 ├── conftest.py                    # Pytest fixtures
 ├── scripts/check.sh               # Runs the CI checks locally
 ├── .github/workflows/test.yml     # CI
+├── .github/dependabot.yml         # Weekly GitHub Actions updates
 ├── pyproject.toml                 # Project configuration, tool settings, coverage gate
 ├── uv.lock                        # Locked dependency versions (used by CI)
 ├── requirements.txt               # Dependencies (for pip users)

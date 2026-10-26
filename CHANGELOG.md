@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Removed
+- The legacy low-level `espn_fantasy_basketball_mcp/server.py`, unused since the FastMCP entry
+  point replaced it.
+
+### Changed
+- `client.py` split: matchup analysis moved to `analysis.py`, calendar math to `dates.py`, name
+  matching to `search.py`, and all ID-to-name tables and thresholds to `constants.py`. The client
+  class keeps thin aliases to every helper, so its public and test-facing API is unchanged.
+- Dependabot keeps the GitHub Actions used by CI current (weekly, grouped).
+- Coverage gate raised to 70%.
+
 ### Fixed
 - Draft tools no longer assume a 12-team, $200, 13-spot league. Budget comes from
   `draftSettings.auctionBudget`, roster size from `rosterSettings.lineupSlotCounts` (IR excluded),

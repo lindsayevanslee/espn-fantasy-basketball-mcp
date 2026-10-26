@@ -40,7 +40,6 @@ source = ["espn_fantasy_basketball_mcp"]
 omit = [
     "tests/*",
     "*/__init__.py",
-    "espn_fantasy_basketball_mcp/server.py",  # Legacy server, not used
 ]
 
 [tool.coverage.report]
@@ -53,8 +52,8 @@ exclude_lines = [
 ]
 show_missing = true
 # Ratchet: the matchup/schedule/settings code added in 2025 had no tests, which pulled
-# coverage from 91% to ~42%; now ~70%. Raise this as tests are added; never lower it.
-fail_under = 65
+# coverage from 91% to ~42%; now ~74%. Raise this as tests are added; never lower it.
+fail_under = 70
 
 [dependency-groups]
 dev = [
@@ -104,7 +103,3 @@ extra_checks = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
-
-[[tool.mypy.overrides]]
-module = "espn_fantasy_basketball_mcp.server"
-ignore_errors = true
