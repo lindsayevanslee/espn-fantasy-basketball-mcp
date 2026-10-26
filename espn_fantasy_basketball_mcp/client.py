@@ -7,7 +7,7 @@ import logging
 import os
 import time
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, overload
 from zoneinfo import ZoneInfo
 
@@ -1416,44 +1416,19 @@ class ESPNFantasyBasketballClient:
         # Get actual dates for the matchup period using scoring period mapping
         # Matchup periods typically correspond to scoring periods, but we need to map correctly
         # For now, use the matchup period as the scoring period to get dates
+        # Calendar window of the matchup period, from ESPN's matchupPeriods mapping
+        window = await self.get_matchup_period_dates(target_matchup_period, league_settings)
         matchup_end: date | None = None  # last day of the matchup period, for games-remaining
-        try:
-            scoring_start, scoring_end = await self._get_scoring_period_dates(target_matchup_period)
-            if scoring_start and scoring_end:
-                start_date = scoring_start
-                matchup_end = date.fromisoformat(scoring_end)
-                # Extend end_date to cover the full week
-                end_date = (datetime.fromisoformat(scoring_end) + timedelta(days=1)).strftime(
-                    "%Y-%m-%d"
-                )
-            else:
-                # Fallback to date estimation if scoring period dates not available
-                if target_matchup_period == current_matchup_period:
-                    start_date = datetime.now().strftime("%Y-%m-%d")
-                elif target_matchup_period > current_matchup_period:
-                    weeks_ahead = target_matchup_period - current_matchup_period
-                    start_date = (datetime.now() + timedelta(weeks=weeks_ahead)).strftime(
-                        "%Y-%m-%d"
-                    )
-                else:
-                    weeks_back = current_matchup_period - target_matchup_period
-                    start_date = (datetime.now() - timedelta(weeks=weeks_back)).strftime("%Y-%m-%d")
-                end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime(
-                    "%Y-%m-%d"
-                )
-                matchup_end = date.fromisoformat(end_date)
-        except Exception as e:
-            logger.warning(f"Could not get scoring period dates, using date estimation: {e}")
-            # Fallback to date estimation
-            if target_matchup_period == current_matchup_period:
-                start_date = datetime.now().strftime("%Y-%m-%d")
-            elif target_matchup_period > current_matchup_period:
-                weeks_ahead = target_matchup_period - current_matchup_period
-                start_date = (datetime.now() + timedelta(weeks=weeks_ahead)).strftime("%Y-%m-%d")
-            else:
-                weeks_back = current_matchup_period - target_matchup_period
-                start_date = (datetime.now() - timedelta(weeks=weeks_back)).strftime("%Y-%m-%d")
-            end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime("%Y-%m-%d")
+        if window is not None:
+            start_date, matchup_end = window[0].isoformat(), window[1]
+            end_date = window[1].isoformat()
+        else:
+            # Last resort: assume 7-day weeks around today
+            logger.warning("Could not determine matchup period dates; estimating from today")
+            weeks_offset = target_matchup_period - current_matchup_period
+            start_dt = datetime.now() + timedelta(weeks=weeks_offset)
+            start_date = start_dt.strftime("%Y-%m-%d")
+            end_date = (start_dt + timedelta(days=6)).strftime("%Y-%m-%d")
             matchup_end = date.fromisoformat(end_date)
 
         opponent_team_id = matchup.opponentTeam.teamId
@@ -3790,6 +3765,121 @@ class ESPNFantasyBasketballClient:
 
         return trending_players
 
+    # ------------------------------------------------------------------ matchup period dates
+    @staticmethod
+    def _date_for_scoring_period(
+        scoring_period: int, anchor_period: int, anchor_date: date
+    ) -> date:
+        """ESPN scoring periods are consecutive calendar days, so one known (period, date) pair
+        places every other period."""
+        return anchor_date + timedelta(days=scoring_period - anchor_period)
+
+    async def _scoring_period_anchor(
+        self, league_settings: LeagueSettings, today: date | None = None
+    ) -> tuple[int, date] | None:
+        """Find a (scoring period, calendar date) pair to anchor the mapping.
+
+        During the season ESPN's status.latestScoringPeriod is today's period, where "today"
+        is ESPN's day (Eastern time). Before or after the season that value is pinned to the
+        first or final period, so fall back to opening night from the NBA schedule as period 1.
+        """
+        status = league_settings.status
+        in_season = (
+            status.firstScoringPeriod <= status.latestScoringPeriod < status.finalScoringPeriod
+        )
+        if in_season:
+            if today is None:
+                today = datetime.now(ZoneInfo("America/New_York")).date()
+            return status.latestScoringPeriod, today
+        first_game = await self._get_season_start_date()
+        if first_game is not None:
+            return status.firstScoringPeriod or 1, first_game.date()
+        return None
+
+    @staticmethod
+    def _matchup_period_window(
+        matchup_period: int,
+        season_start: date,
+        matchup_periods: dict[str, list[int]],
+        week_start_day: int = 0,
+    ) -> tuple[date, date] | None:
+        """Calendar window of a matchup period given opening night and ESPN's period mapping.
+
+        ESPN's scheduleSettings.matchupPeriods is week-indexed: each entry lists the week
+        number(s) a matchup period covers, so a normal period has one element and a two-week
+        All-Star period has two. (Verified live: period 1 was [1] while the daily scoring
+        period counter read 6.) Period 1 starts on opening night and ends at the end of that
+        calendar week; every later period is whole weeks from the next day.
+
+        Some leagues may instead list one scoring period per day; if any entry is longer than
+        four, the lists are treated as daily and the window is their min/max day.
+        """
+        if matchup_period < 1:
+            return None
+        if matchup_periods and str(matchup_period) not in matchup_periods:
+            return None  # beyond the league's schedule
+
+        daily = any(len(v) > 4 for v in matchup_periods.values())
+        if daily:
+            days = matchup_periods[str(matchup_period)]
+            return (
+                season_start + timedelta(days=min(days) - 1),
+                season_start + timedelta(days=max(days) - 1),
+            )
+
+        def weeks_in(period: int) -> int:
+            entry = matchup_periods.get(str(period))
+            return max(1, len(entry)) if entry else 1
+
+        # ESPN weeks end the day before week_start_day (Sunday for Monday starts).
+        days_to_week_end = (week_start_day - 1 - season_start.weekday()) % 7
+        start = season_start
+        end = season_start + timedelta(days=days_to_week_end, weeks=weeks_in(1) - 1)
+        for period in range(2, matchup_period + 1):
+            start = end + timedelta(days=1)
+            end = start + timedelta(days=7 * weeks_in(period) - 1)
+        return start, end
+
+    async def get_matchup_period_dates(
+        self,
+        matchup_period: int,
+        league_settings: LeagueSettings | None = None,
+        today: date | None = None,
+    ) -> tuple[date, date] | None:
+        """First and last calendar day of a matchup period.
+
+        Opening night is found from the daily scoring-period counter (today is
+        status.latestScoringPeriod during the season), and the period's length from
+        scheduleSettings.matchupPeriods, so a short opening week or a two-week All-Star period
+        comes out right.
+
+        Args:
+            matchup_period: Matchup period (week) number
+            league_settings: Already-fetched settings, to avoid a lookup
+            today: Override for the current date (tests)
+
+        Returns:
+            (first_day, last_day) inclusive, or None if it cannot be determined
+        """
+        if league_settings is None:
+            try:
+                league_settings = await self.get_league_settings()
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Could not get league settings for matchup period dates: {e}")
+                return None
+        anchor = await self._scoring_period_anchor(league_settings, today)
+        if anchor is None:
+            return None
+        anchor_period, anchor_date = anchor
+        first_period = league_settings.status.firstScoringPeriod or 1
+        season_start = self._date_for_scoring_period(first_period, anchor_period, anchor_date)
+        return self._matchup_period_window(
+            matchup_period,
+            season_start,
+            league_settings.scheduleSettings.matchupPeriods,
+            self._infer_week_start_day(league_settings),
+        )
+
     async def _get_season_start_date(self) -> datetime | None:
         """Get the NBA season start date by querying the NBA schedule API.
 
@@ -3834,46 +3924,6 @@ class ESPNFantasyBasketballClient:
         except Exception as e:
             logger.warning(f"Could not determine season start date from API: {e}")
             return None
-
-    async def _get_scoring_period_dates(self, scoring_period: int) -> tuple[str | None, str | None]:
-        """Get date range for a specific scoring period by querying NBA schedule.
-
-        Determines the season start date from the NBA schedule API, then calculates
-        scoring period dates based on week boundaries (Monday-Sunday).
-
-        Args:
-            scoring_period: Scoring period number
-
-        Returns:
-            Tuple of (start_date, end_date) in YYYY-MM-DD format, or (None, None) if not found
-        """
-        from datetime import datetime, timedelta
-
-        # Get league settings to determine week start day
-        try:
-            league_settings = await self.get_league_settings()
-            week_start_day = self._infer_week_start_day(league_settings)
-        except Exception:
-            week_start_day = 0  # Default to Monday
-
-        # Get season start date from NBA schedule API
-        first_game_date = await self._get_season_start_date()
-
-        if not first_game_date:
-            # Fallback: estimate based on typical season start
-            logger.warning("Could not get season start from API, using estimate")
-            first_game_date = datetime(self.year - 1, 10, 15)
-
-        # Find the Monday of the week containing the first game
-        # This becomes the start of scoring period 1
-        days_since_week_start = (first_game_date.weekday() - week_start_day) % 7
-        scoring_period_1_start = first_game_date - timedelta(days=days_since_week_start)
-
-        # Calculate the start date for the requested scoring period
-        scoring_period_start = scoring_period_1_start + timedelta(days=(scoring_period - 1) * 7)
-        scoring_period_end = scoring_period_start + timedelta(days=6)  # Week ends 6 days later
-
-        return scoring_period_start.strftime("%Y-%m-%d"), scoring_period_end.strftime("%Y-%m-%d")
 
     def _infer_week_start_day(self, league_settings: LeagueSettings | None) -> int:
         """Infer week start day from league settings.
@@ -3925,7 +3975,13 @@ class ESPNFantasyBasketballClient:
         return week_start.strftime("%Y-%m-%d"), week_end.strftime("%Y-%m-%d")
 
     async def get_player_schedule(
-        self, player_id: int, nba_team_id: int, start_date: str, end_date: str
+        self,
+        player_id: int,
+        nba_team_id: int,
+        start_date: str,
+        end_date: str,
+        this_window: tuple[date, date] | None = None,
+        next_window: tuple[date, date] | None = None,
     ) -> PlayerSchedule:
         """Get schedule for a specific player.
 
@@ -3934,6 +3990,10 @@ class ESPNFantasyBasketballClient:
             nba_team_id: NBA team ID (proTeamId from player data)
             start_date: Start date in YYYY-MM-DD format
             end_date: End date in YYYY-MM-DD format
+            this_window: Inclusive date range counted as gamesThisWeek (default: the
+                Monday-to-Sunday week containing start_date)
+            next_window: Inclusive date range counted as gamesNextWeek (default: the week
+                after this_window)
 
         Returns:
             PlayerSchedule with games and summary
@@ -4047,32 +4107,27 @@ class ESPNFantasyBasketballClient:
                 )
                 games.append(game)
 
-        # Calculate games this week and next week using league-defined week boundaries
-        from datetime import datetime, timedelta
-
-        # Get league settings to infer week start day
-        try:
-            league_settings = await self.get_league_settings()
-            week_start_day = self._infer_week_start_day(league_settings)
-        except Exception as e:
-            logger.warning(f"Could not get league settings for week boundaries, using default: {e}")
-            week_start_day = 0  # Default to Monday
-
-        start_dt = datetime.fromisoformat(start_date)
-        week_start, week_end = self._get_week_boundaries(start_date, week_start_day)
-        week_start_dt = datetime.fromisoformat(week_start)
-        week_end_dt = datetime.fromisoformat(week_end)
-        next_week_start_dt = week_end_dt + timedelta(days=1)
-        next_week_end_dt = next_week_start_dt + timedelta(days=6)
+        # Count games in this and next window. Callers that know the matchup period pass the
+        # windows in; otherwise fall back to the Monday-to-Sunday week containing start_date.
+        if this_window is None:
+            try:
+                league_settings = await self.get_league_settings()
+                week_start_day = self._infer_week_start_day(league_settings)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Could not get league settings for week boundaries: {e}")
+                week_start_day = 0  # Monday
+            week_start, week_end = self._get_week_boundaries(start_date, week_start_day)
+            this_window = (date.fromisoformat(week_start), date.fromisoformat(week_end))
+        if next_window is None:
+            next_window = (this_window[1] + timedelta(days=1), this_window[1] + timedelta(days=7))
 
         games_this_week = 0
         games_next_week = 0
-
         for game in games:
-            game_dt = datetime.fromisoformat(game.date)
-            if week_start_dt <= game_dt <= week_end_dt:
+            game_day = date.fromisoformat(game.date)
+            if this_window[0] <= game_day <= this_window[1]:
                 games_this_week += 1
-            elif next_week_start_dt <= game_dt <= next_week_end_dt:
+            elif next_window[0] <= game_day <= next_window[1]:
                 games_next_week += 1
 
         return PlayerSchedule(
@@ -4089,18 +4144,19 @@ class ESPNFantasyBasketballClient:
         team_id: int,
         start_date: str | None = None,
         end_date: str | None = None,
-        scoring_period: int | None = None,
+        matchup_period: int | None = None,
     ) -> RosterScheduleSummary:
         """Get schedule summary for all players on a fantasy roster.
 
-        Uses league settings to properly map scoring periods to dates and calculate
-        week boundaries based on Monday-to-Sunday weeks.
+        When a matchup period is given, "this week" and "next week" are that period and the
+        next one, using ESPN's matchupPeriods mapping (so uneven weeks are handled). Otherwise
+        they are the Monday-to-Sunday week containing start_date and the week after.
 
         Args:
             team_id: Fantasy team ID
-            start_date: Start date in YYYY-MM-DD format
-            end_date: End date in YYYY-MM-DD format
-            scoring_period: Optional scoring period to use for date mapping
+            start_date: Start date in YYYY-MM-DD format (default: today)
+            end_date: End date in YYYY-MM-DD format (default: start + 7 days)
+            matchup_period: Matchup period (week) to summarize; overrides the dates
 
         Returns:
             RosterScheduleSummary with schedule data for all rostered players
@@ -4110,40 +4166,40 @@ class ESPNFantasyBasketballClient:
         """
         # Validate inputs
         self._validate_positive_int(team_id, "team_id")
-        from datetime import datetime, timedelta
 
-        # Get league settings to understand scoring period structure
         try:
-            league_settings = await self.get_league_settings()
-        except Exception as e:
+            league_settings: LeagueSettings | None = await self.get_league_settings()
+        except Exception as e:  # noqa: BLE001
             logger.warning(f"Failed to get league settings, using date-based calculation: {e}")
             league_settings = None
 
-        # If scoring period provided, get estimated dates for that period
-        if scoring_period:
-            scoring_start, scoring_end = await self._get_scoring_period_dates(scoring_period)
-            if scoring_start and scoring_end:
-                # Use the estimated scoring period dates
-                # Extend end_date to cover next week for "gamesNextWeek" calculation
-                from datetime import datetime, timedelta
-
-                end_dt = datetime.fromisoformat(scoring_end) + timedelta(days=7)
-                start_date = scoring_start
-                end_date = end_dt.strftime("%Y-%m-%d")
-                logger.debug(
-                    f"Scoring period {scoring_period} estimated dates: {start_date} to {end_date}"
+        this_window: tuple[date, date] | None = None
+        next_window: tuple[date, date] | None = None
+        if matchup_period:
+            this_window = await self.get_matchup_period_dates(matchup_period, league_settings)
+            if this_window is not None:
+                next_window = await self.get_matchup_period_dates(
+                    matchup_period + 1, league_settings
                 )
+                if next_window is None:
+                    next_window = (
+                        this_window[1] + timedelta(days=1),
+                        this_window[1] + timedelta(days=7),
+                    )
+                # Fetch enough schedule to cover both windows
+                start_date = this_window[0].isoformat()
+                end_date = next_window[1].isoformat()
 
-        # Validate dates are provided
-        if not start_date or not end_date:
-            from datetime import datetime, timedelta
+        if not start_date:
+            start_date = datetime.now(ZoneInfo(self._get_timezone())).date().isoformat()
+        if not end_date:
+            end_date = (date.fromisoformat(start_date) + timedelta(days=7)).isoformat()
 
-            if not start_date:
-                start_date = datetime.now().strftime("%Y-%m-%d")
-            if not end_date:
-                end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime(
-                    "%Y-%m-%d"
-                )
+        if this_window is None:
+            week_start_day = self._infer_week_start_day(league_settings)
+            week_start, week_end = self._get_week_boundaries(start_date, week_start_day)
+            this_window = (date.fromisoformat(week_start), date.fromisoformat(week_end))
+            next_window = (this_window[1] + timedelta(days=1), this_window[1] + timedelta(days=7))
 
         # Get the roster first
         roster = await self.get_team_roster(team_id)
@@ -4158,7 +4214,7 @@ class ESPNFantasyBasketballClient:
             player = entry.playerPoolEntry.player
             assert player.proTeamId is not None  # filtered below
             schedule = await self.get_player_schedule(
-                player.id, player.proTeamId, start_date, end_date
+                player.id, player.proTeamId, start_date, end_date, this_window, next_window
             )
             schedule.playerName = player.fullName  # use the roster's name
             return schedule
@@ -4180,7 +4236,7 @@ class ESPNFantasyBasketballClient:
         avg_games = total_games_this_week / len(player_schedules) if player_schedules else 0.0
 
         # Determine scoring period if not provided
-        determined_scoring_period = scoring_period
+        determined_scoring_period = matchup_period
         if not determined_scoring_period and league_settings:
             # Use current matchup period from status
             determined_scoring_period = league_settings.status.currentMatchupPeriod

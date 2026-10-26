@@ -637,7 +637,7 @@ async def get_roster_schedule(
     team_id: int | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    scoring_period: int | None = None,
+    matchup_period: int | None = None,
     league_id: int | None = None,
     year: int | None = None,
     espn_s2: str | None = None,
@@ -648,14 +648,17 @@ async def get_roster_schedule(
     This helps you see how many games each of your players has in the upcoming week(s),
     which is crucial for setting your lineup and making roster decisions.
 
-    Uses league settings to properly calculate week boundaries (Monday-to-Sunday)
-    and map scoring periods to dates for accurate game counts.
+    When matchup_period is given, "this week" and "next week" are that matchup period and
+    the next one, using the league's own period-to-date mapping (so a short opening week or
+    a two-week All-Star period is handled). Otherwise they are the Monday-to-Sunday week
+    containing start_date and the week after.
 
     Args:
         team_id: Your fantasy team ID (optional, uses ESPN_TEAM_ID env var)
         start_date: Start date in YYYY-MM-DD format (optional, defaults to today)
         end_date: End date in YYYY-MM-DD format (optional, defaults to 7 days from start)
-        scoring_period: Specific scoring period to get schedule for (optional)
+        matchup_period: Matchup period (week) to summarize (optional; overrides the dates).
+            Use get_league_settings -> status.currentMatchupPeriod for the current week.
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
@@ -663,10 +666,9 @@ async def get_roster_schedule(
 
     Returns:
         Dictionary with schedule summary including:
-        - gamesThisWeek: Games in current week (Monday-Sunday)
-        - gamesNextWeek: Games in next week (Monday-Sunday)
-        - games per player with dates and opponents
-        - scoringPeriod: The scoring period this schedule represents
+        - gamesThisWeek / gamesNextWeek: Games in this and the next matchup period (or week)
+        - games per player with dates, opponents, and tip-off times
+        - scoringPeriod: The matchup period this schedule represents
     """
     from datetime import datetime, timedelta
 
@@ -685,7 +687,7 @@ async def get_roster_schedule(
 
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     schedule_summary = await client.get_roster_schedule_summary(
-        team_id, start_date, end_date, scoring_period
+        team_id, start_date, end_date, matchup_period
     )
     return schedule_summary.model_dump()
 

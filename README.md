@@ -27,7 +27,7 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 7. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
 8. **get_my_current_matchup** - Your current matchup, both rosters, and category scores in one call
 9. **analyze_matchup** - Category-by-category projections, close categories, start/sit priorities, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
-10. **get_roster_schedule** - Games this week and next for every player on your roster
+10. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping
 
 #### Player Analysis Tools
 11. **search_players** - Find ESPN player IDs by name (last name, partial, accented, or misspelled) and see whether each match is a free agent in your league or who owns them
