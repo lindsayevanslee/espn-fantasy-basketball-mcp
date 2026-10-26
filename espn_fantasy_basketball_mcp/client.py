@@ -1,10 +1,12 @@
 """ESPN Fantasy Basketball API client."""
 
 import asyncio
+import difflib
 import json
 import logging
 import os
 import time
+import unicodedata
 from datetime import date, datetime
 from typing import Any, overload
 from zoneinfo import ZoneInfo
@@ -32,6 +34,7 @@ from .models import (
     PlayerRecommendation,
     PlayerSchedule,
     PlayerScheduleGame,
+    PlayerSearchResult,
     PlayerStats,
     Roster,
     RosterEntry,
@@ -146,8 +149,8 @@ class ESPNFantasyBasketballClient:
     # kept for minutes, live data only long enough to de-duplicate the many identical requests
     # a single tool call makes. Concurrent identical requests share one in-flight fetch.
     # Set ESPN_MCP_DISABLE_CACHE=1 to bypass the cache entirely.
-    _response_cache: dict[str, tuple[float, dict[str, Any]]] = {}
-    _inflight: dict[str, tuple[asyncio.AbstractEventLoop, "asyncio.Task[dict[str, Any]]"]] = {}
+    _response_cache: dict[str, tuple[float, Any]] = {}
+    _inflight: dict[str, tuple[asyncio.AbstractEventLoop, "asyncio.Task[Any]"]] = {}
     _cache_hits: int = 0
     _cache_misses: int = 0
     _CACHE_MAX_ENTRIES = 512
@@ -159,6 +162,7 @@ class ESPNFantasyBasketballClient:
     TTL_TEAMS = 300.0
     TTL_NBA_TEAM_SCHEDULE = 6 * 3600.0
     TTL_SCOREBOARD = 60.0
+    TTL_PRO_PLAYERS = 6 * 3600.0  # league-independent list of all active NBA players
     TTL_LIVE = 15.0
 
     @classmethod
@@ -189,6 +193,8 @@ class ESPNFantasyBasketballClient:
             return cls.TTL_SCOREBOARD
         if "/teams/" in url and url.endswith("/schedule"):
             return cls.TTL_NBA_TEAM_SCHEDULE
+        if url.endswith("/players"):
+            return cls.TTL_PRO_PLAYERS
         view = (params or {}).get("view")
         views = set(view) if isinstance(view, list) else ({view} if view else set())
         if views == {"mSettings"}:
@@ -213,7 +219,7 @@ class ESPNFantasyBasketballClient:
         )
 
     @classmethod
-    def _store(cls, key: str, ttl: float, data: dict[str, Any]) -> None:
+    def _store(cls, key: str, ttl: float, data: Any) -> None:
         now = time.monotonic()
         if len(cls._response_cache) >= cls._CACHE_MAX_ENTRIES:
             for stale in [k for k, (exp, _) in cls._response_cache.items() if exp <= now]:
@@ -225,10 +231,11 @@ class ESPNFantasyBasketballClient:
 
     async def _make_request(
         self, url: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None
-    ) -> dict[str, Any]:
+    ) -> Any:
         """GET an ESPN endpoint, serving repeats from the response cache.
 
-        The returned dict may be shared with other callers; treat it as read-only.
+        Returns the decoded JSON (a dict for league endpoints, a list for the players list).
+        The returned object may be shared with other callers; treat it as read-only.
 
         Args:
             url: Full URL to request
@@ -280,7 +287,7 @@ class ESPNFantasyBasketballClient:
 
     async def _fetch(
         self, url: str, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None
-    ) -> dict[str, Any]:
+    ) -> Any:
         """Perform the actual HTTP GET. Errors are logged and re-raised, never cached."""
         try:
             # Set a reasonable timeout (30 seconds)
@@ -291,7 +298,7 @@ class ESPNFantasyBasketballClient:
                     url, params=params, headers=headers, cookies=self.cookies
                 )
                 response.raise_for_status()
-                return response.json()  # type: ignore[no-any-return]
+                return response.json()
         except httpx.TimeoutException as e:
             logger.error(f"Request timeout for {url}: {e}")
             raise
@@ -2779,6 +2786,135 @@ class ESPNFantasyBasketballClient:
             "strategy": "balanced" if team_summary.playersCount < 5 else "punt_detection_needed",
             "recommendation": f"You have ${team_summary.remainingBudget} for {13 - team_summary.playersCount} more players",
         }
+
+    # ------------------------------------------------------------------ player search
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        """Lower-case, strip accents and punctuation, collapse whitespace."""
+        decomposed = unicodedata.normalize("NFKD", name)
+        ascii_only = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+        cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in ascii_only)
+        return " ".join(cleaned.casefold().split())
+
+    @classmethod
+    def _name_match_score(cls, query: str, full_name: str) -> float:
+        """Score how well a query matches a player name (0-1).
+
+        Exact name 1.0; query equal to a name token (usually the surname) 0.95; every query
+        token a prefix of some name token in order ("steph curry" -> "Stephen Curry") 0.9;
+        query a substring 0.85; otherwise difflib similarity capped at 0.8, so typos still
+        rank but never above a structural match.
+        """
+        q = cls._normalize_name(query)
+        n = cls._normalize_name(full_name)
+        if not q or not n:
+            return 0.0
+        if q == n:
+            return 1.0
+        name_tokens = n.split()
+        query_tokens = q.split()
+        if len(query_tokens) == 1 and q in name_tokens:
+            return 0.95
+        if len(query_tokens) <= len(name_tokens):
+            remaining = list(name_tokens)
+            ok = True
+            for qt in query_tokens:
+                idx = next((i for i, nt in enumerate(remaining) if nt.startswith(qt)), None)
+                if idx is None:
+                    ok = False
+                    break
+                remaining = remaining[idx + 1 :]
+            if ok:
+                return 0.9
+        if q in n:
+            return 0.85
+        return min(0.8, difflib.SequenceMatcher(None, q, n).ratio())
+
+    async def get_pro_players(self) -> list[dict[str, Any]]:
+        """All active NBA players known to ESPN Fantasy for this season (league-independent).
+
+        Uses the players list endpoint with the players_wl view, which returns id, fullName,
+        defaultPositionId, proTeamId and injury status for roughly 500 players. Cached 6 hours.
+        """
+        url = f"{self.BASE_URL}/seasons/{self.year}/players"
+        headers = {"x-fantasy-filter": json.dumps({"filterActive": {"value": True}})}
+        data = await self._make_request(url, {"view": "players_wl"}, headers)
+        if isinstance(data, dict):  # defensive: some ESPN endpoints wrap lists
+            data = data.get("players", [])
+        return [p for p in data if isinstance(p, dict) and "id" in p]
+
+    async def search_players(
+        self, query: str, limit: int = 5, include_league_status: bool = True
+    ) -> list[PlayerSearchResult]:
+        """Find players by (partial, misspelled, or accented) name.
+
+        Args:
+            query: Name or part of a name, e.g. "Jokic", "steph curry", "Dončić"
+            limit: Maximum results (1-25)
+            include_league_status: Also report whether each match is a free agent in this
+                league or which fantasy team owns them (one extra request)
+
+        Returns:
+            Matches sorted by score, best first. Empty if nothing scores at least 0.5.
+        """
+        if not query or not query.strip():
+            raise ValueError("query must not be empty")
+        if not isinstance(limit, int) or limit < 1 or limit > 25:
+            raise ValueError(f"Invalid limit: {limit}. Must be between 1 and 25.")
+
+        players = await self.get_pro_players()
+        scored = sorted(
+            (
+                (self._name_match_score(query, p.get("fullName", "")), p)
+                for p in players
+                if p.get("fullName")
+            ),
+            key=lambda sp: (-sp[0], sp[1].get("fullName", "")),
+        )
+        top = [(score, p) for score, p in scored[:limit] if score >= 0.5]
+
+        position_map = self._get_position_id_mapping()
+        results = [
+            PlayerSearchResult(
+                playerId=p["id"],
+                fullName=p.get("fullName", ""),
+                matchScore=round(score, 3),
+                defaultPosition=position_map.get(p.get("defaultPositionId", -1)),
+                proTeamAbbrev=self._resolve_pro_team_abbrev(p.get("proTeamId")),
+                injuryStatus=p.get("injuryStatus"),
+            )
+            for score, p in top
+        ]
+
+        if include_league_status and results:
+            await self._attach_league_status(results)
+        return results
+
+    async def _attach_league_status(self, results: list[PlayerSearchResult]) -> None:
+        """Fill isFreeAgent / fantasyTeamId / fantasyTeamName / percentOwned for matches."""
+        ids = [r.playerId for r in results]
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        headers = {"x-fantasy-filter": json.dumps({"players": {"filterIds": {"value": ids}}})}
+        try:
+            data, teams = await asyncio.gather(
+                self._make_request(url, {"view": "kona_player_info"}, headers),
+                self.get_league_teams(),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not fetch league status for player search: {e}")
+            return
+        team_names = {t.id: t.name for t in teams}
+        by_id = {entry.get("id"): entry for entry in data.get("players", [])}
+        for r in results:
+            entry = by_id.get(r.playerId)
+            if not entry:
+                continue
+            on_team = entry.get("onTeamId")
+            r.isFreeAgent = on_team in (0, None)
+            r.fantasyTeamId = on_team if on_team else None
+            r.fantasyTeamName = team_names.get(on_team) if on_team else None
+            r.percentOwned = (entry.get("ownership") or {}).get("percentOwned")
+            r.injuryStatus = entry.get("player", {}).get("injuryStatus") or r.injuryStatus
 
     @overload
     async def get_player_stats(self, player_id: int, timeframe: str = ...) -> PlayerStats: ...

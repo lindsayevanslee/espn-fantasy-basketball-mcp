@@ -444,6 +444,41 @@ async def main() -> int:
         report.error("analyze_matchup", exc)
         traceback.print_exc()
 
+    # ------------------------------------------------------------------ 5. search
+    section("5. search_players -> find a player from your own roster by surname")
+    try:
+        roster = await client.get_team_roster(team_id)
+        target = next(
+            (e.playerPoolEntry.player for e in roster.entries if e.playerPoolEntry.player.lastName),
+            None,
+        )
+        if target is None:
+            report.skip("No roster player with a last name to search for")
+        else:
+            query = target.lastName or ""
+            results = await client.search_players(query, limit=5)
+            report.info(
+                f"query='{query}' -> "
+                + ", ".join(
+                    f"{r.fullName} ({r.proTeamAbbrev}, score {r.matchScore}, "
+                    f"{'FA' if r.isFreeAgent else (r.fantasyTeamName or 'owned')})"
+                    for r in results
+                )
+            )
+            hit = next((r for r in results if r.playerId == target.id), None)
+            report.check(hit is not None, f"Search for '{query}' finds {target.fullName}")
+            if hit is not None:
+                report.check(
+                    hit.fantasyTeamId == team_id and hit.isFreeAgent is False,
+                    "Search reports the player as owned by your team",
+                    f"fantasyTeamId={hit.fantasyTeamId} isFreeAgent={hit.isFreeAgent}",
+                )
+            pool = await client.get_pro_players()
+            report.check(len(pool) > 300, "Active player list is populated", f"{len(pool)} players")
+    except Exception as exc:  # noqa: BLE001
+        report.error("search_players", exc)
+        traceback.print_exc()
+
     report.summary()
     return 1 if report.failed else 0
 

@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- New tool `search_players`: find ESPN player IDs by name. Forgiving matching (surname only,
+  partial first names, accents, typos) over ESPN's league-independent active player list, cached
+  6 hours; optionally reports whether each match is a free agent in your league or which fantasy
+  team owns them. Every tool that takes a `player_id` now has a way to get one.
 - `get_player_stats` (and everything built on it) now returns per-game `fieldGoalsMade`,
   `fieldGoalsAttempted`, `freeThrowsMade`, and `freeThrowsAttempted` from ESPN stat IDs 13–16.
   `analyze_matchup` uses them to project FG% and FT% as made/attempted; the points-based estimate

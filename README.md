@@ -30,19 +30,20 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 10. **get_roster_schedule** - Games this week and next for every player on your roster
 
 #### Player Analysis Tools
-11. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
-12. **compare_players** - Compare players across categories
-13. **analyze_trade_proposal** - Value and category impact of a proposed trade
-14. **get_trending_players** - Players trending up or down in ownership
+11. **search_players** - Find ESPN player IDs by name (last name, partial, accented, or misspelled) and see whether each match is a free agent in your league or who owns them
+12. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
+13. **compare_players** - Compare players across categories
+14. **analyze_trade_proposal** - Value and category impact of a proposed trade
+15. **get_trending_players** - Players trending up or down in ownership
 
 #### Live Draft Assistant Tools
-15. **get_draft_status** - Get current draft status including all picks and progress
-16. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
-17. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
-18. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
-19. **get_available_players** - Get top available players for the draft with auction values
+16. **get_draft_status** - Get current draft status including all picks and progress
+17. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
+18. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
+19. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
+20. **get_available_players** - Get top available players for the draft with auction values
 
-Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_YEAR`, `ESPN_S2`, and `ESPN_SWID` from the environment, so you rarely need to pass them. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
+Tools that take a `player_id` expect ESPN's numeric ID; use `search_players` to find it from a name. Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_YEAR`, `ESPN_S2`, and `ESPN_SWID` from the environment, so you rarely need to pass them. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
 
 ## Installation
 
@@ -131,6 +132,7 @@ calls. Each endpoint has its own lifetime, chosen by how fast the data changes:
 | Data | Lifetime |
 |---|---|
 | NBA team season schedule | 6 hours |
+| All active NBA players (for name search) | 6 hours |
 | League settings | 10 minutes |
 | League team list | 5 minutes |
 | Today's NBA scoreboard | 60 seconds |
@@ -421,6 +423,7 @@ This MCP server uses the following ESPN API endpoints:
   - Matchups and schedule: `?view=mMatchup`
   - Draft: `?view=mDraftDetail`
   - Players, free agents, and stats: `?view=kona_player_info` with an `x-fantasy-filter` request header
+- **All active players (league-independent)**: `/seasons/{year}/players?view=players_wl`, used by `search_players`
 
 ### NBA Schedule API
 - **Base URL**: `https://site.api.espn.com/apis/site/v2/sports/basketball/nba`
