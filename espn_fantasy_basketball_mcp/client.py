@@ -19,6 +19,7 @@ from .models import (
     CurrentMatchup,
     DraftPick,
     DraftRecommendation,
+    DraftSettings,
     DraftStatus,
     LeagueSettings,
     LeagueStatus,
@@ -114,6 +115,17 @@ class ESPNFantasyBasketballClient:
             Timezone string (defaults to 'America/New_York' if not set)
         """
         return os.getenv("MY_TIMEZONE", "America/New_York")
+
+    def _epoch_ms_to_iso(self, epoch_ms: int | None) -> str | None:
+        """Convert an ESPN epoch-milliseconds timestamp to ISO 8601 in MY_TIMEZONE."""
+        if not epoch_ms:
+            return None
+        try:
+            dt = datetime.fromtimestamp(epoch_ms / 1000, tz=ZoneInfo("UTC"))
+            return dt.astimezone(ZoneInfo(self._get_timezone())).isoformat()
+        except (ValueError, OSError, OverflowError) as e:
+            logger.warning(f"Could not parse timestamp {epoch_ms}: {e}")
+            return None
 
     def _convert_utc_to_timezone_iso(self, utc_date_str: str) -> str:
         """Convert UTC date string to ISO format in the configured timezone.
@@ -399,9 +411,15 @@ class ESPNFantasyBasketballClient:
             slot_id: slot_mapping.get(int(slot_id), f"SLOT_{slot_id}")
             for slot_id in lineup_slot_counts.keys()
         }
+        roster_size = sum(
+            int(count)
+            for slot_id, count in lineup_slot_counts.items()
+            if str(slot_id) != str(self._SLOT_IR)
+        )
         roster_settings = RosterSettings(
             lineupSlotCounts=lineup_slot_counts,
             lineupSlotNames=lineup_slot_names if lineup_slot_names else None,
+            rosterSize=roster_size or None,
             positionLimits={str(k): v for k, v in roster_data.get("positionLimits", {}).items()},
             lineupLocktimeType=roster_data.get("lineupLocktimeType", "FIRSTGAME_WEEKLY"),
             rosterLocktimeType=roster_data.get("rosterLocktimeType"),
@@ -451,6 +469,18 @@ class ESPNFantasyBasketballClient:
             allowOutOfUniverse=trade_data.get("allowOutOfUniverse", False),
         )
 
+        # Parse draft settings
+        draft_data = settings_data.get("draftSettings", {})
+        draft_date = draft_data.get("date")
+        draft_settings = DraftSettings(
+            type=draft_data.get("type"),
+            auctionBudget=draft_data.get("auctionBudget"),
+            pickOrder=[int(t) for t in draft_data.get("pickOrder", []) or []],
+            keeperCount=draft_data.get("keeperCount", 0) or 0,
+            date=draft_date,
+            dateISO=self._epoch_ms_to_iso(draft_date),
+        )
+
         # Parse status
         status = LeagueStatus(
             currentMatchupPeriod=status_data.get("currentMatchupPeriod", 0),
@@ -471,6 +501,7 @@ class ESPNFantasyBasketballClient:
             rosterSettings=roster_settings,
             acquisitionSettings=acquisition_settings,
             tradeSettings=trade_settings,
+            draftSettings=draft_settings,
             status=status,
         )
 
@@ -2548,14 +2579,23 @@ class ESPNFantasyBasketballClient:
             )
             picks.append(pick)
 
-        # Determine current pick if draft is in progress
+        # The league's draft order tells us who nominates / picks next
+        draft_type: str | None = None
+        pick_order: list[int] = []
+        try:
+            settings = await self.get_league_settings()
+            draft_type = settings.draftSettings.type
+            pick_order = settings.draftSettings.pickOrder
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Draft order unavailable: {e}")
+
         current_pick_number = None
         current_nominating_team = None
         if draft_detail.get("inProgress", False):
             current_pick_number = len(picks) + 1
-            # In auction drafts, teams take turns nominating
-            if current_pick_number <= 12:  # Assuming 12 teams
-                current_nominating_team = ((current_pick_number - 1) % 12) + 1
+            current_nominating_team = self._team_on_the_clock(
+                current_pick_number, pick_order, draft_type
+            )
 
         return DraftStatus(
             inProgress=draft_detail.get("inProgress", False),
@@ -2564,14 +2604,47 @@ class ESPNFantasyBasketballClient:
             picks=picks,
             currentPickNumber=current_pick_number,
             currentNominatingTeam=current_nominating_team,
+            draftType=draft_type,
         )
 
+    @staticmethod
+    def _team_on_the_clock(
+        pick_number: int, pick_order: list[int], draft_type: str | None
+    ) -> int | None:
+        """Team ID that picks (snake) or nominates (auction) at an overall pick number.
+
+        Auction nominations cycle through pickOrder every round; snake drafts reverse the
+        order in even rounds. Returns None when the league's pick order is unknown.
+        """
+        if not pick_order or pick_number < 1:
+            return None
+        n = len(pick_order)
+        index = (pick_number - 1) % n
+        round_index = (pick_number - 1) // n
+        if (draft_type or "").upper() == "SNAKE" and round_index % 2 == 1:
+            index = n - 1 - index
+        return pick_order[index]
+
     async def get_available_players(self, limit: int = 100) -> list[PlayerDraftInfo]:
-        """Get available players for draft with auction values."""
+        """Get undrafted players with ESPN's draft rank and auction value, best first.
+
+        Asks ESPN for free agents sorted by its STANDARD draft rank (the filter must be sent
+        as the x-fantasy-filter header); without it ESPN returns an arbitrary default slice.
+        """
+        if not isinstance(limit, int) or limit < 1 or limit > 500:
+            raise ValueError(f"Invalid limit: {limit}. Must be between 1 and 500.")
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         params = {"view": "kona_player_info"}
+        filter_dict = {
+            "players": {
+                "filterStatus": {"value": ["FREEAGENT", "WAIVERS"]},
+                "limit": max(limit * 2, 50),  # headroom for drafted players filtered below
+                "sortDraftRanks": {"sortPriority": 100, "sortAsc": True, "value": "STANDARD"},
+            }
+        }
+        headers = {"x-fantasy-filter": json.dumps(filter_dict)}
 
-        data = await self._make_request(url, params)
+        data = await self._make_request(url, params, headers)
 
         # Get current draft status to see who's been drafted
         draft_status = await self.get_draft_status()
@@ -2653,33 +2726,62 @@ class ESPNFantasyBasketballClient:
         return players
 
     async def get_team_draft_summary(self, team_id: int) -> TeamDraftSummary:
-        """Get draft summary for a specific team."""
-        # Get current draft picks
-        draft_status = await self.get_draft_status()
-        team_picks = [pick for pick in draft_status.picks if pick.teamId == team_id]
+        """Draft spending and roster progress for a team.
 
-        # Get team info
-        teams = await self.get_league_teams()
+        Budget and roster size come from league settings (draftSettings.auctionBudget and
+        rosterSettings.lineupSlotCounts); $200 and 13 are used only if settings are unavailable.
+        """
+        draft_status, teams = await asyncio.gather(self.get_draft_status(), self.get_league_teams())
+        team_picks = [pick for pick in draft_status.picks if pick.teamId == team_id]
         team = next((t for t in teams if t.id == team_id), None)
         team_name = team.name if team else f"Team {team_id}"
 
-        # Calculate spending
+        budget, roster_size = 200, 13
+        draft_type: str | None = draft_status.draftType
+        try:
+            settings = await self.get_league_settings()
+            if settings.draftSettings.auctionBudget:
+                budget = settings.draftSettings.auctionBudget
+            if settings.rosterSettings.rosterSize:
+                roster_size = settings.rosterSettings.rosterSize
+            draft_type = draft_type or settings.draftSettings.type
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                f"League settings unavailable; assuming ${budget} budget and {roster_size} roster spots: {e}"
+            )
+
         total_spent = sum(pick.bidAmount for pick in team_picks)
         players_count = len(team_picks)
 
-        # Assuming $200 budget (standard for auction)
-        remaining_budget = 200 - total_spent
-
-        # Get position counts (simplified)
-        # TODO: This would need player data to get actual positions
+        # Drafted players by position, from the league's player pool
         position_counts: dict[str, int] = {}
+        if team_picks:
+            try:
+                url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+                ids = [pick.playerId for pick in team_picks]
+                headers = {
+                    "x-fantasy-filter": json.dumps({"players": {"filterIds": {"value": ids}}})
+                }
+                data = await self._make_request(url, {"view": "kona_player_info"}, headers)
+                position_map = self._get_position_id_mapping()
+                for entry in data.get("players", []):
+                    position = position_map.get(
+                        entry.get("player", {}).get("defaultPositionId", -1), "UNK"
+                    )
+                    position_counts[position] = position_counts.get(position, 0) + 1
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Could not fetch drafted players' positions: {e}")
 
         return TeamDraftSummary(
             teamId=team_id,
             teamName=team_name,
             totalSpent=total_spent,
             playersCount=players_count,
-            remainingBudget=remaining_budget,
+            remainingBudget=budget - total_spent,
+            budget=budget,
+            rosterSize=roster_size,
+            remainingSlots=max(0, roster_size - players_count),
+            draftType=draft_type,
             positionCounts=position_counts,
         )
 
@@ -2706,11 +2808,13 @@ class ESPNFantasyBasketballClient:
                     priority=1,
                 )
 
-            # Simple bidding logic
+            # Simple bidding logic: keep $1 for every roster spot still to fill after this one
             player_value = current_player.auctionValue or 0
-            max_affordable = min(
-                team_summary.remainingBudget - (13 - team_summary.playersCount), player_value
-            )
+            slots_left = team_summary.remainingSlots
+            if slots_left is None:
+                slots_left = max(0, team_summary.rosterSize - team_summary.playersCount)
+            reserve = max(0, slots_left - 1)
+            max_affordable = min(team_summary.remainingBudget - reserve, player_value)
 
             if player_value >= 10 and max_affordable >= player_value * 0.8:
                 return DraftRecommendation(
@@ -2754,12 +2858,17 @@ class ESPNFantasyBasketballClient:
 
         # This would need more sophisticated analysis with player stats
         # For now, return basic info
+        slots_left = team_summary.remainingSlots
+        if slots_left is None:
+            slots_left = max(0, team_summary.rosterSize - team_summary.playersCount)
         return {
             "totalSpent": team_summary.totalSpent,
             "remainingBudget": team_summary.remainingBudget,
             "playersCount": team_summary.playersCount,
+            "rosterSize": team_summary.rosterSize,
+            "remainingSlots": slots_left,
             "strategy": "balanced" if team_summary.playersCount < 5 else "punt_detection_needed",
-            "recommendation": f"You have ${team_summary.remainingBudget} for {13 - team_summary.playersCount} more players",
+            "recommendation": f"You have ${team_summary.remainingBudget} for {slots_left} more players",
         }
 
     # ------------------------------------------------------------------ player search
@@ -3686,18 +3795,31 @@ class ESPNFantasyBasketballClient:
     async def get_trending_players(
         self, direction: str = "up", limit: int = 20
     ) -> list[TrendingPlayer]:
-        """Get players trending up or down in adds/drops."""
+        """Get free agents trending up or down in ownership.
+
+        Fetches a wide slice of free agents (ESPN's default slice is arbitrary without the
+        x-fantasy-filter header), ranks them by ownership change, and returns the top `limit`.
+        """
+        if direction not in ("up", "down"):
+            raise ValueError(f"Invalid direction: {direction}. Must be 'up' or 'down'.")
+        if not isinstance(limit, int) or limit < 1 or limit > 100:
+            raise ValueError(f"Invalid limit: {limit}. Must be between 1 and 100.")
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         params = {"view": "kona_player_info"}
+        filter_dict = {
+            "players": {
+                "filterStatus": {"value": ["FREEAGENT", "WAIVERS"]},
+                "limit": max(200, limit * 10),
+                "sortPercOwned": {"sortPriority": 1, "sortAsc": False},
+            }
+        }
+        headers = {"x-fantasy-filter": json.dumps(filter_dict)}
 
-        data = await self._make_request(url, params)
+        data = await self._make_request(url, params, headers)
 
         trending_players: list[TrendingPlayer] = []
 
         for player_entry in data.get("players", []):
-            if len(trending_players) >= limit:
-                break
-
             player_info = player_entry["player"]
             ownership = player_entry.get("ownership", {})
 
@@ -3760,10 +3882,10 @@ class ESPNFantasyBasketballClient:
 
             trending_players.append(trending_player)
 
-        # Sort by trending strength
+        # Sort by trending strength, then cut to the requested size
         trending_players.sort(key=lambda x: abs(x.add_percentage - x.drop_percentage), reverse=True)
 
-        return trending_players
+        return trending_players[:limit]
 
     # ------------------------------------------------------------------ matchup period dates
     @staticmethod

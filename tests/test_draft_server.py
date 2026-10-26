@@ -162,6 +162,8 @@ class TestDraftMCPTools:
                     "model_dump": lambda self: mock_team_summary,
                     "remainingBudget": 50,
                     "playersCount": 8,
+                    "rosterSize": 13,
+                    "remainingSlots": 5,
                 },
             )()
             mock_client_instance.get_team_draft_summary = AsyncMock(
@@ -384,6 +386,8 @@ class TestDraftToolsWithTeamIdEnv:
                     "model_dump": lambda self: mock_team_summary,
                     "remainingBudget": 100,
                     "playersCount": 5,
+                    "rosterSize": 13,
+                    "remainingSlots": 8,
                 },
             )()
             mock_client_instance.get_team_draft_summary = AsyncMock(
