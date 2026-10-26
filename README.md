@@ -333,13 +333,18 @@ uv run mypy espn_fantasy_basketball_mcp/ espn_fantasy_basketball.py
 ### Verifying Against Your League
 
 The unit tests mock every ESPN call. To check the server against your real league, run the
-read-only verification script with the same environment variables you give Claude Desktop:
+read-only verification script:
 
 ```bash
-cp .env.example .env      # fill in your league ID, team ID, and cookies (.env is gitignored)
-set -a; source .env; set +a
 uv run python scripts/verify_live.py
 ```
+
+It reads `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_S2`, `ESPN_SWID`, `ESPN_YEAR`, and `MY_TIMEZONE`
+from the environment, and anything not set there from the `env` block of this server's entry in
+your Claude Desktop config. If Claude Desktop already works, no extra setup is needed. Use
+`--config PATH` if your config lives somewhere unusual, or `--server NAME` if you have several
+ESPN entries. Alternatively copy `.env.example` to `.env` (gitignored) and load it with
+`set -a; source .env; set +a`.
 
 It prints a PASS/FAIL report covering: the season your settings resolve to, today's NBA
 scoreboard versus the team codes on your roster (`todaysGame`), and a current-week

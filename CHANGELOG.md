@@ -25,7 +25,8 @@
 
 ### Added
 - `scripts/verify_live.py`: read-only PASS/FAIL verification against your real league (season,
-  today's-game lookups, current-week matchup projections), plus `.env.example`.
+  today's-game lookups, current-week matchup projections). Reads credentials from the
+  environment or, when unset, from your Claude Desktop config. `.env.example` as an alternative.
 
 ### Changed
 - CI runs on every branch, installs from `uv.lock`, checks formatting, type-checks the server entry

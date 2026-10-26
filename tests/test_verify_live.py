@@ -38,8 +38,8 @@ def test_loads_missing_vars_from_matching_server(tmp_path, clean_env, monkeypatc
                 "env": {
                     "ESPN_LEAGUE_ID": "123",
                     "ESPN_TEAM_ID": "4",
-                    "ESPN_S2": "s",
-                    "ESPN_SWID": "w",
+                    "ESPN_S2": "secret-s2-value",
+                    "ESPN_SWID": "secret-swid-value",
                 },
             },
         },
@@ -51,10 +51,8 @@ def test_loads_missing_vars_from_matching_server(tmp_path, clean_env, monkeypatc
     assert verify_live.os.environ["ESPN_LEAGUE_ID"] == "123"
     assert verify_live.os.environ["ESPN_TEAM_ID"] == "4"
     # the description names the keys but must never include the values
-    assert (
-        "s" not in desc.split("supplied")[1].replace("ESPN_S2", "").replace("ESPN_SWID", "") or True
-    )
     assert "ESPN_S2" in desc and "ESPN_SWID" in desc
+    assert "secret-s2-value" not in desc and "secret-swid-value" not in desc
 
 
 def test_existing_environment_wins(tmp_path, clean_env, monkeypatch):
