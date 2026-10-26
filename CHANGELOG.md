@@ -23,6 +23,10 @@
   to the ESPN client.
 - `get_matchups` no longer fetches league settings twice.
 
+### Added
+- `scripts/verify_live.py`: read-only PASS/FAIL verification against your real league (season,
+  today's-game lookups, current-week matchup projections), plus `.env.example`.
+
 ### Changed
 - CI runs on every branch, installs from `uv.lock`, checks formatting, type-checks the server entry
   point, and runs with read-only repository permissions. The Codecov upload step was removed.

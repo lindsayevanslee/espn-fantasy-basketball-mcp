@@ -330,6 +330,24 @@ uv run mypy espn_fantasy_basketball_mcp/ espn_fantasy_basketball.py
 ./scripts/check.sh
 ```
 
+### Verifying Against Your League
+
+The unit tests mock every ESPN call. To check the server against your real league, run the
+read-only verification script with the same environment variables you give Claude Desktop:
+
+```bash
+cp .env.example .env      # fill in your league ID, team ID, and cookies (.env is gitignored)
+set -a; source .env; set +a
+uv run python scripts/verify_live.py
+```
+
+It prints a PASS/FAIL report covering: the season your settings resolve to, today's NBA
+scoreboard versus the team codes on your roster (`todaysGame`), and a current-week
+`analyze_matchup` with games-remaining and projection sanity checks. If none of the teams
+whose abbreviations differ between ESPN endpoints (GSW, UTA, WAS, NOP, NYK, SAS) play today,
+it tells you the next date each one does so you can re-run. It never prints cookie values and
+exits non-zero if any check fails.
+
 ### Continuous Integration
 
 GitHub Actions (`.github/workflows/test.yml`) runs on every push and on pull requests into `main`, across Python 3.10–3.12. It installs from `uv.lock` (`uv sync --locked`) so CI uses exactly the versions committed here, and it runs the same four checks as `scripts/check.sh`. The workflow has read-only repository permissions and uses no secrets.
