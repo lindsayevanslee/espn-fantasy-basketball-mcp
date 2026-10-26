@@ -183,7 +183,7 @@ class Player(BaseModel):
     lastName: str | None = None
     jersey: str | None = None
     proTeamId: int | None = None
-    proTeamAbbrev: str | None = None  # NBA team abbreviation (e.g., "MIN", "LAL")
+    proTeamAbbrev: str | None = None  # NBA team abbreviation (e.g., "MIN", "LAL"); "FA" if unsigned
     proTeamName: str | None = None  # NBA team full name (e.g., "Timberwolves", "Lakers")
     defaultPositionId: int
     defaultPosition: str | None = None  # Human-readable position name (e.g., "PG", "SG")
@@ -298,10 +298,11 @@ class NBAGame(BaseModel):
 class PlayerScheduleGame(BaseModel):
     """A single game in a player's schedule."""
 
-    date: str  # YYYY-MM-DD format
+    date: str  # YYYY-MM-DD format, in the MY_TIMEZONE timezone
     opponent: str  # Opponent team abbreviation
     is_home: bool  # True if home game, False if away
     game_id: str | None = None
+    datetimeISO: str | None = None  # Tip-off as ISO 8601 with offset, in MY_TIMEZONE (when known)
 
 
 class PlayerSchedule(BaseModel):

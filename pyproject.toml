@@ -52,9 +52,9 @@ exclude_lines = [
     "if __name__ == .__main__.:",
 ]
 show_missing = true
-# Ratchet: the matchup/schedule/settings code added in 2025 has no tests yet, which pulled
-# coverage from 91% to ~42%. Raise this as tests are added; never lower it.
-fail_under = 40
+# Ratchet: the matchup/schedule/settings code added in 2025 had no tests, which pulled
+# coverage from 91% to ~42%; now ~59%. Raise this as tests are added; never lower it.
+fail_under = 55
 
 [dependency-groups]
 dev = [

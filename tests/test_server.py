@@ -1,6 +1,7 @@
 """Test cases for ESPN Fantasy Basketball MCP server."""
 
 import sys
+from datetime import date
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -10,6 +11,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from espn_fantasy_basketball import (
+    _default_season,
+    _get_espn_credentials,
     _get_team_id,
     get_free_agents,
     get_league_teams,
@@ -272,3 +275,41 @@ class TestTeamIdEnvVariable:
             assert result["teamId"] == 3
             # Verify the client was called with explicit team_id, not env var
             mock_client_instance.get_team_roster.assert_called_once_with(3, None)
+
+
+class TestSeasonDefault:
+    """ESPN labels a season by the year it ends in; the default must track the calendar."""
+
+    @pytest.mark.parametrize(
+        ("today", "expected"),
+        [
+            (date(2026, 10, 1), 2027),  # opening month of 2026-27
+            (date(2026, 12, 31), 2027),
+            (date(2027, 1, 15), 2027),
+            (date(2027, 6, 1), 2027),  # finals
+            (date(2027, 9, 30), 2027),  # offseason still reports the finished season
+            (date(2027, 10, 1), 2028),  # 2027-28 tips off
+        ],
+    )
+    def test_default_season(self, today, expected):
+        assert _default_season(today) == expected
+
+    def test_credentials_use_computed_default_when_env_unset(self, monkeypatch):
+        monkeypatch.delenv("ESPN_YEAR", raising=False)
+        _, year, _, _ = _get_espn_credentials(league_id=1)
+        assert year == _default_season()
+
+    def test_credentials_env_var_overrides_default(self, monkeypatch):
+        monkeypatch.setenv("ESPN_YEAR", "2031")
+        _, year, _, _ = _get_espn_credentials(league_id=1)
+        assert year == 2031
+
+    def test_credentials_parameter_overrides_env_var(self, monkeypatch):
+        monkeypatch.setenv("ESPN_YEAR", "2031")
+        _, year, _, _ = _get_espn_credentials(league_id=1, year=2026)
+        assert year == 2026
+
+    def test_credentials_treat_empty_env_var_as_unset(self, monkeypatch):
+        monkeypatch.setenv("ESPN_YEAR", "")
+        _, year, _, _ = _get_espn_credentials(league_id=1)
+        assert year == _default_season()

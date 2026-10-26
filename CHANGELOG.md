@@ -3,6 +3,22 @@
 ## [Unreleased]
 
 ### Fixed
+- The default season is now computed from today's date instead of being hard-coded to 2025.
+  ESPN labels a season by the year it ends in, so October–December map to the next year.
+  `ESPN_YEAR` still overrides.
+- Players on the Warriors, Jazz, and Wizards never received `todaysGame`: the scoreboard feed's
+  abbreviations (GS, UTAH, WSH) were normalized to one spelling while the static proTeamId map
+  used another. All abbreviations now go through one canonical set (GSW, NOP, NYK, SAS, UTA,
+  WAS, ...), including those in `get_player_schedule`.
+- `analyze_matchup` for the current week no longer double counts games already played:
+  projections, `yourGamesRemaining`/`opponentGamesRemaining`, and per-player `gamesRemaining`
+  now count only games that have not tipped off yet and that fall inside the matchup period.
+  (The roster schedule deliberately spans an extra week for `gamesNextWeek`; those games were
+  previously being projected into the current matchup.) `PlayerScheduleGame` gains
+  `datetimeISO` so tip-off time is available.
+- `analyze_matchup` compared FG% and FT% against 0.45/0.40 while `PlayerStats` stores
+  percentages on a 0–100 scale, so every player counted as a good shooter. Thresholds are now
+  48/43 for FG% and 80/70 for FT%.
 - CI is green again: 5 stale tests updated to the current tool signatures and batched player-stats call,
   20 mypy errors resolved, ruff lint and formatting applied.
 - Tools that act on your team (`get_team_roster`, `should_i_bid`, `who_should_i_target_next`,
@@ -10,10 +26,18 @@
   to the ESPN client.
 - `get_matchups` no longer fetches league settings twice.
 
+### Added
+- Players with no NBA team (ESPN `proTeamId` 0, shown as "FA" in the ESPN UI) now get
+  `proTeamAbbrev` "FA" instead of null, so an unsigned player sitting in a lineup slot is visible.
+- `scripts/verify_live.py`: read-only PASS/FAIL verification against your real league (season,
+  today's-game lookups, current-week matchup projections). Reads credentials from the
+  environment or, when unset, from your Claude Desktop config. `.env.example` as an alternative.
+
 ### Changed
 - CI runs on every branch, installs from `uv.lock`, checks formatting, type-checks the server entry
   point, and runs with read-only repository permissions. The Codecov upload step was removed.
-- Coverage gate lowered from 80% to 40% as a ratchet, because the 2025 feature work has no tests yet.
+- Coverage gate lowered from 80% to 40% as a ratchet, because the 2025 feature work had no tests;
+  raised to 55% with the regression tests below.
 - README documents all 19 tools, the `ESPN_YEAR` convention, and the CI setup. The badge now points
   at this repository.
 - `uv.lock` and `.python-version` are no longer gitignored (they were already tracked).

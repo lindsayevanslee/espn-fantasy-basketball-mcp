@@ -2,8 +2,9 @@
 
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, overload
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -1140,6 +1141,59 @@ class ESPNFantasyBasketballClient:
             playoff=matchup.playoff,
         )
 
+    # (helps_at, hurts_below) on the 0-100 scale, roughly league-average bands.
+    _SHOOTING_THRESHOLDS: dict[str, tuple[float, float]] = {
+        "fieldGoalPercentage": (48.0, 43.0),
+        "freeThrowPercentage": (80.0, 70.0),
+    }
+
+    @staticmethod
+    def _games_remaining_by_player(
+        schedule: RosterScheduleSummary, now: datetime, window_end: date | None = None
+    ) -> dict[int, int]:
+        """Count each player's games that have not started yet, within the matchup window.
+
+        Games already played (or in progress) are reflected in the matchup's current category
+        scores, so projecting them again would double count. Games after ``window_end`` belong
+        to a later matchup period and are excluded; the schedule summaries deliberately fetch an
+        extra week so ``gamesNextWeek`` can be reported.
+
+        A game counts as remaining when its tip-off (``datetimeISO``) is later than ``now``.
+        When only the date is known, a game dated today or later counts.
+
+        Args:
+            schedule: Roster schedule summary for one fantasy team
+            now: Timezone-aware current time
+            window_end: Last date (inclusive) of the matchup period, or None for no bound
+
+        Returns:
+            Mapping of playerId -> number of remaining games
+        """
+        today = now.date()
+        remaining: dict[int, int] = {}
+        for player_schedule in schedule.playerSchedules:
+            count = 0
+            for game in player_schedule.games:
+                try:
+                    game_day = date.fromisoformat(game.date)
+                except ValueError:
+                    continue
+                if window_end is not None and game_day > window_end:
+                    continue
+                tip_off: datetime | None = None
+                if game.datetimeISO:
+                    try:
+                        tip_off = datetime.fromisoformat(game.datetimeISO)
+                    except ValueError:
+                        tip_off = None
+                if tip_off is not None and tip_off.tzinfo is not None and now.tzinfo is not None:
+                    if tip_off > now:
+                        count += 1
+                elif game_day >= today:
+                    count += 1
+            remaining[player_schedule.playerId] = count
+        return remaining
+
     async def analyze_matchup(
         self, team_id: int, matchup_period: int | None = None
     ) -> MatchupAnalysis:
@@ -1198,10 +1252,12 @@ class ESPNFantasyBasketballClient:
         # Get actual dates for the matchup period using scoring period mapping
         # Matchup periods typically correspond to scoring periods, but we need to map correctly
         # For now, use the matchup period as the scoring period to get dates
+        matchup_end: date | None = None  # last day of the matchup period, for games-remaining
         try:
             scoring_start, scoring_end = await self._get_scoring_period_dates(target_matchup_period)
             if scoring_start and scoring_end:
                 start_date = scoring_start
+                matchup_end = date.fromisoformat(scoring_end)
                 # Extend end_date to cover the full week
                 end_date = (datetime.fromisoformat(scoring_end) + timedelta(days=1)).strftime(
                     "%Y-%m-%d"
@@ -1221,6 +1277,7 @@ class ESPNFantasyBasketballClient:
                 end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime(
                     "%Y-%m-%d"
                 )
+                matchup_end = date.fromisoformat(end_date)
         except Exception as e:
             logger.warning(f"Could not get scoring period dates, using date estimation: {e}")
             # Fallback to date estimation
@@ -1233,6 +1290,7 @@ class ESPNFantasyBasketballClient:
                 weeks_back = current_matchup_period - target_matchup_period
                 start_date = (datetime.now() - timedelta(weeks=weeks_back)).strftime("%Y-%m-%d")
             end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime("%Y-%m-%d")
+            matchup_end = date.fromisoformat(end_date)
 
         # Use the matchup period as scoring period for schedule lookup
         your_schedule = await self.get_roster_schedule_summary(
@@ -1286,15 +1344,13 @@ class ESPNFantasyBasketballClient:
         current_category_losses = 0
         current_category_ties = 0
 
-        # Calculate per-game averages and project totals
-        # Note: totalGamesThisWeek includes all games in the week, but we'll count only future games per player
-        your_games_remaining = your_schedule.totalGamesThisWeek
-        opponent_games_remaining = opponent_schedule.totalGamesThisWeek
-
-        # Import datetime for counting future games
-        from datetime import datetime
-
-        today = datetime.now().date()
+        # Games already played are reflected in the current category scores, so projections
+        # must only add games on or after today. Count them once per player for both rosters.
+        now = datetime.now(ZoneInfo(self._get_timezone()))
+        your_games_left = self._games_remaining_by_player(your_schedule, now, matchup_end)
+        opponent_games_left = self._games_remaining_by_player(opponent_schedule, now, matchup_end)
+        your_games_remaining = sum(your_games_left.values())
+        opponent_games_remaining = sum(opponent_games_left.values())
 
         for stat_id in scoring_stat_ids:
             category_name = stat_mapping.get(str(stat_id))
@@ -1383,34 +1439,10 @@ class ESPNFantasyBasketballClient:
                     opponent_projected_fgm = opponent_fgm
                     opponent_projected_fga = opponent_fga
 
-                    # Add projected contributions based on games remaining
-                    # For current week, only count games that haven't been played yet
-                    from datetime import datetime
-
-                    today = datetime.now().date()
-
+                    # Add projected contributions for games remaining (not yet tipped off)
                     for entry in matchup.yourRoster.entries:
                         player_id = entry.playerId
-                        player_schedule = next(
-                            (
-                                ps
-                                for ps in your_schedule.playerSchedules
-                                if ps.playerId == player_id
-                            ),
-                            None,
-                        )
-
-                        # Count games remaining (future games only)
-                        games_left = 0
-                        if player_schedule:
-                            for game in player_schedule.games:
-                                try:
-                                    game_date = datetime.fromisoformat(game.date).date()
-                                    if game_date >= today:
-                                        games_left += 1
-                                except (ValueError, AttributeError):
-                                    # If date parsing fails, skip this game
-                                    continue
+                        games_left = your_games_left.get(player_id, 0)
 
                         if games_left > 0 and player_id in player_projections:
                             proj = player_projections[player_id]
@@ -1447,26 +1479,7 @@ class ESPNFantasyBasketballClient:
                     # Add projected contributions for opponent
                     for entry in matchup.opponentRoster.entries:
                         player_id = entry.playerId
-                        player_schedule = next(
-                            (
-                                ps
-                                for ps in opponent_schedule.playerSchedules
-                                if ps.playerId == player_id
-                            ),
-                            None,
-                        )
-
-                        # Count games remaining (future games only)
-                        games_left = 0
-                        if player_schedule:
-                            for game in player_schedule.games:
-                                try:
-                                    game_date = datetime.fromisoformat(game.date).date()
-                                    if game_date >= today:
-                                        games_left += 1
-                                except (ValueError, AttributeError):
-                                    # If date parsing fails, skip this game
-                                    continue
+                        games_left = opponent_games_left.get(player_id, 0)
 
                         if games_left > 0 and player_id in player_projections:
                             proj = player_projections[player_id]
@@ -1568,26 +1581,7 @@ class ESPNFantasyBasketballClient:
                     # For current week, only count games that haven't been played yet
                     for entry in matchup.yourRoster.entries:
                         player_id = entry.playerId
-                        player_schedule = next(
-                            (
-                                ps
-                                for ps in your_schedule.playerSchedules
-                                if ps.playerId == player_id
-                            ),
-                            None,
-                        )
-
-                        # Count games remaining (future games only)
-                        games_left = 0
-                        if player_schedule:
-                            for game in player_schedule.games:
-                                try:
-                                    game_date = datetime.fromisoformat(game.date).date()
-                                    if game_date >= today:
-                                        games_left += 1
-                                except (ValueError, AttributeError):
-                                    # If date parsing fails, skip this game
-                                    continue
+                        games_left = your_games_left.get(player_id, 0)
 
                         if games_left > 0 and player_id in player_projections:
                             proj = player_projections[player_id]
@@ -1623,26 +1617,7 @@ class ESPNFantasyBasketballClient:
                     # Add projected contributions for opponent
                     for entry in matchup.opponentRoster.entries:
                         player_id = entry.playerId
-                        player_schedule = next(
-                            (
-                                ps
-                                for ps in opponent_schedule.playerSchedules
-                                if ps.playerId == player_id
-                            ),
-                            None,
-                        )
-
-                        # Count games remaining (future games only)
-                        games_left = 0
-                        if player_schedule:
-                            for game in player_schedule.games:
-                                try:
-                                    game_date = datetime.fromisoformat(game.date).date()
-                                    if game_date >= today:
-                                        games_left += 1
-                                except (ValueError, AttributeError):
-                                    # If date parsing fails, skip this game
-                                    continue
+                        games_left = opponent_games_left.get(player_id, 0)
 
                         if games_left > 0 and player_id in player_projections:
                             proj = player_projections[player_id]
@@ -1700,11 +1675,7 @@ class ESPNFantasyBasketballClient:
                 # Calculate projections for your team
                 for entry in matchup.yourRoster.entries:
                     player_id = entry.playerId
-                    player_schedule = next(
-                        (ps for ps in your_schedule.playerSchedules if ps.playerId == player_id),
-                        None,
-                    )
-                    games_left = player_schedule.gamesThisWeek if player_schedule else 0
+                    games_left = your_games_left.get(player_id, 0)
 
                     if games_left > 0 and player_id in player_projections:
                         proj = player_projections[player_id]
@@ -1717,15 +1688,7 @@ class ESPNFantasyBasketballClient:
                 # Calculate projections for opponent team
                 for entry in matchup.opponentRoster.entries:
                     player_id = entry.playerId
-                    player_schedule = next(
-                        (
-                            ps
-                            for ps in opponent_schedule.playerSchedules
-                            if ps.playerId == player_id
-                        ),
-                        None,
-                    )
-                    games_left = player_schedule.gamesThisWeek if player_schedule else 0
+                    games_left = opponent_games_left.get(player_id, 0)
 
                     if games_left > 0 and player_id in player_projections:
                         proj = player_projections[player_id]
@@ -1822,14 +1785,10 @@ class ESPNFantasyBasketballClient:
         # Generate player recommendations
         player_recommendations = []
 
-        # Create a map of player schedules for quick lookup
-        your_player_schedules = {ps.playerId: ps for ps in your_schedule.playerSchedules}
-
         for entry in matchup.yourRoster.entries:
             player_id = entry.playerId
             player = entry.playerPoolEntry.player
-            player_schedule = your_player_schedules.get(player_id)
-            games_remaining = player_schedule.gamesThisWeek if player_schedule else 0
+            games_remaining = your_games_left.get(player_id, 0)
 
             # Skip players with no games remaining or on IR
             if games_remaining == 0 or entry.lineupSlotId == 13:  # IR slot
@@ -1864,11 +1823,14 @@ class ESPNFantasyBasketballClient:
                         categories_hurt.append(category)
                         priority_score -= 1
                 elif category in ["fieldGoalPercentage", "freeThrowPercentage"]:
-                    # Higher percentage is better
-                    if category_value > 0.45:  # Good shooter
+                    # Higher percentage is better. PlayerStats stores percentages on a
+                    # 0-100 scale (e.g. 47.8); tolerate a 0-1 fraction just in case.
+                    pct = category_value * 100.0 if category_value <= 1.0 else category_value
+                    good, poor = self._SHOOTING_THRESHOLDS[category]
+                    if pct >= good:
                         categories_helped.append(category)
                         priority_score += 1
-                    elif category_value < 0.40:  # Poor shooter
+                    elif pct < poor:
                         categories_hurt.append(category)
                         priority_score -= 1
                 else:
@@ -2865,27 +2827,37 @@ class ESPNFantasyBasketballClient:
             13: "IR",  # Injured Reserve
         }
 
-    @staticmethod
-    def _normalize_nba_abbrev(nba_abbrev: str) -> str:
-        """Normalize NBA API abbreviation to ESPN Fantasy abbreviation.
+    # ESPN's site API (scoreboard, team schedules) and some fantasy payloads use short or
+    # non-standard codes. Everything this client emits or uses as a lookup key goes through
+    # _normalize_nba_abbrev so that today's-game lookups, schedule lookups, and the static
+    # proTeamId map all agree on one spelling.
+    _ABBREV_ALIASES: dict[str, str] = {
+        "GS": "GSW",  # Golden State Warriors
+        "NO": "NOP",  # New Orleans Pelicans
+        "NY": "NYK",  # New York Knicks
+        "SA": "SAS",  # San Antonio Spurs
+        "UTAH": "UTA",  # Utah Jazz
+        "WSH": "WAS",  # Washington Wizards
+        "PHO": "PHX",  # Phoenix Suns
+        "BRK": "BKN",  # Brooklyn Nets
+        "CHO": "CHA",  # Charlotte Hornets
+    }
 
-        The NBA API uses slightly different abbreviations than ESPN Fantasy:
-        - NBA API: "GS" -> ESPN Fantasy: "GSW"
-        - NBA API: "WSH" -> ESPN Fantasy: "WAS"
-        - NBA API: "UTAH" -> ESPN Fantasy: "UTA"
+    @classmethod
+    def _normalize_nba_abbrev(cls, nba_abbrev: str) -> str:
+        """Normalize any NBA team abbreviation variant to the canonical 3-letter code.
+
+        Canonical codes are the ones in _get_pro_team_id_to_abbrev (GSW, NOP, NYK, SAS,
+        UTA, WAS, ...). Unknown codes are returned upper-cased and unchanged.
 
         Args:
-            nba_abbrev: Abbreviation from NBA API
+            nba_abbrev: Abbreviation from any ESPN endpoint
 
         Returns:
-            Normalized abbreviation matching ESPN Fantasy format
+            Canonical abbreviation
         """
-        normalization_map = {
-            "GS": "GSW",  # Golden State Warriors
-            "WSH": "WAS",  # Washington Wizards
-            "UTAH": "UTA",  # Utah Jazz
-        }
-        return normalization_map.get(nba_abbrev, nba_abbrev)
+        code = (nba_abbrev or "").strip().upper()
+        return cls._ABBREV_ALIASES.get(code, code)
 
     def _parse_todays_games(
         self, nba_data: dict[str, Any]
@@ -2996,9 +2968,9 @@ class ESPNFantasyBasketballClient:
         """Get mapping of ESPN Fantasy proTeamId to team abbreviation.
 
         This mapping is based on ESPN Fantasy Basketball's proTeamId system.
-        It was manually validated by checking which players map to which codes and checking against the ESPN Fantasy UI.
-        Note: ESPN Fantasy uses different team IDs than the NBA API, but the
-        abbreviations are consistent (with a few exceptions like GSW vs GS).
+        The ID -> team identity was manually validated against the ESPN Fantasy UI.
+        Abbreviations are the canonical codes that _normalize_nba_abbrev produces, so
+        values here can be used directly as keys into the today's-games cache.
 
         Returns:
             Dictionary mapping ESPN Fantasy proTeamId to team abbreviation
@@ -3007,13 +2979,13 @@ class ESPNFantasyBasketballClient:
         return {
             1: "ATL",  # Atlanta Hawks
             2: "BOS",  # Boston Celtics
-            3: "NO",  # Brooklyn Nets
+            3: "NOP",  # New Orleans Pelicans
             4: "CHI",  # Chicago Bulls
             5: "CLE",  # Cleveland Cavaliers
             6: "DAL",  # Dallas Mavericks
             7: "DEN",  # Denver Nuggets
             8: "DET",  # Detroit Pistons
-            9: "GS",  # Golden State Warriors
+            9: "GSW",  # Golden State Warriors
             10: "HOU",  # Houston Rockets
             11: "IND",  # Indiana Pacers
             12: "LAC",  # LA Clippers
@@ -3022,15 +2994,15 @@ class ESPNFantasyBasketballClient:
             15: "MIL",  # Milwaukee Bucks
             16: "MIN",  # Minnesota Timberwolves
             17: "BKN",  # Brooklyn Nets
-            18: "NY",  # New York Knicks
+            18: "NYK",  # New York Knicks
             19: "ORL",  # Orlando Magic
             20: "PHI",  # Philadelphia 76ers
             21: "PHX",  # Phoenix Suns
             22: "POR",  # Portland Trail Blazers
             23: "SAC",  # Sacramento Kings
-            24: "SA",  # San Antonio Spurs
+            24: "SAS",  # San Antonio Spurs
             25: "OKC",  # Oklahoma City Thunder
-            26: "UTAH",  # Utah Jazz
+            26: "UTA",  # Utah Jazz
             27: "WAS",  # Washington Wizards
             28: "TOR",  # Toronto Raptors
             29: "MEM",  # Memphis Grizzlies
@@ -3057,14 +3029,19 @@ class ESPNFantasyBasketballClient:
             team_id_to_abbrev: Optional mapping from today's games (proTeamId -> abbrev)
 
         Returns:
-            Team abbreviation or None if proTeamId is invalid
+            Team abbreviation, "FA" for an unsigned player (proTeamId 0), or None if unknown
         """
-        # Use API value if available
+        # Use API value if available (normalized so it matches our lookup keys)
         if api_pro_team_abbrev:
-            return api_pro_team_abbrev
+            return self._normalize_nba_abbrev(api_pro_team_abbrev)
 
-        # If no proTeamId, can't resolve
-        if not pro_team_id:
+        # ESPN uses proTeamId 0 for players not on any NBA roster (shown as "FA" in its UI).
+        # Such a player cannot play, so no today's-game or schedule lookups will match "FA".
+        if pro_team_id == 0:
+            return "FA"
+
+        # If no proTeamId at all, can't resolve
+        if pro_team_id is None:
             return None
 
         # Try today's games mapping first (if provided)
@@ -3622,7 +3599,7 @@ class ESPNFantasyBasketballClient:
 
         # Parse schedule data
         games = []
-        team_abbrev = data.get("team", {}).get("abbreviation", "UNK")
+        team_abbrev = self._normalize_nba_abbrev(data.get("team", {}).get("abbreviation", "UNK"))
         player_name = f"Player {player_id}"  # We'll need to get this from elsewhere
 
         events = data.get("events", [])
@@ -3640,13 +3617,13 @@ class ESPNFantasyBasketballClient:
                 # NBA games are played in the evening in local time (ET/PT)
                 # A game at midnight UTC Dec 18 is actually Dec 17 evening in ET
                 # So we need to convert to ET and use that date
+                tip_off_iso: str | None = None
                 try:
-                    from zoneinfo import ZoneInfo
-
                     utc_dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
                     et_dt = utc_dt.astimezone(ZoneInfo(self._get_timezone()))
                     game_date_str = et_dt.strftime("%Y-%m-%d")
                     game_dt = datetime.fromisoformat(game_date_str)
+                    tip_off_iso = et_dt.isoformat()
                 except (ImportError, ValueError):
                     # Fallback: parse UTC datetime and check if we need to adjust
                     # Only subtract 1 day if the UTC time is before ~5 AM (midnight ET)
@@ -3686,13 +3663,14 @@ class ESPNFantasyBasketballClient:
                         is_home = comp.get("homeAway") == "home"
                     else:
                         # This is the opponent
-                        opponent = comp_team.get("abbreviation", "UNK")
+                        opponent = self._normalize_nba_abbrev(comp_team.get("abbreviation", "UNK"))
 
                 game = PlayerScheduleGame(
                     date=game_date_str,
                     opponent=opponent,
                     is_home=is_home,
                     game_id=event.get("id"),
+                    datetimeISO=tip_off_iso,
                 )
                 games.append(game)
 
