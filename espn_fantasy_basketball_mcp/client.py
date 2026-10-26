@@ -39,6 +39,7 @@ from .models import (
     DraftRecommendation,
     DraftSettings,
     DraftStatus,
+    InjuryReport,
     LeagueSettings,
     LeagueStatus,
     Matchup,
@@ -193,6 +194,7 @@ class ESPNFantasyBasketballClient:
     TTL_NBA_TEAM_SCHEDULE = 6 * 3600.0
     TTL_SCOREBOARD = 60.0
     TTL_PRO_PLAYERS = 6 * 3600.0  # league-independent list of all active NBA players
+    TTL_INJURIES = 900.0  # ESPN's NBA injury report
     TTL_LIVE = 15.0
 
     @classmethod
@@ -225,6 +227,8 @@ class ESPNFantasyBasketballClient:
             return cls.TTL_NBA_TEAM_SCHEDULE
         if url.endswith("/players"):
             return cls.TTL_PRO_PLAYERS
+        if url.endswith("/injuries"):
+            return cls.TTL_INJURIES
         view = (params or {}).get("view")
         views = set(view) if isinstance(view, list) else ({view} if view else set())
         if views == {"mSettings"}:
@@ -859,7 +863,7 @@ class ESPNFantasyBasketballClient:
             # "03YYYY" = last 30 days
             # Prioritize current season (2026) over previous seasons
             if stat_id == current_season_id:
-                averages = stat_set.get("averages") or {}
+                averages = stat_set.get("averageStats") or stat_set.get("averages") or {}
                 totals = stat_set.get("stats") or {}
 
                 # ESPN stat ID mapping for basketball:
@@ -978,8 +982,8 @@ class ESPNFantasyBasketballClient:
         for player_data in data.get("players", []):
             player_info = player_data["player"]
 
-            # Parse ownership data
-            ownership_data = player_data.get("ownership") or {}
+            # Parse ownership data (ESPN nests it under "player"; older fixtures had it top-level)
+            ownership_data = player_info.get("ownership") or player_data.get("ownership") or {}
             percent_owned = ownership_data.get("percentOwned", 0)
             percent_change = ownership_data.get("percentChange", 0)
 
@@ -996,11 +1000,14 @@ class ESPNFantasyBasketballClient:
                         # "00YYYY" = season actuals, "10YYYY" = projections
                         if stat_id.startswith("00"):
                             # Get averages if available, otherwise use totals
-                            averages = stat_set.get("averages") or {}
+                            averages = (
+                                stat_set.get("averageStats") or stat_set.get("averages") or {}
+                            )
                             totals = stat_set.get("stats") or {}
 
                             # Use averages preferentially (per-game stats)
                             source = averages if averages else totals
+                            basis = "per_game" if averages else "season_total"
 
                             # ESPN stat ID mapping for basketball:
                             # 0=PTS, 1=BLK, 2=STL, 3=AST, 6=REB, 13=FG%, 14=FT%, 17=3PM, 11=TO, 40=MIN
@@ -1020,6 +1027,7 @@ class ESPNFantasyBasketballClient:
                                 "turnovers": round(source.get("11", 0), 1),
                                 "minutes": round(source.get("40", 0), 1),
                                 "games_played": (stat_set.get("stats") or {}).get("42", 0),
+                                "basis": basis,  # "per_game" or "season_total" (if ESPN sent no averages)
                             }
 
                             # Also grab fantasy points average if available
@@ -1725,7 +1733,7 @@ class ESPNFantasyBasketballClient:
 
         Args:
             date: Date in YYYY-MM-DD format (optional, defaults to today).
-                  The API accepts dates in YYYYMMDD format (no dashes) via the 'date' parameter.
+                  The API accepts dates in YYYYMMDD format (no dashes) via the 'dates' parameter.
 
         Returns:
             List of NBA games, or empty list if API fails
@@ -1743,11 +1751,12 @@ class ESPNFantasyBasketballClient:
                 # Convert to YYYYMMDD format (no dashes) for API
                 date_obj = datetime.strptime(date, "%Y-%m-%d")
                 date_formatted = date_obj.strftime("%Y%m%d")
-                # Use 'date' parameter (not 'dates') with YYYYMMDD format
-                params["date"] = date_formatted
+                # ESPN's site API reads `dates` (plural); it silently ignores `date` and
+                # returns today's games, which is how this bug was first noticed.
+                params["dates"] = date_formatted
             elif re.match(r"^\d{8}$", date):
                 # Already in YYYYMMDD format
-                params["date"] = date
+                params["dates"] = date
             else:
                 raise ValueError(f"Invalid date format: {date}. Must be YYYY-MM-DD or YYYYMMDD.")
         else:
@@ -2118,6 +2127,103 @@ class ESPNFantasyBasketballClient:
             "recommendation": f"You have ${team_summary.remainingBudget} for {slots_left} more players",
         }
 
+    # ------------------------------------------------------------------ injuries
+    async def get_injury_report(self, team_id: int | None = None) -> list[InjuryReport]:
+        """ESPN's NBA injury report, with comments and estimated return dates.
+
+        Uses ESPN's site API (/sports/basketball/nba/injuries), which carries the detail the
+        fantasy API lacks: a short and long comment and, when ESPN has one, a return date. When
+        team_id is given, entries are joined to that fantasy roster (by athlete ID, falling back
+        to normalized name) and only rostered players are returned, with their lineup slot.
+
+        Args:
+            team_id: Fantasy team whose players to report on (None for the whole league report)
+
+        Returns:
+            Injury entries, roster players first when a team is given
+        """
+        data = await self._make_request(f"{self.NBA_BASE_URL}/injuries")
+        entries = self._parse_injury_report(data)
+
+        if team_id is None:
+            return entries
+
+        roster = await self.get_team_roster(team_id)
+        by_id: dict[int, RosterEntry] = {}
+        by_name: dict[str, RosterEntry] = {}
+        for entry in roster.entries:
+            by_id[entry.playerId] = entry
+            by_name[normalize_name(entry.playerPoolEntry.player.fullName)] = entry
+
+        matched: list[InjuryReport] = []
+        for report in entries:
+            roster_entry = None
+            if report.playerId is not None:
+                roster_entry = by_id.get(report.playerId)
+            if roster_entry is None:
+                roster_entry = by_name.get(normalize_name(report.playerName))
+            if roster_entry is None:
+                continue
+            report.onRoster = True
+            report.playerId = roster_entry.playerId
+            report.lineupSlot = roster_entry.lineupSlotName or LINEUP_SLOT_NAMES.get(
+                roster_entry.lineupSlotId, f"SLOT_{roster_entry.lineupSlotId}"
+            )
+            matched.append(report)
+        return matched
+
+    def _parse_injury_report(self, data: Any) -> list[InjuryReport]:
+        """Flatten ESPN's team-grouped injury feed into InjuryReport entries."""
+        teams = (data or {}).get("injuries") if isinstance(data, dict) else data
+        results: list[InjuryReport] = []
+        for team_block in teams or []:
+            if not isinstance(team_block, dict):
+                continue
+            team_abbrev = (
+                normalize_nba_abbrev(
+                    str(team_block.get("abbreviation") or team_block.get("shortDisplayName") or "")
+                )
+                or None
+            )
+            for item in team_block.get("injuries") or []:
+                if not isinstance(item, dict):
+                    continue
+                athlete = item.get("athlete") or {}
+                details = item.get("details") or {}
+                fantasy = details.get("fantasyStatus") or {}
+                raw_id = athlete.get("id")
+                try:
+                    player_id: int | None = int(raw_id) if raw_id is not None else None
+                except (TypeError, ValueError):
+                    player_id = None
+                injury_bits = [
+                    details.get("side"),
+                    details.get("location") or details.get("type"),
+                    details.get("detail"),
+                ]
+                injury = " ".join(str(b) for b in injury_bits if b) or None
+                reported = item.get("date")
+                results.append(
+                    InjuryReport(
+                        playerId=player_id,
+                        playerName=athlete.get("displayName")
+                        or athlete.get("fullName")
+                        or "Unknown",
+                        nbaTeam=team_abbrev,
+                        position=(athlete.get("position") or {}).get("abbreviation"),
+                        status=item.get("status"),
+                        fantasyStatus=fantasy.get("abbreviation") or fantasy.get("description"),
+                        injury=injury,
+                        comment=item.get("shortComment"),
+                        longComment=item.get("longComment"),
+                        returnDate=details.get("returnDate"),
+                        reportedAt=self._convert_utc_to_timezone_iso(reported)
+                        if reported
+                        else None,
+                    )
+                )
+        return results
+
     # ------------------------------------------------------------------ player search
 
     async def get_pro_players(self) -> list[dict[str, Any]]:
@@ -2203,7 +2309,9 @@ class ESPNFantasyBasketballClient:
             r.isFreeAgent = on_team in (0, None)
             r.fantasyTeamId = on_team if on_team else None
             r.fantasyTeamName = team_names.get(on_team) if on_team else None
-            r.percentOwned = (entry.get("ownership") or {}).get("percentOwned")
+            r.percentOwned = (
+                (entry.get("player") or {}).get("ownership") or entry.get("ownership") or {}
+            ).get("percentOwned")
             r.injuryStatus = (entry.get("player") or {}).get("injuryStatus") or r.injuryStatus
 
     @overload
@@ -2350,7 +2458,7 @@ class ESPNFantasyBasketballClient:
             stat_id = str(stat_set.get("id", ""))
 
             if stat_id.startswith(target_prefix):
-                averages = stat_set.get("averages") or {}
+                averages = stat_set.get("averageStats") or stat_set.get("averages") or {}
                 totals = stat_set.get("stats") or {}
                 games_played = totals.get("42", 0)
 
@@ -2872,7 +2980,7 @@ class ESPNFantasyBasketballClient:
 
         for player_entry in data.get("players", []):
             player_info = player_entry["player"]
-            ownership = player_entry.get("ownership", {})
+            ownership = player_info.get("ownership") or player_entry.get("ownership") or {}
 
             # Calculate trending metrics
             add_percentage = ownership.get("percentChange", 0)

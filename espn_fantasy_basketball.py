@@ -792,6 +792,46 @@ async def search_players(
     return [r.model_dump() for r in results]
 
 
+@mcp.tool()
+async def get_injury_report(
+    team_id: int | None = None,
+    roster_only: bool = True,
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+) -> list[dict]:
+    """Get ESPN's NBA injury report: status, comments, and estimated return dates.
+
+    This is the detail the roster tools lack (they only carry status codes like OUT or
+    DAY_TO_DAY). Use it to decide who to move to IR or drop, and when a player is expected back.
+
+    Args:
+        team_id: Your fantasy team ID (optional, uses ESPN_TEAM_ID env var)
+        roster_only: If True (default) return only players on that fantasy team, with their lineup
+            slot. If False, return the whole NBA injury report.
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        List of injury entries with playerId, playerName, nbaTeam, status, fantasyStatus, injury,
+        comment, longComment, returnDate (when ESPN gives one), reportedAt, and for roster players
+        onRoster and lineupSlot.
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    team_id = _get_team_id(team_id)
+    if roster_only and team_id is None:
+        raise ValueError(
+            "team_id is required for roster_only=True. Provide it, set ESPN_TEAM_ID, "
+            "or pass roster_only=False for the league-wide report."
+        )
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    report = await client.get_injury_report(team_id if roster_only else None)
+    return [r.model_dump() for r in report]
+
+
 if __name__ == "__main__":
     # Run the server
     mcp.run(transport="stdio")
