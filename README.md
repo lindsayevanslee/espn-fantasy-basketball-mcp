@@ -35,13 +35,14 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 13. **compare_players** - Compare players across categories
 14. **analyze_trade_proposal** - Value and category impact of a proposed trade
 15. **get_trending_players** - Players trending up or down in ownership
+16. **get_injury_report** - ESPN's NBA injury report (status, comments, estimated return dates) for your roster or the whole league
 
 #### Live Draft Assistant Tools
-16. **get_draft_status** - Get current draft status including all picks and progress
-17. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
-18. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
-19. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
-20. **get_available_players** - Get top available players for the draft with auction values
+17. **get_draft_status** - Get current draft status including all picks and progress
+18. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
+19. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
+20. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
+21. **get_available_players** - Get top available players for the draft with auction values
 
 Tools that take a `player_id` expect ESPN's numeric ID; use `search_players` to find it from a name. Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_YEAR`, `ESPN_S2`, and `ESPN_SWID` from the environment, so you rarely need to pass them. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
 
@@ -133,6 +134,7 @@ calls. Each endpoint has its own lifetime, chosen by how fast the data changes:
 |---|---|
 | NBA team season schedule | 6 hours |
 | All active NBA players (for name search) | 6 hours |
+| NBA injury report | 15 minutes |
 | League settings | 10 minutes |
 | League team list | 5 minutes |
 | Today's NBA scoreboard | 60 seconds |
@@ -441,6 +443,7 @@ This MCP server uses the following ESPN API endpoints:
 - **Base URL**: `https://site.api.espn.com/apis/site/v2/sports/basketball/nba`
 - **Today's games**: `/scoreboard`
 - **Team season schedule**: `/teams/{team_id}/schedule`
+- **Injury report**: `/injuries`
 
 ## API Limitations & Alternatives Needed
 
@@ -457,8 +460,7 @@ This MCP server uses the following ESPN API endpoints:
 
 The server covers everything ESPN exposes for a league: settings, rosters, free agents, matchups
 and box scores, player stats and projections, draft state, and NBA schedules. It does not have
-player news or injury details beyond ESPN's status codes, advanced metrics, play-by-play, or
-daily-fantasy data. Ask Claude for those from its own knowledge or another source, and it should
+player news beyond ESPN's injury report, advanced metrics, play-by-play, or daily-fantasy data. Ask Claude for those from its own knowledge or another source, and it should
 say which is which.
 
 ### ESPN ID Reference

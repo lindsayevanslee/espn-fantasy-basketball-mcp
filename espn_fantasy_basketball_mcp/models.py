@@ -198,6 +198,24 @@ class PlayerSearchResult(BaseModel):
     percentOwned: float | None = None
 
 
+class InjuryReport(BaseModel):
+    """One entry from ESPN's NBA injury report, joined to a fantasy roster when possible."""
+
+    playerId: int | None = None  # ESPN athlete ID (same ID space as fantasy playerId)
+    playerName: str
+    nbaTeam: str | None = None  # Canonical abbreviation
+    position: str | None = None
+    status: str | None = None  # e.g. "Out", "Day-To-Day", "Questionable"
+    fantasyStatus: str | None = None  # ESPN's fantasy code, e.g. "O", "DTD", "GTD"
+    injury: str | None = None  # e.g. "Knee" / "Left knee soreness"
+    comment: str | None = None  # Short note
+    longComment: str | None = None  # Full note, often with the expected timeline
+    returnDate: str | None = None  # ESPN's estimated return date (YYYY-MM-DD) when given
+    reportedAt: str | None = None  # ISO 8601 in MY_TIMEZONE
+    onRoster: bool | None = None  # True if on the requested fantasy team
+    lineupSlot: str | None = None  # Slot on that team, e.g. "SF", "BENCH", "IR"
+
+
 class PlayerOwnership(BaseModel):
     percentOwned: float | None = None
     percentChange: float | None = None

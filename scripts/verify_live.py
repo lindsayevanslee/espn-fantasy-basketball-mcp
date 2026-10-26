@@ -361,6 +361,17 @@ async def main() -> int:
             "Every team on today's scoreboard maps to a code in the static proTeamId map",
             f"unmapped: {unmapped}" if unmapped else "",
         )
+        # The `dates` parameter: asking for another day must not return today's slate
+        other_day = (
+            datetime.now(ZoneInfo(client._get_timezone())).date() - timedelta(days=1)
+        ).isoformat()
+        other = await client.get_nba_schedule(other_day)
+        other_dates = sorted({g.date[:10] for g in other})
+        report.check(
+            all(d == other_day for d in other_dates) and bool(other),
+            f"get_nba_schedule({other_day}) returns games on that date, not today's",
+            f"got {len(other)} games dated {other_dates}",
+        )
         playing = {pid: code for pid, code in TRICKY_TEAMS.items() if code in games}
         if playing:
             for pid, code in playing.items():
@@ -530,6 +541,77 @@ async def main() -> int:
             report.check(len(pool) > 300, "Active player list is populated", f"{len(pool)} players")
     except Exception as exc:  # noqa: BLE001
         report.error("search_players", exc)
+        traceback.print_exc()
+
+    # ------------------------------------------------------------------ 5b. free agents
+    section("5b. get_free_agents -> ownership % and per-game averages")
+    try:
+        fas = await client.get_free_agents(size=5, verbose=True)
+        owned = [fa.ownership.percentOwned for fa in fas if fa.ownership]
+        report.info(
+            f"top free agents by ownership: {[(fa.fullName, o) for fa, o in zip(fas, owned, strict=False)]}"
+        )
+        report.check(
+            any(o and o > 0 for o in owned),
+            "Free agents carry a nonzero percentOwned",
+            "all zero: ownership field not where the parser expects it" if owned else "no players",
+        )
+        bases = {(fa.stats or {}).get("basis") for fa in fas}
+        report.check(
+            bases <= {"per_game"},
+            "Free-agent stats are per-game averages (ESPN averageStats present)",
+            f"bases seen: {bases}",
+        )
+        for fa in fas[:3]:
+            st = fa.stats or {}
+            report.info(
+                f"{fa.fullName}: {st.get('games_played')} GP, {st.get('points')} PTS, "
+                f"{st.get('rebounds')} REB, {st.get('assists')} AST ({st.get('basis')})"
+            )
+    except Exception as exc:  # noqa: BLE001
+        report.error("get_free_agents", exc)
+        traceback.print_exc()
+
+    # ------------------------------------------------------------------ 6. injuries
+    section("6. get_injury_report -> ESPN injury feed joined to your roster")
+    try:
+        roster = await client.get_team_roster(team_id)
+        out_players = {
+            e.playerPoolEntry.player.fullName
+            for e in roster.entries
+            if (e.injuryStatus or "").upper() in ("OUT", "DAY_TO_DAY", "DOUBTFUL", "QUESTIONABLE")
+        }
+        league_wide = await client.get_injury_report()
+        report.check(
+            len(league_wide) > 20,
+            "League-wide injury feed is populated",
+            f"{len(league_wide)} entries",
+        )
+        with_ids = sum(1 for e in league_wide if e.playerId is not None)
+        report.info(f"{with_ids} of {len(league_wide)} entries carry an athlete id")
+        mine = await client.get_injury_report(team_id)
+        for e in mine:
+            report.info(
+                f"{e.playerName} ({e.lineupSlot}): {e.status} / {e.fantasyStatus}; {e.injury}; "
+                f"return {e.returnDate or '?'}; {e.comment}"
+            )
+        joined_by_id = [e for e in mine if e.playerId in {r.playerId for r in roster.entries}]
+        report.check(
+            bool(mine),
+            "Injury report lists at least one of your injured players",
+            f"roster flags {sorted(out_players)}; report matched {[e.playerName for e in mine]}",
+        )
+        if mine:
+            report.check(
+                bool(joined_by_id),
+                "Athlete ids in the injury feed match fantasy player ids",
+                "matches were by name only" if not joined_by_id else "",
+            )
+        missing = out_players - {e.playerName for e in mine}
+        if missing:
+            report.info(f"flagged on roster but absent from ESPN's injury feed: {sorted(missing)}")
+    except Exception as exc:  # noqa: BLE001
+        report.error("get_injury_report", exc)
         traceback.print_exc()
 
     report.summary()

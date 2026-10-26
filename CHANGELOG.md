@@ -2,7 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+- New tool `get_injury_report`: ESPN's NBA injury report (status, fantasy status code, injury,
+  short and long comments, estimated return date) from the site API, joined to your fantasy
+  roster by athlete ID with a name fallback, so "who should I move to IR" has data behind it.
+  Cached 15 minutes.
+
 ### Fixed
+- `get_nba_schedule` ignored its `date` argument and always returned today's games: ESPN's site
+  API reads `dates=YYYYMMDD`, not `date=`. The verify script now asks for yesterday's slate and
+  checks the games come back on that date.
+- Ownership was 0.0% for every player in `get_free_agents`, `get_trending_players`, and
+  `search_players`: ESPN nests `ownership` under the player object, not at the entry level.
+- Free-agent and player stats used season totals when per-game averages were asked for: ESPN's
+  key is `averageStats`, not `averages`. `get_free_agents(verbose=True)` stats now carry a
+  `basis` field (`per_game` or `season_total`) so callers know which they got.
 - `analyze_matchup` (and `get_matchups`) crashed with `'NoneType' object has no attribute 'get'`
   for a matchup period that had not started: ESPN sends explicit nulls (`cumulativeScore: null`,
   sometimes a null side) rather than omitting keys. Every nested lookup now treats null as empty.
