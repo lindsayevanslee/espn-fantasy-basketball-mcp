@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+- `get_nba_schedule(date=...)` always returned today's games: ESPN's scoreboard reads the
+  `dates` query parameter and silently ignores `date`. (Ported from the unmerged PR #14.)
+- Per-game stats were read from a key ESPN does not send (`averages`); the real key is
+  `averageStats`, confirmed in recorded payloads. The code had been recomputing per-game numbers
+  from season totals and games played, which failed whenever ESPN omitted stat 42 and was the
+  root cause of the "gamesPlayed 0 with 76 FTA" report. Both keys are now read, ESPN's first.
+  (Ported from PR #14.)
+
 ### Added
 - `get_transactions` tool (ESPN `mTransactions2` view): recent adds, drops, waiver claims and
   trades, newest first, with player and team names and a one-line summary, filterable by team

@@ -1178,7 +1178,7 @@ class ESPNFantasyBasketballClient:
         stat's total by its average recovers the number of games.
         """
         totals = stat_set.get("stats") or {}
-        averages = stat_set.get("averages") or {}
+        averages = stat_set.get("averageStats") or stat_set.get("averages") or {}
         gp = totals.get("42")
         if isinstance(gp, (int, float)) and gp > 0:
             return int(round(gp))
@@ -1353,7 +1353,9 @@ class ESPNFantasyBasketballClient:
 
         stats_data = {}
 
-        # Look for current season stats first (00YYYY format)
+        # Look for current season stats first (00YYYY format). Per-game numbers are under
+        # `averageStats` (recorded live; an earlier guess of `averages` is kept as a fallback),
+        # totals under `stats`.
         current_season_id = f"00{self.year}"
 
         for stat_set in stats_list:
@@ -1366,7 +1368,7 @@ class ESPNFantasyBasketballClient:
             # "03YYYY" = last 30 days
             # Prioritize current season (2026) over previous seasons
             if stat_id == current_season_id:
-                averages = stat_set.get("averages") or {}
+                averages = stat_set.get("averageStats") or stat_set.get("averages") or {}
                 totals = stat_set.get("stats") or {}
 
                 # ESPN stat ID mapping for basketball:
@@ -1505,7 +1507,9 @@ class ESPNFantasyBasketballClient:
                         # "00YYYY" = season actuals, "10YYYY" = projections
                         if stat_id.startswith("00"):
                             # Get averages if available, otherwise use totals
-                            averages = stat_set.get("averages") or {}
+                            averages = (
+                                stat_set.get("averageStats") or stat_set.get("averages") or {}
+                            )
                             totals = stat_set.get("stats") or {}
 
                             # Use averages preferentially (per-game stats)
@@ -2275,7 +2279,8 @@ class ESPNFantasyBasketballClient:
 
         Args:
             date: Date in YYYY-MM-DD format (optional, defaults to today).
-                  The API accepts dates in YYYYMMDD format (no dashes) via the 'date' parameter.
+                  ESPN's site API reads the 'dates' parameter in YYYYMMDD format (no dashes);
+                  'date' (singular) is silently ignored and returns today.
 
         Returns:
             List of NBA games, or empty list if API fails
@@ -2293,11 +2298,11 @@ class ESPNFantasyBasketballClient:
                 # Convert to YYYYMMDD format (no dashes) for API
                 date_obj = datetime.strptime(date, "%Y-%m-%d")
                 date_formatted = date_obj.strftime("%Y%m%d")
-                # Use 'date' parameter (not 'dates') with YYYYMMDD format
-                params["date"] = date_formatted
+                # ESPN reads `dates` (plural); `date` is ignored and today comes back
+                params["dates"] = date_formatted
             elif re.match(r"^\d{8}$", date):
                 # Already in YYYYMMDD format
-                params["date"] = date
+                params["dates"] = date
             else:
                 raise ValueError(f"Invalid date format: {date}. Must be YYYY-MM-DD or YYYYMMDD.")
         else:
@@ -2912,7 +2917,7 @@ class ESPNFantasyBasketballClient:
             stat_id = str(stat_set.get("id", ""))
 
             if stat_id.startswith(target_prefix):
-                averages = stat_set.get("averages") or {}
+                averages = stat_set.get("averageStats") or stat_set.get("averages") or {}
                 totals = stat_set.get("stats") or {}
                 games_played = self._games_played(stat_set)
 
