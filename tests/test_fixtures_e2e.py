@@ -90,10 +90,27 @@ async def test_unstarted_matchup_returns_projections(client):
 
 
 @pytest.mark.asyncio
-async def test_explicit_period_3_also_works(client):
+async def test_explicit_period_3_also_works(client, espn):
+    """Period 3 carries ESPN's live not-started shape: cumulativeScore with scoreByStat: null."""
+    raw = next(m for m in espn.load("league_mMatchup.json")["schedule"] if m["id"] == 5)
+    assert raw["home"]["cumulativeScore"] == {
+        "wins": 0,
+        "losses": 0,
+        "ties": 0,
+        "statBySlot": None,
+        "scoreByStat": None,
+    }
     analysis = await client.analyze_matchup(MY_TEAM, matchup_period=3)
     assert analysis.matchupId == 5
     assert any(c.yourProjected for c in analysis.categoryProjections)
+
+
+@pytest.mark.asyncio
+async def test_fully_null_cumulative_score_also_works(client):
+    """Period 14 carries the other variant, cumulativeScore: null."""
+    analysis = await client.analyze_matchup(MY_TEAM, matchup_period=14)
+    assert analysis.matchupId == 27 and analysis.opponentTeamId == 5
+    assert all(c.yourCurrent == 0 for c in analysis.categoryProjections)
 
 
 @pytest.mark.asyncio

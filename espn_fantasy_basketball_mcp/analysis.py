@@ -217,12 +217,12 @@ async def analyze_matchup(
             your_cumulative_score = matchup.yourTeam.cumulativeScore or {}
             opponent_cumulative_score = matchup.opponentTeam.cumulativeScore or {}
             your_score_by_stat = (
-                your_cumulative_score.get("scoreByStat", {})
+                your_cumulative_score.get("scoreByStat") or {}
                 if isinstance(your_cumulative_score, dict)
                 else {}
             )
             opponent_score_by_stat = (
-                opponent_cumulative_score.get("scoreByStat", {})
+                opponent_cumulative_score.get("scoreByStat") or {}
                 if isinstance(opponent_cumulative_score, dict)
                 else {}
             )
@@ -236,16 +236,16 @@ async def analyze_matchup(
 
                 # If componentStats doesn't have valid counts, try reading from raw API response
                 if your_fgm_raw < 1.0 or your_fga_raw < 1.0:
-                    your_fgm_stat = your_score_by_stat.get("13", {})
-                    your_fga_stat = your_score_by_stat.get("14", {})
+                    your_fgm_stat = your_score_by_stat.get("13") or {}
+                    your_fga_stat = your_score_by_stat.get("14") or {}
                     if isinstance(your_fgm_stat, dict) and "score" in your_fgm_stat:
                         your_fgm_raw = your_fgm_stat["score"]
                     if isinstance(your_fga_stat, dict) and "score" in your_fga_stat:
                         your_fga_raw = your_fga_stat["score"]
 
                 if opponent_fgm_raw < 1.0 or opponent_fga_raw < 1.0:
-                    opponent_fgm_stat = opponent_score_by_stat.get("13", {})
-                    opponent_fga_stat = opponent_score_by_stat.get("14", {})
+                    opponent_fgm_stat = opponent_score_by_stat.get("13") or {}
+                    opponent_fga_stat = opponent_score_by_stat.get("14") or {}
                     if isinstance(opponent_fgm_stat, dict) and "score" in opponent_fgm_stat:
                         opponent_fgm_raw = opponent_fgm_stat["score"]
                     if isinstance(opponent_fga_stat, dict) and "score" in opponent_fga_stat:
@@ -371,16 +371,16 @@ async def analyze_matchup(
 
                 # If componentStats doesn't have valid counts, try reading from raw API response
                 if your_ftm_raw < 1.0 or your_fta_raw < 1.0:
-                    your_ftm_stat = your_score_by_stat.get("15", {})
-                    your_fta_stat = your_score_by_stat.get("16", {})
+                    your_ftm_stat = your_score_by_stat.get("15") or {}
+                    your_fta_stat = your_score_by_stat.get("16") or {}
                     if isinstance(your_ftm_stat, dict) and "score" in your_ftm_stat:
                         your_ftm_raw = your_ftm_stat["score"]
                     if isinstance(your_fta_stat, dict) and "score" in your_fta_stat:
                         your_fta_raw = your_fta_stat["score"]
 
                 if opponent_ftm_raw < 1.0 or opponent_fta_raw < 1.0:
-                    opponent_ftm_stat = opponent_score_by_stat.get("15", {})
-                    opponent_fta_stat = opponent_score_by_stat.get("16", {})
+                    opponent_ftm_stat = opponent_score_by_stat.get("15") or {}
+                    opponent_fta_stat = opponent_score_by_stat.get("16") or {}
                     if isinstance(opponent_ftm_stat, dict) and "score" in opponent_ftm_stat:
                         opponent_ftm_raw = opponent_ftm_stat["score"]
                     if isinstance(opponent_fta_stat, dict) and "score" in opponent_fta_stat:

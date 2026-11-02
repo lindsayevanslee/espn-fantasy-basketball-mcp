@@ -380,14 +380,21 @@ roster_response = {
 
 
 # ----------------------------------------------------------------------------- matchups
-def side(team_id: int, totals: dict[str, float] | None, wins=0, losses=0, ties=0) -> dict:
+def side(
+    team_id: int, totals: dict[str, float] | None, wins=0, losses=0, ties=0, null_score=False
+) -> dict:
     if totals is None:
+        # Observed live for a matchup that has not started: cumulativeScore is an object whose
+        # scoreByStat is null (not a null cumulativeScore). null_score=True gives the other
+        # variant some leagues send.
         return {
             "teamId": team_id,
             "totalPoints": 0.0,
             "totalProjectedPoints": 0.0,
             "gamesPlayed": 0,
-            "cumulativeScore": None,
+            "cumulativeScore": None
+            if null_score
+            else {"wins": 0, "losses": 0, "ties": 0, "statBySlot": None, "scoreByStat": None},
             "pointsByScoringPeriod": None,
             "rosterForCurrentScoringPeriod": None,
         }
@@ -490,8 +497,8 @@ schedule = [
         "matchupPeriodId": 14,
         "playoffTierType": "NONE",
         "winner": "UNDECIDED",
-        "home": side(8, None),
-        "away": side(5, None),
+        "home": side(8, None, null_score=True),
+        "away": side(5, None, null_score=True),
     },
 ]
 matchup_response = {

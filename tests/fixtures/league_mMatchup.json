@@ -773,7 +773,13 @@
     "totalPoints": 0.0,
     "totalProjectedPoints": 0.0,
     "gamesPlayed": 0,
-    "cumulativeScore": null,
+    "cumulativeScore": {
+     "wins": 0,
+     "losses": 0,
+     "ties": 0,
+     "statBySlot": null,
+     "scoreByStat": null
+    },
     "pointsByScoringPeriod": null,
     "rosterForCurrentScoringPeriod": null
    },
@@ -782,7 +788,13 @@
     "totalPoints": 0.0,
     "totalProjectedPoints": 0.0,
     "gamesPlayed": 0,
-    "cumulativeScore": null,
+    "cumulativeScore": {
+     "wins": 0,
+     "losses": 0,
+     "ties": 0,
+     "statBySlot": null,
+     "scoreByStat": null
+    },
     "pointsByScoringPeriod": null,
     "rosterForCurrentScoringPeriod": null
    }
@@ -797,7 +809,13 @@
     "totalPoints": 0.0,
     "totalProjectedPoints": 0.0,
     "gamesPlayed": 0,
-    "cumulativeScore": null,
+    "cumulativeScore": {
+     "wins": 0,
+     "losses": 0,
+     "ties": 0,
+     "statBySlot": null,
+     "scoreByStat": null
+    },
     "pointsByScoringPeriod": null,
     "rosterForCurrentScoringPeriod": null
    },
@@ -806,7 +824,13 @@
     "totalPoints": 0.0,
     "totalProjectedPoints": 0.0,
     "gamesPlayed": 0,
-    "cumulativeScore": null,
+    "cumulativeScore": {
+     "wins": 0,
+     "losses": 0,
+     "ties": 0,
+     "statBySlot": null,
+     "scoreByStat": null
+    },
     "pointsByScoringPeriod": null,
     "rosterForCurrentScoringPeriod": null
    }

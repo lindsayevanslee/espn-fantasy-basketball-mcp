@@ -31,6 +31,11 @@
   `scoring_period + 1` for the next day's lineup when it cannot.
 
 ### Fixed
+- `analyze_matchup` still crashed for a matchup that has not started. Live data shows ESPN
+  sends `cumulativeScore: {wins: 0, losses: 0, ties: 0, scoreByStat: null}`, a non-null object
+  with a null inside, which the earlier null-safety pass (and its fixture) did not cover. The
+  percentage-category lookups now treat a null `scoreByStat` (and null entries in it) as empty,
+  and the fixture carries the live shape.
 - Free agents all showed `percentOwned: 0.0`. ESPN nests ownership under
   `players[].player.ownership`; the code read `players[].ownership`, which does not exist.
   Affects `get_free_agents`, `get_trending_players` and `search_players`.

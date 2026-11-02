@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import re
 import sys
@@ -103,6 +104,7 @@ class Recorder:
         self.redact_names = redact_names
         self.written: dict[str, Any] = {}
         self.unmapped: list[str] = []
+        self.failures: list[str] = []
 
     def capture(self, url: str, params: Any, headers: Any, data: Any) -> None:
         name = fixture_name(url, params, headers)
@@ -137,20 +139,32 @@ async def record(client: ESPNFantasyBasketballClient, team_id: int, recorder: Re
     settings = await client.get_league_settings()
     current = settings.status.currentMatchupPeriod
     print(f"league '{settings.leagueName}', matchup period {current}")
-    await client.get_league_teams()
-    await client.get_matchups(matchup_period=current)
-    roster = await client.get_team_roster(team_id)
-    print(f"roster: {len(roster.entries)} players")
-    await client.get_free_agents(size=50, verbose=True)
-    current_matchup = await client.get_my_current_matchup(team_id, verbose=True)
-    if current_matchup is not None:
-        await client.analyze_matchup(team_id, current)
+
+    async def step(name: str, coro: Any) -> Any:
+        """Run one tool call; a failure is reported and recorded, never fatal."""
         try:
-            await client.analyze_matchup(team_id, current + 1)
-        except ValueError as exc:
-            print(f"no matchup for period {current + 1}: {exc}")
-    await client.get_roster_schedule_summary(team_id, matchup_period=current)
-    await client.search_players(roster.entries[0].playerPoolEntry.player.lastName or "a", 3)
+            result = await coro
+            print(f"  ok   {name}")
+            return result
+        except Exception as exc:  # noqa: BLE001
+            print(f"  FAIL {name}: {type(exc).__name__}: {exc}")
+            recorder.failures.append(f"{name}: {type(exc).__name__}: {exc}")
+            return None
+
+    await step("get_league_teams", client.get_league_teams())
+    await step("get_matchups(current)", client.get_matchups(matchup_period=current))
+    roster = await step("get_team_roster", client.get_team_roster(team_id))
+    await step("get_free_agents(verbose)", client.get_free_agents(size=50, verbose=True))
+    await step("get_my_current_matchup", client.get_my_current_matchup(team_id, verbose=True))
+    await step("analyze_matchup(current)", client.analyze_matchup(team_id, current))
+    await step("analyze_matchup(next)", client.analyze_matchup(team_id, current + 1))
+    await step(
+        "get_roster_schedule_summary",
+        client.get_roster_schedule_summary(team_id, matchup_period=current),
+    )
+    if roster is not None and roster.entries:
+        surname = roster.entries[0].playerPoolEntry.player.lastName or "a"
+        await step("search_players", client.search_players(surname, 3))
 
 
 async def main() -> int:
@@ -175,8 +189,15 @@ async def main() -> int:
         int(league_id), year, os.getenv("ESPN_S2"), os.getenv("ESPN_SWID")
     )
     recorder = Recorder(args.out, args.redact_names)
-    await record(client, int(team_id), recorder)
-    recorder.flush()
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per request is noise
+    try:
+        await record(client, int(team_id), recorder)
+    finally:
+        recorder.flush()  # keep whatever was captured even if a step blew up
+    if recorder.failures:
+        print("steps that failed (responses captured before the failure were still written):")
+        for item in recorder.failures:
+            print(f"  {item}")
     print(f"wrote {len(recorder.written)} fixtures to {args.out}")
     for name in sorted(recorder.written):
         print(f"  {name}")
@@ -185,7 +206,7 @@ async def main() -> int:
         for item in recorder.unmapped:
             print(f"  {item}")
     print("run `uv run pytest tests/test_fixture_hygiene.py` to confirm nothing leaked")
-    return 0
+    return 1 if recorder.failures else 0
 
 
 if __name__ == "__main__":
