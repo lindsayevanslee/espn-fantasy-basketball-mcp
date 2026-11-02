@@ -540,10 +540,13 @@ class AcquisitionSettings(BaseModel):
     acquisitionType: str  # "WAIVERS_TRADITIONAL", "FREE_AGENT", etc.
     waiverHours: int
     waiverProcessDays: list[str]  # Days waivers process (e.g., ["SUNDAY"])
-    waiverProcessHour: int  # Hour (0-23) waivers process, in ESPN's Eastern time
-    waiverProcessHourTimezone: str = "America/New_York"  # ESPN's canonical timezone
+    # Hour (0-23) waivers process, in UTC: a league with waiverProcessHour 8 had every player's
+    # waiverProcessDate at 08:00Z (recorded live). Per-player waiverProcessDateISO on free
+    # agents is the authoritative time.
+    waiverProcessHour: int
+    waiverProcessHourTimezone: str = "UTC"
     waiverProcessTimeLocal: str | None = (
-        None  # Same time in MY_TIMEZONE, e.g. "07:00 America/Chicago"
+        None  # Same time in MY_TIMEZONE, e.g. "02:00 America/Chicago"
     )
     matchupAcquisitionLimit: float  # Max acquisitions per matchup (or per day, see below)
     matchupLimitPerScoringPeriod: bool  # True: the limit above applies per day, not per matchup

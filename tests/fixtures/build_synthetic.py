@@ -90,7 +90,7 @@ settings = {
             "acquisitionType": "WAIVERS_TRADITIONAL",
             "waiverHours": 24,
             "waiverProcessDays": ["SUNDAY"],
-            "waiverProcessHour": 3,
+            "waiverProcessHour": 8,  # UTC: live process dates were all 08:00Z (03:00 ET)
             "matchupAcquisitionLimit": 1.0,
             "matchupLimitPerScoringPeriod": True,  # 1 per day: 6 in the opening week, 7 after
             "acquisitionLimit": -1,
@@ -547,8 +547,8 @@ OWNERSHIP = {
 
 
 WAIVER_PROCESS = int(
-    datetime.fromisoformat("2026-11-03T08:00:00").replace(tzinfo=ET).timestamp() * 1000
-)
+    datetime.fromisoformat("2026-11-03T03:00:00").replace(tzinfo=ET).timestamp() * 1000
+)  # 08:00Z, as recorded live
 ON_WAIVERS = {7003: WAIVER_PROCESS}  # dropped by team 5 on Nov 1
 
 
@@ -677,6 +677,29 @@ transactions_response = {
                 },
             ],
         },
+        # a drop made from the roster page: ESPN logs it as ROSTER with a DROP item
+        {
+            "id": "t-98",
+            "type": "ROSTER",
+            "status": "EXECUTED",
+            "executionType": "EXECUTE",
+            "teamId": 12,
+            "memberId": "REDACTED-ID",
+            "scoringPeriodId": 13,
+            "proposedDate": ms("2026-11-01", 8, 30),
+            "isPending": False,
+            "items": [
+                {
+                    "playerId": 3001,
+                    "type": "DROP",
+                    "fromTeamId": 12,
+                    "toTeamId": 0,
+                    "fromLineupSlotId": 4,
+                    "toLineupSlotId": -1,
+                },
+            ],
+        },
+        # plain lineup saves (today's and a future day's); hidden unless asked for
         {
             "id": "t-99",
             "type": "ROSTER",
@@ -695,6 +718,26 @@ transactions_response = {
                     "toTeamId": 12,
                     "fromLineupSlotId": 12,
                     "toLineupSlotId": 2,
+                },
+            ],
+        },
+        {
+            "id": "t-102",
+            "type": "FUTURE_ROSTER",
+            "status": "EXECUTED",
+            "executionType": "EXECUTE",
+            "teamId": 8,
+            "memberId": "REDACTED-ID",
+            "scoringPeriodId": 14,
+            "proposedDate": ms("2026-11-01", 11, 50),
+            "items": [
+                {
+                    "playerId": 1003,
+                    "type": "LINEUP",
+                    "fromTeamId": 8,
+                    "toTeamId": 8,
+                    "fromLineupSlotId": 1,
+                    "toLineupSlotId": 12,
                 },
             ],
         },

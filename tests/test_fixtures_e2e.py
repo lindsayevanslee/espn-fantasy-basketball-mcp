@@ -168,8 +168,8 @@ async def test_free_agents_have_ownership_percentages(client):
     assert by_name["Drew Wing"].availabilityNote == "Free agent: can be added now"
     zed = by_name["Zed Streamer"]
     assert zed.availabilityStatus == "WAIVERS"
-    assert zed.waiverProcessDateISO == "2026-11-03T08:00:00-05:00"
-    assert zed.availabilityNote == "On waivers; claims process 2026-11-03T08:00:00-05:00"
+    assert zed.waiverProcessDateISO == "2026-11-03T03:00:00-05:00"
+    assert zed.availabilityNote == "On waivers; claims process 2026-11-03T03:00:00-05:00"
     assert all(v > 0 for v in owned.values())
     assert free_agents[0].ownership.percentStarted == 40.1
     # verbose stats: games derived when ESPN omits stat 42; shooting splits present
@@ -331,6 +331,9 @@ async def test_settings_describe_limits_and_records(client):
     assert acq.effectiveLimitByMatchupPeriod["3"] == 7
     assert acq.effectiveLimitByMatchupPeriod["17"] == 14, "two-week All-Star period"
     assert acq.effectiveLimitCurrentMatchup == 7
+    # waiverProcessHour is UTC (8 -> 03:00 Eastern), matching the players' process dates
+    assert (acq.waiverProcessHour, acq.waiverProcessHourTimezone) == (8, "UTC")
+    assert acq.waiverProcessTimeLocal == "03:00 America/New_York"
     # 2. waiver order rule
     assert acq.waiverOrderReset is False
     assert "back of the waiver order after each successful claim" in acq.waiverOrderDescription
@@ -453,8 +456,18 @@ async def test_analysis_opponent_roster_excludes_dropped_player(client):
 @pytest.mark.asyncio
 async def test_transactions_explain_waiver_state(client):
     log = await client.get_transactions()
-    assert [t.id for t in log] == ["t-101", "t-100", "t-99"], "newest first"
-    pending, drop, lineup = log
+    assert [t.id for t in log] == ["t-101", "t-100", "t-98"], "newest first, no lineup saves"
+    pending, drop, roster_drop = log
+    assert (
+        roster_drop.summary == "Waiver Wire Warriors dropped Stale Center (roster move, 2026-11-01)"
+    )
+
+    everything = await client.get_transactions(include_lineup_changes=True)
+    assert [t.id for t in everything] == ["t-102", "t-101", "t-100", "t-98", "t-99"]
+    assert everything[0].summary == (
+        "Statistical Anomalies set lineup for scoring period 14 (future lineup change, 2026-11-01)"
+    )
+    lineup = everything[-1]
     assert pending.type == "WAIVER" and pending.status == "PENDING"
     assert pending.teamName == "Statistical Anomalies"
     assert pending.summary == (
@@ -467,10 +480,18 @@ async def test_transactions_explain_waiver_state(client):
     assert drop.processDateISO == "2026-11-01T09:15:00-05:00"
     assert [i.type for i in drop.items] == ["DROP", "ADD"]
     assert drop.items[0].playerName == "Zed Streamer" and drop.items[0].toTeamId == 0
-    assert lineup.summary == "Waiver Wire Warriors lineup change (lineup change, 2026-10-31)"
+    assert lineup.summary == (
+        "Waiver Wire Warriors set lineup for scoring period 12 (lineup change, 2026-10-31)"
+    )
 
     mine = await client.get_transactions(team_id=MY_TEAM)
     assert [t.id for t in mine] == ["t-101"]
+    assert [
+        t.id for t in await client.get_transactions(team_id=MY_TEAM, include_lineup_changes=True)
+    ] == [
+        "t-102",
+        "t-101",
+    ]
     dropped_by_5 = await client.get_transactions(team_id=5, limit=1)
     assert dropped_by_5[0].id == "t-100"
 

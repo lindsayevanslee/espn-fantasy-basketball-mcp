@@ -5,7 +5,10 @@
 ### Added
 - `get_transactions` tool (ESPN `mTransactions2` view): recent adds, drops, waiver claims and
   trades, newest first, with player and team names and a one-line summary, filterable by team
-  or scoring period. Answers "who dropped this player and when".
+  or scoring period. Answers "who dropped this player and when". ESPN logs every lineup save
+  as a `ROSTER` / `FUTURE_ROSTER` transaction; those are hidden unless
+  `include_lineup_changes=true`, while a drop made from the roster page (a `ROSTER`
+  transaction with a `DROP` item) is always shown as a "roster move".
 - Waiver state on free agents and search results: `availabilityStatus` (FREEAGENT = addable
   now, WAIVERS = ESPN's "WA" flag), `waiverProcessDateISO` and an `availabilityNote`.
 - `get_league_teams`: `waiverRank`, ESPN's `transactionCounter`, and `acquisitionsThisMatchup`
@@ -19,6 +22,13 @@
   `unlockedSlots` ("SLOT: player") for the roster's scoring period.
 - `teamAbbrev` on matchup sides and `yourTeamAbbrev` / `opponentTeamAbbrev` on the analysis,
   so a team renamed mid-week can still be identified.
+
+### Fixed
+- `acquisitionSettings.waiverProcessTimeLocal` treated ESPN's `waiverProcessHour` as Eastern
+  time. Recorded live, a league with hour 8 had every on-waivers player's `waiverProcessDate`
+  at 08:00Z (03:00 ET, 02:00 CT), so the hour is UTC; the 1.2.0 conversion reported 07:00 CT.
+  `waiverProcessHourTimezone` now says `UTC`, and each free agent's `waiverProcessDateISO` is
+  the authoritative time.
 
 ### Changed
 - `analyze_matchup` / `get_my_current_matchup` for a *future* matchup period now request the

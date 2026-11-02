@@ -597,7 +597,7 @@ class ESPNFantasyBasketballClient:
                 acquisition_data.get("acquisitionLimit", -1),
             ),
             minimumBid=acquisition_data.get("minimumBid", 0),
-            waiverProcessTimeLocal=self._eastern_hour_to_local(
+            waiverProcessTimeLocal=self._utc_hour_to_local(
                 acquisition_data.get("waiverProcessHour")
             ),
             waiverOrderReset=acquisition_data.get("waiverOrderReset"),
@@ -739,15 +739,20 @@ class ESPNFantasyBasketballClient:
             named[name] = limit
         return named
 
-    def _eastern_hour_to_local(self, hour: int | None) -> str | None:
-        """Express an ESPN hour-of-day (Eastern time) in MY_TIMEZONE, e.g. "07:00 America/Chicago"."""
+    def _utc_hour_to_local(self, hour: int | None) -> str | None:
+        """Express ESPN's waiverProcessHour in MY_TIMEZONE, e.g. "02:00 America/Chicago".
+
+        The hour is UTC, not Eastern: a league reporting waiverProcessHour 8 had every
+        on-waivers player's waiverProcessDate at 08:00Z (03:00 ET / 02:00 CT), recorded live
+        on 2026-11-01. The per-player waiverProcessDateISO is the authoritative time.
+        """
         if hour is None:
             return None
         try:
-            eastern = datetime.now(ZoneInfo("America/New_York")).replace(
+            utc = datetime.now(ZoneInfo("UTC")).replace(
                 hour=int(hour), minute=0, second=0, microsecond=0
             )
-            local = eastern.astimezone(ZoneInfo(self._get_timezone()))
+            local = utc.astimezone(ZoneInfo(self._get_timezone()))
             return f"{local:%H:%M} {self._get_timezone()}"
         except (ValueError, OSError):
             return None
@@ -3484,17 +3489,26 @@ class ESPNFantasyBasketballClient:
     # ------------------------------------------------------------------ transactions
 
     async def get_transactions(
-        self, limit: int = 25, scoring_period: int | None = None, team_id: int | None = None
+        self,
+        limit: int = 25,
+        scoring_period: int | None = None,
+        team_id: int | None = None,
+        include_lineup_changes: bool = False,
     ) -> list[Transaction]:
         """Recent league transactions (adds, drops, waiver claims, trades), newest first.
 
         Uses ESPN's mTransactions2 view. Player and team IDs are resolved to names. Answers
         "who dropped this player and when" and so why he is on waivers.
 
+        ESPN also logs every lineup save (type ROSTER or FUTURE_ROSTER with only LINEUP items);
+        those are left out unless include_lineup_changes is True. A drop made from the roster
+        page arrives as a ROSTER transaction with a DROP item and is always included.
+
         Args:
             limit: Maximum transactions to return (1-200)
             scoring_period: Restrict to one scoring period (day); default is ESPN's current
             team_id: Only transactions proposed by, or moving a player to/from, this team
+            include_lineup_changes: Also return pure lineup saves
         """
         if not isinstance(limit, int) or limit < 1 or limit > 200:
             raise ValueError(f"Invalid limit: {limit}. Must be between 1 and 200.")
@@ -3519,7 +3533,20 @@ class ESPNFantasyBasketballClient:
                 if isinstance(i, dict)
             )
 
+        def moves_players(t: dict[str, Any]) -> bool:
+            return any(
+                i.get("type") in ("ADD", "DROP")
+                for i in t.get("items") or []
+                if isinstance(i, dict)
+            )
+
         raw = [t for t in raw if involves(t)]
+        if not include_lineup_changes:
+            raw = [
+                t
+                for t in raw
+                if t.get("type") not in ("ROSTER", "FUTURE_ROSTER") or moves_players(t)
+            ]
         raw.sort(key=lambda t: t.get("proposedDate") or t.get("processDate") or 0, reverse=True)
         raw = raw[:limit]
 
@@ -3544,6 +3571,7 @@ class ESPNFantasyBasketballClient:
             "TRADE_ACCEPT": "trade",
             "TRADE_PROPOSAL": "trade proposal",
             "ROSTER": "lineup change",
+            "FUTURE_ROSTER": "future lineup change",
             "DRAFT": "draft pick",
         }
         transactions: list[Transaction] = []
@@ -3571,9 +3599,17 @@ class ESPNFantasyBasketballClient:
             if dropped:
                 parts.append("dropped " + ", ".join(dropped))
             kind = kinds.get(str(t.get("type")), str(t.get("type") or "transaction").lower())
+            if t.get("type") in ("ROSTER", "FUTURE_ROSTER") and moves_players(t):
+                kind = "roster move"  # a drop made from the roster page
             when = self._epoch_ms_to_iso(t.get("processDate") or t.get("proposedDate"))
             status = t.get("status")
-            summary = f"{team_name} {'; '.join(parts) or kind}"
+            if parts:
+                action = "; ".join(parts)
+            elif t.get("scoringPeriodId") and kind.endswith("lineup change"):
+                action = f"set lineup for scoring period {t['scoringPeriodId']}"
+            else:
+                action = kind
+            summary = f"{team_name} {action}"
             summary += f" ({kind}"
             if status and status != "EXECUTED":
                 summary += f", {str(status).lower()}"

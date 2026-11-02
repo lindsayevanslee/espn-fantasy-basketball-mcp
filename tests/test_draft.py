@@ -447,8 +447,20 @@ class TestDraftSettingsAware:
             "C": 4,
         }
         assert settings.rosterSettings.lineupSlotNames["11"] == "UTIL"
-        assert settings.acquisitionSettings.waiverProcessHourTimezone == "America/New_York"
-        assert settings.acquisitionSettings.waiverProcessTimeLocal == "07:00 America/Chicago"
+        # waiverProcessHour is UTC (live: hour 8 and process dates at 08:00Z)
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        hour = settings.acquisitionSettings.waiverProcessHour
+        expected = (
+            datetime.now(ZoneInfo("UTC"))
+            .replace(hour=hour, minute=0)
+            .astimezone(ZoneInfo("America/Chicago"))
+        )
+        assert settings.acquisitionSettings.waiverProcessHourTimezone == "UTC"
+        assert settings.acquisitionSettings.waiverProcessTimeLocal == (
+            f"{expected:%H:%M} America/Chicago"
+        )
         assert settings.draftSettings.type == "AUCTION"
         assert settings.draftSettings.auctionBudget == 300
         assert settings.draftSettings.pickOrder == [8, 3, 5]

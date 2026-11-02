@@ -65,6 +65,27 @@
    ]
   },
   {
+   "id": "t-98",
+   "type": "ROSTER",
+   "status": "EXECUTED",
+   "executionType": "EXECUTE",
+   "teamId": 12,
+   "memberId": "REDACTED-ID",
+   "scoringPeriodId": 13,
+   "proposedDate": 1793539800000,
+   "isPending": false,
+   "items": [
+    {
+     "playerId": 3001,
+     "type": "DROP",
+     "fromTeamId": 12,
+     "toTeamId": 0,
+     "fromLineupSlotId": 4,
+     "toLineupSlotId": -1
+    }
+   ]
+  },
+  {
    "id": "t-99",
    "type": "ROSTER",
    "status": "EXECUTED",
@@ -82,6 +103,26 @@
      "toTeamId": 12,
      "fromLineupSlotId": 12,
      "toLineupSlotId": 2
+    }
+   ]
+  },
+  {
+   "id": "t-102",
+   "type": "FUTURE_ROSTER",
+   "status": "EXECUTED",
+   "executionType": "EXECUTE",
+   "teamId": 8,
+   "memberId": "REDACTED-ID",
+   "scoringPeriodId": 14,
+   "proposedDate": 1793551800000,
+   "items": [
+    {
+     "playerId": 1003,
+     "type": "LINEUP",
+     "fromTeamId": 8,
+     "toTeamId": 8,
+     "fromLineupSlotId": 1,
+     "toLineupSlotId": 12
     }
    ]
   }

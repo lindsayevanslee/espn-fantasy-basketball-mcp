@@ -269,6 +269,7 @@ async def get_transactions(
     limit: int = 25,
     scoring_period: int | None = None,
     team_id: int | None = None,
+    include_lineup_changes: bool = False,
     league_id: int | None = None,
     year: int | None = None,
     espn_s2: str | None = None,
@@ -284,6 +285,8 @@ async def get_transactions(
         scoring_period: Only one scoring period (day; 1 = opening night) (optional)
         team_id: Only transactions by, or moving a player to/from, this team (optional; NOT
             defaulted from ESPN_TEAM_ID, so the whole league is returned unless you pass one)
+        include_lineup_changes: Also return plain lineup saves (ESPN logs every one as a
+            ROSTER / FUTURE_ROSTER transaction); off by default to keep the log readable
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
@@ -295,7 +298,9 @@ async def get_transactions(
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    transactions = await client.get_transactions(int(limit), scoring_period, team_id)
+    transactions = await client.get_transactions(
+        int(limit), scoring_period, team_id, include_lineup_changes
+    )
     return [t.model_dump() for t in transactions]
 
 

@@ -189,7 +189,7 @@
    "waiverProcessDays": [
     "SUNDAY"
    ],
-   "waiverProcessHour": 3,
+   "waiverProcessHour": 8,
    "matchupAcquisitionLimit": 1.0,
    "matchupLimitPerScoringPeriod": true,
    "acquisitionLimit": -1,
