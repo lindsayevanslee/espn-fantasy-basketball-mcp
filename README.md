@@ -395,7 +395,9 @@ uv run python scripts/record_fixtures.py --redact-names
 
 It makes the same calls the tools make and writes every response under the name the tests
 would look it up by, after removing `members`, owner IDs, every GUID (ESPN SWIDs are GUIDs) and
-every cookie-shaped token. Cookie values are never printed or written.
+every cookie-shaped token. Cookie values are never printed or written. The recorded folder is
+gitignored: it still carries your league's names and rosters, so it stays on your machine.
+Delete it with `rm -rf tests/fixtures/recorded` when you are done.
 `tests/test_fixture_hygiene.py` scans everything under `tests/fixtures/` for `espn_s2`, `SWID`,
 GUIDs and cookie tokens on every test run, so a leaked credential fails CI.
 

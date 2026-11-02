@@ -13,7 +13,8 @@ Before anything is written it is sanitised:
   the payload is replaced
 Team names, league name and player data are kept; pass --redact-names to replace team and
 league names too. Cookie values are never printed or written. tests/test_fixture_hygiene.py
-checks every file under tests/fixtures for leaks on each test run.
+checks every file under tests/fixtures for leaks on each test run. The output directory is
+gitignored (tests/fixtures/recorded/); the recordings are for local inspection and stay local.
 
 Usage (from the repository root):
 
