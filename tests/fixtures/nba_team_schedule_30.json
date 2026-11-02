@@ -1,0 +1,71 @@
+{
+ "team": {
+  "id": "30",
+  "abbreviation": "CHA",
+  "displayName": "CHA"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "3020261104",
+   "date": "2026-11-05T00:00Z",
+   "name": "CHA vs ATL",
+   "competitions": [
+    {
+     "id": "c300",
+     "date": "2026-11-05T00:00Z",
+     "competitors": [
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      },
+      {
+       "id": "1",
+       "homeAway": "away",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "3020261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "CHA vs ATL",
+   "competitions": [
+    {
+     "id": "c301",
+     "date": "2026-11-12T00:00Z",
+     "competitors": [
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      },
+      {
+       "id": "1",
+       "homeAway": "home",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

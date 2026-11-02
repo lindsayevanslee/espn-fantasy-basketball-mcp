@@ -1,0 +1,187 @@
+{
+ "team": {
+  "id": "1",
+  "abbreviation": "ATL",
+  "displayName": "ATL"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "120261103",
+   "date": "2026-11-04T00:00Z",
+   "name": "ATL vs CHA",
+   "competitions": [
+    {
+     "id": "c10",
+     "date": "2026-11-04T00:00Z",
+     "competitors": [
+      {
+       "id": "1",
+       "homeAway": "home",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "120261105",
+   "date": "2026-11-06T00:00Z",
+   "name": "ATL vs CHA",
+   "competitions": [
+    {
+     "id": "c11",
+     "date": "2026-11-06T00:00Z",
+     "competitors": [
+      {
+       "id": "1",
+       "homeAway": "away",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "120261107",
+   "date": "2026-11-08T00:00Z",
+   "name": "ATL vs CHA",
+   "competitions": [
+    {
+     "id": "c12",
+     "date": "2026-11-08T00:00Z",
+     "competitors": [
+      {
+       "id": "1",
+       "homeAway": "home",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "120261109",
+   "date": "2026-11-10T00:00Z",
+   "name": "ATL vs CHA",
+   "competitions": [
+    {
+     "id": "c13",
+     "date": "2026-11-10T00:00Z",
+     "competitors": [
+      {
+       "id": "1",
+       "homeAway": "away",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "120261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "ATL vs CHA",
+   "competitions": [
+    {
+     "id": "c14",
+     "date": "2026-11-12T00:00Z",
+     "competitors": [
+      {
+       "id": "1",
+       "homeAway": "home",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "120261113",
+   "date": "2026-11-14T00:00Z",
+   "name": "ATL vs CHA",
+   "competitions": [
+    {
+     "id": "c15",
+     "date": "2026-11-14T00:00Z",
+     "competitors": [
+      {
+       "id": "1",
+       "homeAway": "away",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

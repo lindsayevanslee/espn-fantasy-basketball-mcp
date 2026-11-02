@@ -1,0 +1,187 @@
+{
+ "team": {
+  "id": "25",
+  "abbreviation": "OKC",
+  "displayName": "OKC"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "2520261102",
+   "date": "2026-11-03T00:00Z",
+   "name": "OKC vs CHA",
+   "competitions": [
+    {
+     "id": "c250",
+     "date": "2026-11-03T00:00Z",
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "home",
+       "team": {
+        "id": "25",
+        "abbreviation": "OKC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2520261103",
+   "date": "2026-11-04T00:00Z",
+   "name": "OKC vs CHA",
+   "competitions": [
+    {
+     "id": "c251",
+     "date": "2026-11-04T00:00Z",
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "away",
+       "team": {
+        "id": "25",
+        "abbreviation": "OKC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2520261105",
+   "date": "2026-11-06T00:00Z",
+   "name": "OKC vs CHA",
+   "competitions": [
+    {
+     "id": "c252",
+     "date": "2026-11-06T00:00Z",
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "home",
+       "team": {
+        "id": "25",
+        "abbreviation": "OKC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2520261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "OKC vs CHA",
+   "competitions": [
+    {
+     "id": "c253",
+     "date": "2026-11-09T00:00Z",
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "away",
+       "team": {
+        "id": "25",
+        "abbreviation": "OKC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2520261110",
+   "date": "2026-11-11T00:00Z",
+   "name": "OKC vs CHA",
+   "competitions": [
+    {
+     "id": "c254",
+     "date": "2026-11-11T00:00Z",
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "home",
+       "team": {
+        "id": "25",
+        "abbreviation": "OKC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2520261112",
+   "date": "2026-11-13T00:00Z",
+   "name": "OKC vs CHA",
+   "competitions": [
+    {
+     "id": "c255",
+     "date": "2026-11-13T00:00Z",
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "away",
+       "team": {
+        "id": "25",
+        "abbreviation": "OKC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

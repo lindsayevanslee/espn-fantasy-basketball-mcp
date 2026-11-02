@@ -1,0 +1,146 @@
+[
+ {
+  "id": 1001,
+  "fullName": "Ava Guard",
+  "defaultPositionId": 1,
+  "proTeamId": 2,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 1002,
+  "fullName": "Jon Collins",
+  "defaultPositionId": 4,
+  "proTeamId": 6,
+  "injuryStatus": "OUT",
+  "active": true
+ },
+ {
+  "id": 1003,
+  "fullName": "Cason Wallace",
+  "defaultPositionId": 2,
+  "proTeamId": 25,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 1004,
+  "fullName": "Benched Guy",
+  "defaultPositionId": 5,
+  "proTeamId": 0,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 2001,
+  "fullName": "Max Center",
+  "defaultPositionId": 5,
+  "proTeamId": 14,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 2002,
+  "fullName": "Dee Wing",
+  "defaultPositionId": 3,
+  "proTeamId": 18,
+  "injuryStatus": "DAY_TO_DAY",
+  "active": true
+ },
+ {
+  "id": 2003,
+  "fullName": "Rook Guard",
+  "defaultPositionId": 1,
+  "proTeamId": 14,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 3001,
+  "fullName": "Stale Center",
+  "defaultPositionId": 5,
+  "proTeamId": 28,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 3002,
+  "fullName": "Loyal Forward",
+  "defaultPositionId": 4,
+  "proTeamId": 1,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 3003,
+  "fullName": "Traded Guard",
+  "defaultPositionId": 1,
+  "proTeamId": 30,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 3004,
+  "fullName": "Solid Wing",
+  "defaultPositionId": 3,
+  "proTeamId": 16,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 5001,
+  "fullName": "Lone Star",
+  "defaultPositionId": 2,
+  "proTeamId": 10,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 7001,
+  "fullName": "Drew Wing",
+  "defaultPositionId": 3,
+  "proTeamId": 9,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 7002,
+  "fullName": "Kris Big",
+  "defaultPositionId": 5,
+  "proTeamId": 12,
+  "injuryStatus": "DAY_TO_DAY",
+  "active": true
+ },
+ {
+  "id": 7003,
+  "fullName": "Zed Streamer",
+  "defaultPositionId": 2,
+  "proTeamId": 21,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 9001,
+  "fullName": "Streamer One",
+  "defaultPositionId": 1,
+  "proTeamId": 7,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 9002,
+  "fullName": "Streamer Two",
+  "defaultPositionId": 3,
+  "proTeamId": 13,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ },
+ {
+  "id": 9003,
+  "fullName": "List Only",
+  "defaultPositionId": 4,
+  "proTeamId": 16,
+  "injuryStatus": "ACTIVE",
+  "active": true
+ }
+]

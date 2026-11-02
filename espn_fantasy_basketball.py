@@ -93,7 +93,8 @@ async def get_league_teams(
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
-        List of team dictionaries with id, name, location, record, etc.
+        List of team dictionaries with id, name, location, record, etc. recordType /
+        recordDescription say whether record counts categories (H2H Each Category) or matchups.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
@@ -127,10 +128,15 @@ async def get_league_settings(
         Dictionary with league settings including:
         - scheduleSettings: Week boundaries, matchup periods, playoff settings
         - rosterSettings: Lineup slots, position limits, lock times
-        - acquisitionSettings: Waiver schedule, acquisition limits
+        - acquisitionSettings: Waiver schedule, acquisition limits, and
+          acquisitionLimitDescription spelling out "N per matchup period" vs "N per day"
         - tradeSettings: Trade deadline, veto rules
         - scoringSettings: Scoring categories and type
-        - status: Current matchup period, scoring periods
+        - status: currentMatchupPeriod (a week) with currentMatchupPeriodDates, and
+          latestScoringPeriod (a day counter; 1 = opening night) with latestScoringPeriodDate
+
+        scheduleSettings.matchupPeriodDates is the authoritative period -> [first_day, last_day]
+        mapping; the raw matchupPeriods is week-indexed and should not be read as days.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
@@ -153,12 +159,20 @@ async def get_team_roster(
         team_id: Team ID to get roster for (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
-        scoring_period: Specific scoring period (optional)
+        scoring_period: Specific scoring period, i.e. a day index where 1 is opening night
+            (optional; omit for today's roster). The response says which period and date it
+            is for (scoringPeriodId / scoringPeriodDate) and whether that lineup is locked;
+            use scoringPeriodId + 1 for tomorrow's editable lineup. When omitted, players ESPN
+            still lists but who were dropped (onTeamId no longer this team) are removed and
+            named in staleEntriesRemoved; a historical day is returned exactly as stored.
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
-        Dictionary with team roster including all players and their positions
+        Dictionary with team roster including all players, positions, per-game stats
+        (gamesPlayed is null when ESPN does not report it; fg_pct/ft_pct are null only when
+        fga/fta is 0), injury status plus injuryDetails / injuryReturnDate when ESPN
+        publishes a reason, and today's game
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
@@ -307,8 +321,10 @@ async def get_my_current_matchup(
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
-        verbose: If True, include full player stats in rosters.
-                 If False, omit player stats from rosters (keeps only lineup info like name, position, injury status) (default False).
+        verbose: If True, include season totals in each player's stats as well.
+                 If False (default), rosters still carry per-game averages (points, rebounds,
+                 assists, ..., gamesPlayed), injury status/details and today's game; only the
+                 season totals block is omitted.
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
@@ -318,8 +334,9 @@ async def get_my_current_matchup(
         - scoringPeriod: Current scoring period/week
         - yourTeam: Your team's matchup data (scores, games played)
         - opponentTeam: Opponent's matchup data (scores, games played)
-        - yourRoster: Your team's roster for this week (stats omitted if verbose=False)
-        - opponentRoster: Opponent's roster for this week (stats omitted if verbose=False)
+        - yourRoster: Your team's roster today, with per-game averages (season totals only if verbose=True)
+        - opponentRoster: Opponent's roster today, same shape
+        - staleEntriesRemoved (per roster): players ESPN still listed but who were dropped
         - winner: Winner determination (if available)
         - playoff: Whether this is a playoff matchup
     """
@@ -643,6 +660,7 @@ async def get_roster_schedule(
     start_date: str | None = None,
     end_date: str | None = None,
     matchup_period: int | None = None,
+    player_ids: list[int] | None = None,
     league_id: int | None = None,
     year: int | None = None,
     espn_s2: str | None = None,
@@ -656,7 +674,12 @@ async def get_roster_schedule(
     When matchup_period is given, "this week" and "next week" are that matchup period and
     the next one, using the league's own period-to-date mapping (so a short opening week or
     a two-week All-Star period is handled). Otherwise they are the Monday-to-Sunday week
-    containing start_date and the week after.
+    containing start_date and the week after. The windows used are returned as
+    thisWeek / nextWeek.
+
+    Pass player_ids to list streaming candidates (free agents or other teams' players) next
+    to your roster; they are marked includedInTotals=False and left out of the team totals.
+    For candidates only, use get_player_schedule.
 
     Args:
         team_id: Your fantasy team ID (optional, uses ESPN_TEAM_ID env var)
@@ -664,6 +687,8 @@ async def get_roster_schedule(
         end_date: End date in YYYY-MM-DD format (optional, defaults to 7 days from start)
         matchup_period: Matchup period (week) to summarize (optional; overrides the dates).
             Use get_league_settings -> status.currentMatchupPeriod for the current week.
+        player_ids: Extra ESPN player IDs to include for comparison (optional; use
+            search_players to find IDs)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
@@ -671,8 +696,9 @@ async def get_roster_schedule(
 
     Returns:
         Dictionary with schedule summary including:
-        - gamesThisWeek / gamesNextWeek: Games in this and the next matchup period (or week)
-        - games per player with dates, opponents, and tip-off times
+        - thisWeek / nextWeek: the [first_day, last_day] windows counted
+        - gamesThisWeek / gamesNextWeek per player, with dates, opponents, and tip-off times
+        - totalGamesThisWeek / totalGamesNextWeek / averageGamesPerPlayer over rostered players
         - scoringPeriod: The matchup period this schedule represents
     """
     from datetime import datetime, timedelta
@@ -690,11 +716,73 @@ async def get_roster_schedule(
     if not end_date:
         end_date = (datetime.fromisoformat(start_date) + timedelta(days=7)).strftime("%Y-%m-%d")
 
+    extra_ids = _coerce_player_ids(player_ids) if player_ids else None
+
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     schedule_summary = await client.get_roster_schedule_summary(
-        team_id, start_date, end_date, matchup_period
+        team_id, start_date, end_date, matchup_period, extra_player_ids=extra_ids
     )
     return schedule_summary.model_dump()
+
+
+def _coerce_player_ids(player_ids: list) -> list[int]:
+    """MCP clients sometimes send numbers as strings; accept both, reject anything else."""
+    coerced: list[int] = []
+    for pid in player_ids:
+        try:
+            coerced.append(int(pid))
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"Invalid player ID {pid!r}: must be an integer") from e
+    return coerced
+
+
+@mcp.tool()
+async def get_player_schedule(
+    player_ids: list[int],
+    matchup_period: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+) -> dict:
+    """How many games specific players have this matchup period and next, by ESPN player ID.
+
+    Use this for streaming candidates and trade targets who are not on your roster: it
+    answers "how many games does this free agent have left this week" directly instead of
+    inferring from other teams' players. Find IDs with search_players.
+
+    Windows work like get_roster_schedule: with matchup_period, "this week" is that matchup
+    period and "next week" the following one (league's own period dates); otherwise the
+    Monday-to-Sunday week containing start_date and the week after.
+
+    Args:
+        player_ids: ESPN player IDs (1-50). Unknown IDs are listed with a note and zero games.
+        matchup_period: Matchup period (week) to count (optional; overrides the dates).
+            Use get_league_settings -> status.currentMatchupPeriod for the current week.
+        start_date: Start date in YYYY-MM-DD format (optional, defaults to today)
+        end_date: End date in YYYY-MM-DD format (optional, defaults to 7 days from start)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        Dictionary with thisWeek / nextWeek windows, per-player games (dates, opponents,
+        tip-off times, gamesThisWeek, gamesNextWeek) and totals over the listed players.
+        teamId is null because this is not a roster.
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    if not player_ids:
+        raise ValueError("player_ids is required (one or more ESPN player IDs)")
+    ids = _coerce_player_ids(player_ids)
+    if matchup_period is not None:
+        matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
+
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    summary = await client.get_players_schedule_summary(ids, start_date, end_date, matchup_period)
+    return summary.model_dump()
 
 
 @mcp.tool()

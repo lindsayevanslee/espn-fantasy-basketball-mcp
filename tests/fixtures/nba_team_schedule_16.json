@@ -1,0 +1,187 @@
+{
+ "team": {
+  "id": "16",
+  "abbreviation": "MIN",
+  "displayName": "MIN"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "1620261102",
+   "date": "2026-11-03T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "c160",
+     "date": "2026-11-03T00:00Z",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "home",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1620261104",
+   "date": "2026-11-05T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "c161",
+     "date": "2026-11-05T00:00Z",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "away",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1620261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "c162",
+     "date": "2026-11-07T00:00Z",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "home",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1620261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "c163",
+     "date": "2026-11-09T00:00Z",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "away",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1620261110",
+   "date": "2026-11-11T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "c164",
+     "date": "2026-11-11T00:00Z",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "home",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1620261112",
+   "date": "2026-11-13T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "c165",
+     "date": "2026-11-13T00:00Z",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "away",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

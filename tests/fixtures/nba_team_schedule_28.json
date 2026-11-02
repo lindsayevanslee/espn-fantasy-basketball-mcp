@@ -1,0 +1,100 @@
+{
+ "team": {
+  "id": "28",
+  "abbreviation": "TOR",
+  "displayName": "TOR"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "2820261102",
+   "date": "2026-11-03T00:00Z",
+   "name": "TOR vs CHA",
+   "competitions": [
+    {
+     "id": "c280",
+     "date": "2026-11-03T00:00Z",
+     "competitors": [
+      {
+       "id": "28",
+       "homeAway": "home",
+       "team": {
+        "id": "28",
+        "abbreviation": "TOR"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2820261105",
+   "date": "2026-11-06T00:00Z",
+   "name": "TOR vs CHA",
+   "competitions": [
+    {
+     "id": "c281",
+     "date": "2026-11-06T00:00Z",
+     "competitors": [
+      {
+       "id": "28",
+       "homeAway": "away",
+       "team": {
+        "id": "28",
+        "abbreviation": "TOR"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2820261109",
+   "date": "2026-11-10T00:00Z",
+   "name": "TOR vs CHA",
+   "competitions": [
+    {
+     "id": "c282",
+     "date": "2026-11-10T00:00Z",
+     "competitors": [
+      {
+       "id": "28",
+       "homeAway": "home",
+       "team": {
+        "id": "28",
+        "abbreviation": "TOR"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

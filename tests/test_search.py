@@ -136,9 +136,14 @@ class TestSearchPlayers:
         doncic = results2[0]
         assert doncic.isFreeAgent is True and doncic.fantasyTeamId is None
 
-        # the league lookup sends the matched ids as a filterIds header
-        _, kwargs_or_args = req.await_args_list[0][0][0], req.await_args_list[0][0]
-        assert '"filterIds"' in kwargs_or_args[2]["x-fantasy-filter"]
+        # the league lookup sends the matched ids as a filterIds header (other requests,
+        # such as the injury report, carry no filter)
+        filters = [
+            c.args[2]["x-fantasy-filter"]
+            for c in req.await_args_list
+            if len(c.args) > 2 and c.args[2] and "x-fantasy-filter" in c.args[2]
+        ]
+        assert filters and all('"filterIds"' in f for f in filters)
 
     @pytest.mark.asyncio
     async def test_league_status_failure_is_non_fatal(self, client):

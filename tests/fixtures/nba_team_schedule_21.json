@@ -1,0 +1,100 @@
+{
+ "team": {
+  "id": "21",
+  "abbreviation": "PHX",
+  "displayName": "PHX"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "2120261102",
+   "date": "2026-11-03T00:00Z",
+   "name": "PHX vs CHA",
+   "competitions": [
+    {
+     "id": "c210",
+     "date": "2026-11-03T00:00Z",
+     "competitors": [
+      {
+       "id": "21",
+       "homeAway": "home",
+       "team": {
+        "id": "21",
+        "abbreviation": "PHX"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2120261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "PHX vs CHA",
+   "competitions": [
+    {
+     "id": "c211",
+     "date": "2026-11-07T00:00Z",
+     "competitors": [
+      {
+       "id": "21",
+       "homeAway": "away",
+       "team": {
+        "id": "21",
+        "abbreviation": "PHX"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "2120261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "PHX vs CHA",
+   "competitions": [
+    {
+     "id": "c212",
+     "date": "2026-11-12T00:00Z",
+     "competitors": [
+      {
+       "id": "21",
+       "homeAway": "home",
+       "team": {
+        "id": "21",
+        "abbreviation": "PHX"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

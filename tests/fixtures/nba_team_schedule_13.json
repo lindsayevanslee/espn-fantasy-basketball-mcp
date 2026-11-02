@@ -1,0 +1,158 @@
+{
+ "team": {
+  "id": "13",
+  "abbreviation": "LAL",
+  "displayName": "LAL"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "1320261103",
+   "date": "2026-11-04T00:00Z",
+   "name": "LAL vs CHA",
+   "competitions": [
+    {
+     "id": "c130",
+     "date": "2026-11-04T00:00Z",
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "home",
+       "team": {
+        "id": "13",
+        "abbreviation": "LAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1320261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "LAL vs CHA",
+   "competitions": [
+    {
+     "id": "c131",
+     "date": "2026-11-07T00:00Z",
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "away",
+       "team": {
+        "id": "13",
+        "abbreviation": "LAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1320261110",
+   "date": "2026-11-11T00:00Z",
+   "name": "LAL vs CHA",
+   "competitions": [
+    {
+     "id": "c132",
+     "date": "2026-11-11T00:00Z",
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "home",
+       "team": {
+        "id": "13",
+        "abbreviation": "LAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1320261112",
+   "date": "2026-11-13T00:00Z",
+   "name": "LAL vs CHA",
+   "competitions": [
+    {
+     "id": "c133",
+     "date": "2026-11-13T00:00Z",
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "away",
+       "team": {
+        "id": "13",
+        "abbreviation": "LAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1320261113",
+   "date": "2026-11-14T00:00Z",
+   "name": "LAL vs CHA",
+   "competitions": [
+    {
+     "id": "c134",
+     "date": "2026-11-14T00:00Z",
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "home",
+       "team": {
+        "id": "13",
+        "abbreviation": "LAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
