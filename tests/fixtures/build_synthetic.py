@@ -90,11 +90,13 @@ settings = {
             "acquisitionType": "WAIVERS_TRADITIONAL",
             "waiverHours": 24,
             "waiverProcessDays": ["SUNDAY"],
-            "waiverProcessHour": 3,
+            "waiverProcessHour": 8,  # UTC: live process dates were all 08:00Z (03:00 ET)
             "matchupAcquisitionLimit": 1.0,
-            "matchupLimitPerScoringPeriod": False,
+            "matchupLimitPerScoringPeriod": True,  # 1 per day: 6 in the opening week, 7 after
             "acquisitionLimit": -1,
             "minimumBid": 0,
+            "waiverOrderReset": False,  # a successful claim sends the team to the back
+            "isUsingAcquisitionBudget": False,
         },
         "tradeSettings": {
             "deadlineDate": 1772514000000,
@@ -129,6 +131,14 @@ TEAMS = {
     12: ("WW", "Waiver Wire Warriors", 7, 10, 1),
     5: ("FT", "Fifth Team", 8, 9, 1),
 }
+# waiver order (1 = first claim) and ESPN's transaction counter per team
+WAIVER_RANK = {8: 12, 3: 1, 12: 5, 5: 7}
+TRANSACTIONS = {
+    8: (3, 3, 0, 1, {"1": 2, "2": 1}),  # acquisitions, drops, trades, moveToIR, by period
+    3: (1, 1, 0, 0, {"2": 1}),
+    12: (5, 5, 1, 0, {"1": 2, "2": 3}),
+    5: (2, 2, 0, 0, {"1": 1, "2": 1}),
+}
 
 
 def team_block(team_id: int) -> dict:
@@ -141,6 +151,19 @@ def team_block(team_id: int) -> dict:
         "owners": ["REDACTED-ID"],
         "primaryOwner": "REDACTED-ID",
         "playoffSeed": 1,
+        "waiverRank": WAIVER_RANK[team_id],
+        "transactionCounter": {
+            "acquisitionBudgetSpent": 0,
+            "acquisitions": TRANSACTIONS[team_id][0],
+            "drops": TRANSACTIONS[team_id][1],
+            "trades": TRANSACTIONS[team_id][2],
+            "moveToIR": TRANSACTIONS[team_id][3],
+            "moveToActive": 4,
+            "misc": 0,
+            "paid": 0,
+            "teamCharges": 0,
+            "matchupAcquisitionTotals": TRANSACTIONS[team_id][4],
+        },
         "record": {
             "overall": {
                 "wins": w,
@@ -326,8 +349,12 @@ def full_stats(pid: int) -> list[dict]:
     if pid not in SEASON_STATS:
         return []  # unsigned: nothing this season
     gp, per_game, omit = SEASON_STATS[pid]
+    season = stat_set(f"00{SEASON}", gp, per_game, omit)
+    if pid == 1003:  # live: ESPN reports FT% 0.0 for a player with 0 FTA
+        season["averages"]["20"] = 0.0
+        season["stats"]["20"] = 0.0
     return [
-        stat_set(f"00{SEASON}", gp, per_game, omit),
+        season,
         stat_set(f"10{SEASON}", 82, projection(pid)),
         stat_set(f"01{SEASON}", 3, {k: round(v * 1.05, 2) for k, v in per_game.items()}),
     ]
@@ -335,7 +362,7 @@ def full_stats(pid: int) -> list[dict]:
 
 ROSTERS: dict[int, list[tuple[int, int, int, bool]]] = {
     # team: [(playerId, lineupSlotId, onTeamId, lineupLocked)]
-    8: [(1001, 0, 8, False), (1002, 3, 8, False), (1003, 1, 8, False), (1004, 12, 8, False)],
+    8: [(1001, 0, 8, True), (1002, 3, 8, False), (1003, 1, 8, False), (1004, 12, 8, False)],
     3: [(2001, 4, 3, False), (2002, 2, 3, False), (2003, 12, 3, False)],
     # 3001 was dropped after his slot locked (onTeamId 0 = free agent pool); 3003 was traded
     12: [(3001, 4, 0, True), (3002, 3, 12, True), (3003, 12, 5, True), (3004, 2, 12, True)],
@@ -519,12 +546,20 @@ OWNERSHIP = {
 }
 
 
+WAIVER_PROCESS = int(
+    datetime.fromisoformat("2026-11-03T03:00:00").replace(tzinfo=ET).timestamp() * 1000
+)  # 08:00Z, as recorded live
+ON_WAIVERS = {7003: WAIVER_PROCESS}  # dropped by team 5 on Nov 1
+
+
 def kona_entry(pid: int, on_team: int) -> dict:
     owned, change, started = OWNERSHIP.get(pid, (99.0, 0.0, 90.0))
+    status = "ONTEAM" if on_team else ("WAIVERS" if pid in ON_WAIVERS else "FREEAGENT")
     return {
         "id": pid,
         "onTeamId": on_team,
-        "status": "ONTEAM" if on_team else "FREEAGENT",
+        "status": status,
+        **({"waiverProcessDate": ON_WAIVERS[pid]} if pid in ON_WAIVERS else {}),
         "keeperValue": 0,
         "keeperValueFuture": 0,
         "lineupLocked": False,
@@ -567,6 +602,148 @@ player_info_response = {
     ],
     "status": settings["status"],
 }
+
+
+def ms(day: str, hour: int, minute: int = 0) -> int:
+    return int(
+        datetime.fromisoformat(f"{day}T{hour:02d}:{minute:02d}:00").replace(tzinfo=ET).timestamp()
+        * 1000
+    )
+
+
+transactions_response = {
+    "id": LEAGUE_ID,
+    "seasonId": SEASON,
+    "scoringPeriodId": 13,
+    "transactions": [
+        {
+            "id": "t-100",
+            "type": "FREEAGENT",
+            "status": "EXECUTED",
+            "executionType": "PROCESS",
+            "teamId": 5,
+            "memberId": "REDACTED-ID",
+            "scoringPeriodId": 13,
+            "proposedDate": ms("2026-11-01", 9, 15),
+            "processDate": ms("2026-11-01", 9, 15),
+            "isPending": False,
+            "rating": 0,
+            "items": [
+                {
+                    "playerId": 7003,
+                    "type": "DROP",
+                    "fromTeamId": 5,
+                    "toTeamId": 0,
+                    "fromLineupSlotId": 12,
+                    "toLineupSlotId": -1,
+                },
+                {
+                    "playerId": 7001,
+                    "type": "ADD",
+                    "fromTeamId": 0,
+                    "toTeamId": 5,
+                    "fromLineupSlotId": -1,
+                    "toLineupSlotId": 12,
+                },
+            ],
+        },
+        {
+            "id": "t-101",
+            "type": "WAIVER",
+            "status": "PENDING",
+            "executionType": "PROCESS",
+            "teamId": 8,
+            "memberId": "REDACTED-ID",
+            "scoringPeriodId": 15,
+            "proposedDate": ms("2026-11-01", 11, 40),
+            "bidAmount": 0,
+            "isPending": True,
+            "items": [
+                {
+                    "playerId": 7003,
+                    "type": "ADD",
+                    "fromTeamId": 0,
+                    "toTeamId": 8,
+                    "fromLineupSlotId": -1,
+                    "toLineupSlotId": 12,
+                },
+                {
+                    "playerId": 1004,
+                    "type": "DROP",
+                    "fromTeamId": 8,
+                    "toTeamId": 0,
+                    "fromLineupSlotId": 12,
+                    "toLineupSlotId": -1,
+                },
+            ],
+        },
+        # a drop made from the roster page: ESPN logs it as ROSTER with a DROP item
+        {
+            "id": "t-98",
+            "type": "ROSTER",
+            "status": "EXECUTED",
+            "executionType": "EXECUTE",
+            "teamId": 12,
+            "memberId": "REDACTED-ID",
+            "scoringPeriodId": 13,
+            "proposedDate": ms("2026-11-01", 8, 30),
+            "isPending": False,
+            "items": [
+                {
+                    "playerId": 3001,
+                    "type": "DROP",
+                    "fromTeamId": 12,
+                    "toTeamId": 0,
+                    "fromLineupSlotId": 4,
+                    "toLineupSlotId": -1,
+                },
+            ],
+        },
+        # plain lineup saves (today's and a future day's); hidden unless asked for
+        {
+            "id": "t-99",
+            "type": "ROSTER",
+            "status": "EXECUTED",
+            "executionType": "EXECUTE",
+            "teamId": 12,
+            "memberId": "REDACTED-ID",
+            "scoringPeriodId": 12,
+            "proposedDate": ms("2026-10-31", 17, 5),
+            "processDate": ms("2026-10-31", 17, 5),
+            "items": [
+                {
+                    "playerId": 3004,
+                    "type": "LINEUP",
+                    "fromTeamId": 12,
+                    "toTeamId": 12,
+                    "fromLineupSlotId": 12,
+                    "toLineupSlotId": 2,
+                },
+            ],
+        },
+        {
+            "id": "t-102",
+            "type": "FUTURE_ROSTER",
+            "status": "EXECUTED",
+            "executionType": "EXECUTE",
+            "teamId": 8,
+            "memberId": "REDACTED-ID",
+            "scoringPeriodId": 14,
+            "proposedDate": ms("2026-11-01", 11, 50),
+            "items": [
+                {
+                    "playerId": 1003,
+                    "type": "LINEUP",
+                    "fromTeamId": 8,
+                    "toTeamId": 8,
+                    "fromLineupSlotId": 1,
+                    "toLineupSlotId": 12,
+                },
+            ],
+        },
+    ],
+}
+
 players_wl_response = [
     {
         "id": pid,
@@ -843,6 +1020,7 @@ def main() -> None:
     write("league_mMatchup.json", matchup_response)
     write("league_kona_free_agents.json", free_agents_response)
     write("league_kona_player_info.json", player_info_response)
+    write("league_mTransactions.json", transactions_response)
     write("players_wl.json", players_wl_response)
     write("nba_scoreboard.json", scoreboard_response)
     write("nba_injuries.json", injuries_response)

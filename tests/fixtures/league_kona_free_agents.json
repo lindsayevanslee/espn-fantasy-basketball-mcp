@@ -362,7 +362,8 @@
   {
    "id": 7003,
    "onTeamId": 0,
-   "status": "FREEAGENT",
+   "status": "WAIVERS",
+   "waiverProcessDate": 1793692800000,
    "keeperValue": 0,
    "keeperValueFuture": 0,
    "lineupLocked": false,

@@ -416,7 +416,8 @@
        "15": 0.0,
        "16": 0.0,
        "40": 26.0,
-       "19": 0.438
+       "19": 0.438,
+       "20": 0.0
       },
       "stats": {
        "0": 81.0,
@@ -432,7 +433,8 @@
        "16": 0.0,
        "40": 234.0,
        "19": 0.438,
-       "42": 9.0
+       "42": 9.0,
+       "20": 0.0
       },
       "appliedAverage": 17.0,
       "appliedTotal": 0.0
@@ -2365,7 +2367,8 @@
   {
    "id": 7003,
    "onTeamId": 0,
-   "status": "FREEAGENT",
+   "status": "WAIVERS",
+   "waiverProcessDate": 1793692800000,
    "keeperValue": 0,
    "keeperValueFuture": 0,
    "lineupLocked": false,

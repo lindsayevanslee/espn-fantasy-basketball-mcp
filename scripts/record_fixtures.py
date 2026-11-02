@@ -163,6 +163,7 @@ async def record(client: ESPNFantasyBasketballClient, team_id: int, recorder: Re
         "get_roster_schedule_summary",
         client.get_roster_schedule_summary(team_id, matchup_period=current),
     )
+    await step("get_transactions", client.get_transactions(limit=50))
     if roster is not None and roster.entries:
         surname = roster.entries[0].playerPoolEntry.player.lastName or "a"
         await step("search_players", client.search_players(surname, 3))

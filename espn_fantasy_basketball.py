@@ -95,6 +95,9 @@ async def get_league_teams(
     Returns:
         List of team dictionaries with id, name, location, record, etc. recordType /
         recordDescription say whether record counts categories (H2H Each Category) or matchups.
+        waiverRank is the team's place in the waiver order (1 = first claim), and
+        acquisitionsThisMatchup / acquisitionLimitThisMatchup / acquisitionsRemainingThisMatchup
+        show adds used against the effective per-matchup limit.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
@@ -128,8 +131,9 @@ async def get_league_settings(
         Dictionary with league settings including:
         - scheduleSettings: Week boundaries, matchup periods, playoff settings
         - rosterSettings: Lineup slots, position limits, lock times
-        - acquisitionSettings: Waiver schedule, acquisition limits, and
-          acquisitionLimitDescription spelling out "N per matchup period" vs "N per day"
+        - acquisitionSettings: Waiver schedule, acquisition limits, acquisitionLimitDescription
+          ("1 per day, so 7 for matchup period 2 (7 days)"), effectiveLimitByMatchupPeriod (a
+          per-day limit times the days in each period), waiverOrderReset / waiverOrderDescription
         - tradeSettings: Trade deadline, veto rules
         - scoringSettings: Scoring categories and type
         - status: currentMatchupPeriod (a week) with currentMatchupPeriodDates, and
@@ -170,9 +174,10 @@ async def get_team_roster(
 
     Returns:
         Dictionary with team roster including all players, positions, per-game stats
-        (gamesPlayed is null when ESPN does not report it; fg_pct/ft_pct are null only when
+        (gamesPlayed is null when ESPN does not report it; fg_pct/ft_pct are null exactly when
         fga/fta is 0), injury status plus injuryDetails / injuryReturnDate when ESPN
-        publishes a reason, and today's game
+        publishes a reason, today's game, and per-slot lock state for that scoring period
+        (each entry's lineupLocked, plus lockedSlots / unlockedSlots lists)
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     team_id = _get_team_id(team_id)
@@ -249,13 +254,54 @@ async def get_free_agents(
         swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
-        List of available free agent player dictionaries.
-        When verbose=False, stats field will be None to reduce response size.
+        List of available free agent player dictionaries. availabilityStatus is FREEAGENT (can
+        be added now) or WAIVERS (claims process at waiverProcessDateISO; ESPN's "WA" flag),
+        with a plain-English availabilityNote. When verbose=False, stats is None.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     players = await client.get_free_agents(size, position_id, verbose)
     return [player.model_dump() for player in players]
+
+
+@mcp.tool()
+async def get_transactions(
+    limit: int = 25,
+    scoring_period: int | None = None,
+    team_id: int | None = None,
+    include_lineup_changes: bool = False,
+    league_id: int | None = None,
+    year: int | None = None,
+    espn_s2: str | None = None,
+    swid: str | None = None,
+) -> list[dict]:
+    """Recent league transactions: adds, drops, waiver claims and trades, newest first.
+
+    Use it to answer "why is this player on waivers" (who dropped him and when), "what did my
+    opponent change this week", or to see pending waiver claims.
+
+    Args:
+        limit: Maximum transactions to return (1-200, default 25)
+        scoring_period: Only one scoring period (day; 1 = opening night) (optional)
+        team_id: Only transactions by, or moving a player to/from, this team (optional; NOT
+            defaulted from ESPN_TEAM_ID, so the whole league is returned unless you pass one)
+        include_lineup_changes: Also return plain lineup saves (ESPN logs every one as a
+            ROSTER / FUTURE_ROSTER transaction); off by default to keep the log readable
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
+        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
+        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
+
+    Returns:
+        List of transactions with type, status (EXECUTED / PENDING / ...), team, dates, the
+        players moved (ADD / DROP with names) and a one-line summary.
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    transactions = await client.get_transactions(
+        int(limit), scoring_period, team_id, include_lineup_changes
+    )
+    return [t.model_dump() for t in transactions]
 
 
 @mcp.tool()
