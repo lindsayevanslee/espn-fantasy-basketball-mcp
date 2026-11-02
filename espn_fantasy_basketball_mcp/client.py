@@ -68,6 +68,9 @@ from .models import (
     TodaysGame,
     TradeAnalysis,
     TradeSettings,
+    Transaction,
+    TransactionCounter,
+    TransactionItem,
     TrendingPlayer,
 )
 from .search import SEARCH_MIN_SCORE, name_match_score, normalize_name
@@ -355,15 +358,38 @@ class ESPNFantasyBasketballClient:
         # categories (a 9-category league gains up to 9 wins a week), which is easy to misread
         # as a matchup record. Settings are cached, so this is normally free.
         record_type = record_description = None
+        current_period: int | None = None
+        limit_this_matchup: int | None = None
         try:
             settings = await self.get_league_settings()
             record_type, record_description = self._describe_record(
                 settings.scoringSettings.scoringType
             )
+            current_period = settings.status.currentMatchupPeriod
+            limit_this_matchup = settings.acquisitionSettings.effectiveLimitCurrentMatchup
         except Exception as e:  # noqa: BLE001
             logger.debug(f"Could not determine record type from settings: {e}")
 
         for team_data in data.get("teams", []):
+            counter_data = team_data.get("transactionCounter") or {}
+            counter = None
+            used: int | None = None
+            if isinstance(counter_data, dict) and counter_data:
+                totals = counter_data.get("matchupAcquisitionTotals") or {}
+                counter = TransactionCounter(
+                    acquisitions=counter_data.get("acquisitions"),
+                    drops=counter_data.get("drops"),
+                    trades=counter_data.get("trades"),
+                    moveToIR=counter_data.get("moveToIR"),
+                    matchupAcquisitionTotals={str(k): int(v) for k, v in totals.items()},
+                )
+                if current_period is not None:
+                    used = int(totals.get(str(current_period), 0) or 0)
+            remaining = (
+                max(0, limit_this_matchup - used)
+                if used is not None and limit_this_matchup is not None
+                else None
+            )
             team = Team(
                 id=team_data["id"],
                 abbrev=team_data.get("abbrev", ""),
@@ -374,6 +400,11 @@ class ESPNFantasyBasketballClient:
                 record=team_data.get("record"),
                 recordType=record_type,
                 recordDescription=record_description,
+                waiverRank=team_data.get("waiverRank"),
+                transactionCounter=counter,
+                acquisitionsThisMatchup=used,
+                acquisitionLimitThisMatchup=limit_this_matchup,
+                acquisitionsRemainingThisMatchup=remaining,
             )
             teams.append(team)
 
@@ -395,11 +426,18 @@ class ESPNFantasyBasketballClient:
         return None, None
 
     @staticmethod
-    def _describe_acquisition_limit(per_matchup: float | None, per_day: bool, season: int) -> str:
+    def _describe_acquisition_limit(
+        per_matchup: float | None,
+        per_day: bool,
+        season: int,
+        days_in_current: int | None = None,
+        current_period: int | None = None,
+    ) -> str:
         """Spell out ESPN's three acquisition-limit fields in one sentence.
 
-        ESPN uses -1 for "no limit". matchupLimitPerScoringPeriod=True means the per-matchup
-        number is enforced per day (scoring period) instead of per matchup period.
+        ESPN uses -1 for "no limit". matchupLimitPerScoringPeriod=True means the number is
+        enforced per day (scoring period), so the allowance for a matchup period is that
+        number times the days in the period (6 in a six-day opening week, 7 in a normal week).
         """
         if per_matchup is None or per_matchup < 0:
             matchup_text = "No limit on acquisitions per matchup period"
@@ -412,13 +450,48 @@ class ESPNFantasyBasketballClient:
             count: float | int = (
                 int(per_matchup) if float(per_matchup).is_integer() else per_matchup
             )
-            unit = "day (scoring period)" if per_day else "matchup period"
-            matchup_text = f"{count} acquisition{'s' if count != 1 else ''} per {unit}"
+            if per_day:
+                matchup_text = f"{count} per day (scoring period)"
+                if days_in_current and current_period is not None:
+                    matchup_text += (
+                        f", so {count * days_in_current:g} for matchup period {current_period} "
+                        f"({days_in_current} days)"
+                    )
+            else:
+                matchup_text = f"{count} acquisition{'s' if count != 1 else ''} per matchup period"
         if season is None or season < 0:
             season_text = "no season-long limit"
         else:
             season_text = f"{season} for the whole season"
         return f"{matchup_text}; {season_text}."
+
+    @staticmethod
+    def _effective_acquisition_limits(
+        per_matchup: float | None, per_day: bool, period_dates: dict[str, list[str]]
+    ) -> dict[str, int] | None:
+        """Adds allowed in each matchup period: per-day limits scale with the period's length."""
+        if per_matchup is None or per_matchup <= 0:
+            return None
+        limits: dict[str, int] = {}
+        for period, (first, last) in period_dates.items():
+            days = (date.fromisoformat(last) - date.fromisoformat(first)).days + 1
+            limits[period] = int(per_matchup * days) if per_day else int(per_matchup)
+        return limits or None
+
+    @staticmethod
+    def _describe_waiver_order(reset: bool | None) -> str | None:
+        """ESPN's waiverOrderReset flag in words (semantics from ESPN's league-settings page)."""
+        if reset is None:
+            return None
+        if reset:
+            return (
+                "Waiver order resets to inverse standings on ESPN's schedule (waiverOrderReset="
+                "true); a successful claim does not permanently send you to the back"
+            )
+        return (
+            "A team moves to the back of the waiver order after each successful claim "
+            "(waiverOrderReset=false); see each team's waiverRank in get_league_teams"
+        )
 
     async def get_league_settings(self) -> LeagueSettings:
         """Get league settings including schedule, roster, scoring, and acquisition settings.
@@ -527,6 +600,10 @@ class ESPNFantasyBasketballClient:
             waiverProcessTimeLocal=self._eastern_hour_to_local(
                 acquisition_data.get("waiverProcessHour")
             ),
+            waiverOrderReset=acquisition_data.get("waiverOrderReset"),
+            waiverOrderDescription=self._describe_waiver_order(
+                acquisition_data.get("waiverOrderReset")
+            ),
         )
 
         # Parse trade settings
@@ -616,10 +693,32 @@ class ESPNFantasyBasketballClient:
                 if window is not None:
                     period_dates[key] = [window[0].isoformat(), window[1].isoformat()]
             schedule_settings.matchupPeriodDates = period_dates or None
-            status.currentMatchupPeriodDates = period_dates.get(str(status.currentMatchupPeriod))
+            current_key = str(status.currentMatchupPeriod)
+            status.currentMatchupPeriodDates = period_dates.get(current_key)
             status.latestScoringPeriodDate = date_for_scoring_period(
                 status.latestScoringPeriod, anchor_period, anchor_date
             ).isoformat()
+
+            # Per-day acquisition limits scale with each period's length
+            per_matchup = acquisition_data.get("matchupAcquisitionLimit")
+            per_day = bool(acquisition_data.get("matchupLimitPerScoringPeriod", False))
+            effective = self._effective_acquisition_limits(per_matchup, per_day, period_dates)
+            acquisition_settings.effectiveLimitByMatchupPeriod = effective
+            acquisition_settings.effectiveLimitCurrentMatchup = (
+                effective.get(current_key) if effective else None
+            )
+            current_window = period_dates.get(current_key)
+            if current_window:
+                days = (
+                    date.fromisoformat(current_window[1]) - date.fromisoformat(current_window[0])
+                ).days + 1
+                acquisition_settings.acquisitionLimitDescription = self._describe_acquisition_limit(
+                    per_matchup,
+                    per_day,
+                    acquisition_data.get("acquisitionLimit", -1),
+                    days_in_current=days,
+                    current_period=status.currentMatchupPeriod,
+                )
 
         return league_settings
 
@@ -719,14 +818,21 @@ class ESPNFantasyBasketballClient:
             response_period if isinstance(response_period, int) else None
         )
         period_date: str | None = None
-        if period_id is not None:
-            try:
-                settings = await self.get_league_settings()
+        latest_period: int | None = None
+        try:
+            settings = await self.get_league_settings()
+            latest_period = settings.status.latestScoringPeriod
+            if period_id is not None:
                 anchor = await self._scoring_period_anchor(settings)
                 if anchor is not None:
                     period_date = date_for_scoring_period(period_id, *anchor).isoformat()
-            except Exception as e:  # noqa: BLE001
-                logger.debug(f"Could not date scoring period {period_id}: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Could not date scoring period {period_id}: {e}")
+        # Today's and future rosters drop players who no longer belong to the team; a past
+        # day is returned as stored (onTeamId is always the player's *current* team).
+        filter_stale = scoring_period is None or (
+            latest_period is not None and scoring_period >= latest_period
+        )
 
         for team_data in data.get("teams", []):
             if team_data["id"] == team_id:
@@ -742,7 +848,7 @@ class ESPNFantasyBasketballClient:
                     # Rosters for an explicit (historical) scoring period keep every entry,
                     # because onTeamId is always the player's *current* team.
                     on_team_id = entry["playerPoolEntry"].get("onTeamId")
-                    if scoring_period is None and on_team_id is not None and on_team_id != team_id:
+                    if filter_stale and on_team_id is not None and on_team_id != team_id:
                         stale_entries.append(
                             f"{player_data.get('fullName', player_data.get('id'))} "
                             f"(onTeamId={on_team_id})"
@@ -880,6 +986,7 @@ class ESPNFantasyBasketballClient:
                         acquisitionType=entry.get("acquisitionType"),
                         injuryStatus=injury_status,
                         todaysGame=todays_game,
+                        lineupLocked=entry["playerPoolEntry"].get("lineupLocked"),
                     )
 
                     roster_entries.append(roster_entry)
@@ -891,8 +998,16 @@ class ESPNFantasyBasketballClient:
                 ]
                 lock_flags = [e.playerPoolEntry.lineupLocked for e in starters]
                 lineup_locked: bool | None = None
+                locked_slots: list[str] | None = None
+                unlocked_slots: list[str] | None = None
                 if lock_flags and all(f is not None for f in lock_flags):
                     lineup_locked = all(lock_flags)
+                    label = [
+                        f"{e.lineupSlotName or e.lineupSlotId}: {e.playerPoolEntry.player.fullName}"
+                        for e in starters
+                    ]
+                    locked_slots = [t for t, f in zip(label, lock_flags, strict=True) if f]
+                    unlocked_slots = [t for t, f in zip(label, lock_flags, strict=True) if not f]
                 note = None
                 if lineup_locked and period_id is not None:
                     note = (
@@ -906,6 +1021,8 @@ class ESPNFantasyBasketballClient:
                     scoringPeriodId=period_id,
                     scoringPeriodDate=period_date,
                     lineupLocked=lineup_locked,
+                    lockedSlots=locked_slots,
+                    unlockedSlots=unlocked_slots,
                     note=note,
                     staleEntriesRemoved=stale_entries or None,
                 )
@@ -979,6 +1096,7 @@ class ESPNFantasyBasketballClient:
                 acquisitionType=entry.acquisitionType,
                 injuryStatus=entry.injuryStatus,
                 todaysGame=entry.todaysGame,
+                lineupLocked=entry.lineupLocked,
             )
 
             slim_entries.append(slim_entry)
@@ -989,6 +1107,8 @@ class ESPNFantasyBasketballClient:
             scoringPeriodId=roster.scoringPeriodId,
             scoringPeriodDate=roster.scoringPeriodDate,
             lineupLocked=roster.lineupLocked,
+            lockedSlots=roster.lockedSlots,
+            unlockedSlots=roster.unlockedSlots,
             note=roster.note,
             staleEntriesRemoved=roster.staleEntriesRemoved,
         )
@@ -999,10 +1119,10 @@ class ESPNFantasyBasketballClient:
     ) -> dict[str, Any]:
         """Per-game FGM/FGA/FTM/FTA and FG%/FT% (0-100) for one ESPN stat set.
 
-        Percentages come from ESPN's own 19/20 keys when present (0.0 included; it used to be
-        treated as missing), else from made/attempted (stat IDs 13-16). A percentage is None
-        only when the player has no attempts at all, and the attempt counts are returned
-        alongside so a null FT% can be told apart from a parsing failure.
+        A percentage is None exactly when the player has no attempts (ESPN sends 0.0 then, which
+        is not a real percentage); the attempt counts are returned alongside so a null FT% is
+        explained by fta: 0. Otherwise ESPN's own 19/20 key is used when present, else
+        made/attempted (stat IDs 13-16).
         """
 
         def per_game(key: str) -> float | None:
@@ -1015,15 +1135,18 @@ class ESPNFantasyBasketballClient:
             return None
 
         def pct(made_key: str, att_key: str, pct_key: str) -> float | None:
-            # ESPN's own percentage first (0 is a real value, not "missing"), then
-            # made / attempted; None only when the player has no attempts.
+            # A player with no attempts has no percentage (None, with the 0 attempts visible
+            # alongside), whatever ESPN's own key says. Otherwise ESPN's percentage when
+            # present, else made / attempted.
+            made, att = totals.get(made_key), totals.get(att_key)
+            if not (isinstance(made, (int, float)) and isinstance(att, (int, float))):
+                made, att = averages.get(made_key), averages.get(att_key)
+            if isinstance(att, (int, float)) and att <= 0:
+                return None
             for source in (averages, totals):
                 value = source.get(pct_key)
                 if isinstance(value, (int, float)):
                     return round(value * 100, 1) if value <= 1.0 else round(value, 1)
-            made, att = totals.get(made_key), totals.get(att_key)
-            if not (isinstance(made, (int, float)) and isinstance(att, (int, float))):
-                made, att = averages.get(made_key), averages.get(att_key)
             if isinstance(made, (int, float)) and isinstance(att, (int, float)) and att > 0:
                 return round(made / att * 100, 1)
             return None
@@ -1362,6 +1485,7 @@ class ESPNFantasyBasketballClient:
             percent_owned = ownership_data.get("percentOwned", 0)
             percent_change = ownership_data.get("percentChange", 0)
             percent_started = ownership_data.get("percentStarted")
+            avail_status, waiver_iso, avail_note = self._availability_of(player_data)
 
             # Parse stats only if verbose mode
             stats_data = None
@@ -1446,6 +1570,9 @@ class ESPNFantasyBasketballClient:
                 injuryStatus=player_info.get("injuryStatus"),
                 injuryDetails=injury_details,
                 injuryReturnDate=injury_return,
+                availabilityStatus=avail_status,
+                waiverProcessDateISO=waiver_iso,
+                availabilityNote=avail_note,
                 ownership=PlayerOwnership(
                     percentOwned=percent_owned,
                     percentChange=percent_change,
@@ -1456,6 +1583,31 @@ class ESPNFantasyBasketballClient:
             players.append(player)
 
         return players
+
+    def _availability_of(self, entry: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+        """(status, waiverProcessDateISO, note) for a kona_player_info entry.
+
+        ESPN marks a recently dropped player status WAIVERS with a waiverProcessDate (its
+        "WA (Tue)" flag); FREEAGENT means addable right now; ONTEAM means rostered.
+        """
+        status = entry.get("status")
+        if not isinstance(status, str):
+            return None, None, None
+        process = entry.get("waiverProcessDate")
+        waiver_iso = (
+            self._epoch_ms_to_iso(int(process)) if isinstance(process, (int, float)) else None
+        )
+        if status == "WAIVERS":
+            note = (
+                f"On waivers; claims process {waiver_iso}"
+                if waiver_iso
+                else "On waivers; claims process at the next waiver run"
+            )
+        elif status == "FREEAGENT":
+            note = "Free agent: can be added now"
+        else:
+            note = None
+        return status, waiver_iso, note
 
     async def get_matchups(
         self, matchup_period: int | None = None, team_id: int | None = None
@@ -1533,11 +1685,13 @@ class ESPNFantasyBasketballClient:
         except Exception as e:
             logger.warning(f"Could not get league settings for scoring category filtering: {e}")
 
-        # Get team names mapping
+        # Get team names mapping (and abbreviations, which survive a mid-week rename)
         team_names = {}
+        team_abbrevs: dict[int, str] = {}
         try:
             teams = await self.get_league_teams()
             team_names = {team.id: team.name for team in teams}
+            team_abbrevs = {team.id: team.abbrev for team in teams if team.abbrev}
         except Exception as e:
             logger.warning(f"Could not get team names: {e}")
 
@@ -1558,14 +1712,14 @@ class ESPNFantasyBasketballClient:
                 if schedule_item.get("home"):
                     home_data = schedule_item["home"]
                     home_team = self._parse_matchup_team_data(
-                        home_data, team_names, scoring_stat_ids, stat_mapping
+                        home_data, team_names, scoring_stat_ids, stat_mapping, team_abbrevs
                     )
 
                 away_team = None
                 if schedule_item.get("away"):
                     away_data = schedule_item["away"]
                     away_team = self._parse_matchup_team_data(
-                        away_data, team_names, scoring_stat_ids, stat_mapping
+                        away_data, team_names, scoring_stat_ids, stat_mapping, team_abbrevs
                     )
 
                 matchup = Matchup(
@@ -1586,6 +1740,7 @@ class ESPNFantasyBasketballClient:
         team_names: dict[int, str],
         scoring_stat_ids: set[int],
         stat_mapping: dict[str, str],
+        team_abbrevs: dict[int, str] | None = None,
     ) -> MatchupTeam:
         """Parse team data from matchup API response into MatchupTeam object.
 
@@ -1621,6 +1776,7 @@ class ESPNFantasyBasketballClient:
         return MatchupTeam(
             teamId=team_id,
             teamName=team_names.get(team_id) if team_id else None,
+            teamAbbrev=(team_abbrevs or {}).get(team_id) if team_id else None,
             totalPoints=team_data.get("totalPoints"),
             totalProjectedPoints=team_data.get("totalProjectedPoints"),
             gamesPlayed=team_data.get("gamesPlayed"),
@@ -1729,19 +1885,20 @@ class ESPNFantasyBasketballClient:
         if opponent_team_id is None:
             return None
 
-        # Which day's rosters to show: today's for the current or a future week (future rosters
-        # cannot be known), the final day's for a past week. For today ESPN's default roster is
-        # requested (no scoringPeriodId), which also lets get_team_roster drop players who were
-        # dropped after their slot locked; a past day is requested explicitly and kept whole.
+        # Which day's rosters to show: today's (ESPN's default, no scoringPeriodId) for the
+        # current week, the first day's for a future week (ESPN returns the lineup as set for
+        # that day), the final day's for a past week. get_team_roster drops players who no
+        # longer belong to the team for today's and future rosters and keeps past ones whole.
         status = league_settings.status
         scoring_period = status.latestScoringPeriod
         requested_period: int | None = None
-        if matchup_period < status.currentMatchupPeriod:
+        if matchup_period != status.currentMatchupPeriod:
             window = await self.get_matchup_period_dates(matchup_period, league_settings)
             anchor = await self._scoring_period_anchor(league_settings)
             if window is not None and anchor is not None:
                 anchor_period, anchor_date = anchor
-                scoring_period = anchor_period + (window[1] - anchor_date).days
+                day = window[1] if matchup_period < status.currentMatchupPeriod else window[0]
+                scoring_period = anchor_period + (day - anchor_date).days
                 requested_period = scoring_period
 
         # Get rosters for both teams concurrently
@@ -2594,6 +2751,9 @@ class ESPNFantasyBasketballClient:
             r.fantasyTeamId = on_team if on_team else None
             r.fantasyTeamName = team_names.get(on_team) if on_team else None
             r.percentOwned = self._ownership_data(entry).get("percentOwned")
+            r.availabilityStatus, r.waiverProcessDateISO, r.availabilityNote = (
+                self._availability_of(entry)
+            )
             player_info = entry.get("player") or {}
             r.injuryStatus = player_info.get("injuryStatus") or r.injuryStatus
             r.injuryDetails = (
@@ -3320,6 +3480,122 @@ class ESPNFantasyBasketballClient:
         trending_players.sort(key=lambda x: abs(x.add_percentage - x.drop_percentage), reverse=True)
 
         return trending_players[:limit]
+
+    # ------------------------------------------------------------------ transactions
+
+    async def get_transactions(
+        self, limit: int = 25, scoring_period: int | None = None, team_id: int | None = None
+    ) -> list[Transaction]:
+        """Recent league transactions (adds, drops, waiver claims, trades), newest first.
+
+        Uses ESPN's mTransactions2 view. Player and team IDs are resolved to names. Answers
+        "who dropped this player and when" and so why he is on waivers.
+
+        Args:
+            limit: Maximum transactions to return (1-200)
+            scoring_period: Restrict to one scoring period (day); default is ESPN's current
+            team_id: Only transactions proposed by, or moving a player to/from, this team
+        """
+        if not isinstance(limit, int) or limit < 1 or limit > 200:
+            raise ValueError(f"Invalid limit: {limit}. Must be between 1 and 200.")
+        self._validate_positive_int(scoring_period, "scoring_period")
+        self._validate_positive_int(team_id, "team_id")
+
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        params: dict[str, Any] = {"view": "mTransactions2"}
+        if scoring_period:
+            params["scoringPeriodId"] = str(scoring_period)
+        data = await self._make_request(url, params)
+        raw = [t for t in (data.get("transactions") or []) if isinstance(t, dict)]
+
+        def involves(t: dict[str, Any]) -> bool:
+            if team_id is None:
+                return True
+            if t.get("teamId") == team_id:
+                return True
+            return any(
+                team_id in (i.get("fromTeamId"), i.get("toTeamId"))
+                for i in t.get("items") or []
+                if isinstance(i, dict)
+            )
+
+        raw = [t for t in raw if involves(t)]
+        raw.sort(key=lambda t: t.get("proposedDate") or t.get("processDate") or 0, reverse=True)
+        raw = raw[:limit]
+
+        team_names: dict[int, str] = {}
+        try:
+            team_names = {t.id: t.name for t in await self.get_league_teams()}
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Could not get team names for transactions: {e}")
+        player_ids = sorted(
+            {
+                i["playerId"]
+                for t in raw
+                for i in t.get("items") or []
+                if isinstance(i, dict) and isinstance(i.get("playerId"), int)
+            }
+        )
+        player_names = {pid: name for pid, name, _ in await self._resolve_players(player_ids)}
+
+        kinds = {
+            "FREEAGENT": "free-agent move",
+            "WAIVER": "waiver claim",
+            "TRADE_ACCEPT": "trade",
+            "TRADE_PROPOSAL": "trade proposal",
+            "ROSTER": "lineup change",
+            "DRAFT": "draft pick",
+        }
+        transactions: list[Transaction] = []
+        for t in raw:
+            items = [
+                TransactionItem(
+                    playerId=i.get("playerId"),
+                    playerName=player_names.get(i["playerId"])
+                    if isinstance(i.get("playerId"), int)
+                    else None,
+                    type=i.get("type"),
+                    fromTeamId=i.get("fromTeamId"),
+                    toTeamId=i.get("toTeamId"),
+                )
+                for i in t.get("items") or []
+                if isinstance(i, dict)
+            ]
+            proposer = t.get("teamId")
+            team_name = team_names.get(proposer, f"Team {proposer}") if proposer else "League"
+            added = [i.playerName or str(i.playerId) for i in items if i.type == "ADD"]
+            dropped = [i.playerName or str(i.playerId) for i in items if i.type == "DROP"]
+            parts = []
+            if added:
+                parts.append("added " + ", ".join(added))
+            if dropped:
+                parts.append("dropped " + ", ".join(dropped))
+            kind = kinds.get(str(t.get("type")), str(t.get("type") or "transaction").lower())
+            when = self._epoch_ms_to_iso(t.get("processDate") or t.get("proposedDate"))
+            status = t.get("status")
+            summary = f"{team_name} {'; '.join(parts) or kind}"
+            summary += f" ({kind}"
+            if status and status != "EXECUTED":
+                summary += f", {str(status).lower()}"
+            if when:
+                summary += f", {when[:10]}"
+            summary += ")"
+            transactions.append(
+                Transaction(
+                    id=str(t["id"]) if t.get("id") is not None else None,
+                    type=t.get("type"),
+                    status=status,
+                    teamId=proposer,
+                    teamName=team_names.get(proposer) if proposer else None,
+                    scoringPeriodId=t.get("scoringPeriodId"),
+                    proposedDateISO=self._epoch_ms_to_iso(t.get("proposedDate")),
+                    processDateISO=self._epoch_ms_to_iso(t.get("processDate")),
+                    bidAmount=t.get("bidAmount"),
+                    items=items,
+                    summary=summary,
+                )
+            )
+        return transactions
 
     # ------------------------------------------------------------------ matchup period dates
 

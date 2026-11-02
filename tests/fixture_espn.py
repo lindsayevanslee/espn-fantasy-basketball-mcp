@@ -49,6 +49,8 @@ def fixture_name(
         if "filterStatus" in fantasy_filter:
             return "league_kona_free_agents.json"
         return "league_kona_player_info.json"
+    if "mTransactions2" in views:
+        return "league_mTransactions.json"
     if "mMatchup" in views:
         return "league_mMatchup.json"
     if "mRoster" in views:

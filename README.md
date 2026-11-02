@@ -16,33 +16,34 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 ### Available Tools
 
 #### League & Roster Tools
-1. **get_league_teams** - All teams in the league with records, labelled as category or matchup wins
-2. **get_league_settings** - Scoring categories, roster slots, matchup period calendar dates, waiver and trade rules with a plain-English acquisition limit, current period and today's scoring period
-3. **get_team_roster** - Roster for a team with per-game stats (incl. FGM/FGA/FTM/FTA), injury status with ESPN's reason and expected return, today's game, and which scoring period (day) the roster is for; players ESPN still lists but who were dropped are removed and named in `staleEntriesRemoved`
+1. **get_league_teams** - All teams with records (labelled as category or matchup wins), waiver rank, and acquisitions used vs. the limit this matchup
+2. **get_league_settings** - Scoring categories, roster slots, matchup period calendar dates, waiver rules (order reset, process time) and acquisition limits in plain English, including the per-matchup allowance when the limit is per day
+3. **get_team_roster** - Roster for a team with per-game stats (incl. FGM/FGA/FTM/FTA), injury status with ESPN's reason and expected return, today's game, which scoring period (day) the roster is for and which starting slots are locked for it; players ESPN still lists but who were dropped are removed and named in `staleEntriesRemoved`
 4. **get_team_season_stats** - Season category totals, record, win percentage, and games back for a team
-5. **get_free_agents** - Free agents/waiver wire players with ownership percentages and injury detail (pass `verbose=true` for stats)
+5. **get_free_agents** - Free agents/waiver wire players with ownership percentages, injury detail, and whether each is addable now or on waivers until a given time (pass `verbose=true` for stats)
 6. **get_nba_schedule** - Get NBA game schedule for a date
+7. **get_transactions** - Recent adds, drops, waiver claims and trades with player and team names, newest first (answers "why is this player on waivers")
 
 #### Matchup Tools
-7. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
-8. **get_my_current_matchup** - Your current matchup, both rosters with per-game averages, and category scores in one call (`verbose=true` adds season totals)
-9. **analyze_matchup** - Category-by-category projections, close categories, start/sit priorities, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
-10. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping; pass `player_ids` to compare streaming candidates alongside
-11. **get_player_schedule** - Games this matchup period and next for any ESPN player IDs (free agents, trade targets), with the date windows counted
+8. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
+9. **get_my_current_matchup** - Your current matchup, both rosters with per-game averages, and category scores in one call (`verbose=true` adds season totals)
+10. **analyze_matchup** - Category-by-category projections, close categories, start/sit priorities, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
+11. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping; pass `player_ids` to compare streaming candidates alongside
+12. **get_player_schedule** - Games this matchup period and next for any ESPN player IDs (free agents, trade targets), with the date windows counted
 
 #### Player Analysis Tools
-12. **search_players** - Find ESPN player IDs by name (last name, partial, accented, or misspelled) and see whether each match is a free agent in your league or who owns them
-13. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
-14. **compare_players** - Compare players across categories
-15. **analyze_trade_proposal** - Value and category impact of a proposed trade
-16. **get_trending_players** - Players trending up or down in ownership
+13. **search_players** - Find ESPN player IDs by name (last name, partial, accented, or misspelled) and see whether each match is a free agent in your league or who owns them
+14. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
+15. **compare_players** - Compare players across categories
+16. **analyze_trade_proposal** - Value and category impact of a proposed trade
+17. **get_trending_players** - Players trending up or down in ownership
 
 #### Live Draft Assistant Tools
-17. **get_draft_status** - Get current draft status including all picks and progress
-18. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
-19. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
-20. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
-21. **get_available_players** - Get top available players for the draft with auction values
+18. **get_draft_status** - Get current draft status including all picks and progress
+19. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
+20. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
+21. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
+22. **get_available_players** - Get top available players for the draft with auction values
 
 Tools that take a `player_id` expect ESPN's numeric ID; use `search_players` to find it from a name. Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_YEAR`, `ESPN_S2`, and `ESPN_SWID` from the environment, so you rarely need to pass them. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
 

@@ -32,6 +32,9 @@ from espn_fantasy_basketball import (
 from espn_fantasy_basketball import (
     get_team_roster as get_team_roster_tool,
 )
+from espn_fantasy_basketball import (
+    get_transactions as get_transactions_tool,
+)
 from espn_fantasy_basketball_mcp.client import ESPNFantasyBasketballClient
 from tests.fixture_espn import use_fixtures
 
@@ -66,6 +69,8 @@ async def test_unstarted_matchup_returns_projections(client):
     analysis = await client.analyze_matchup(MY_TEAM)
 
     assert analysis.opponentTeamId == 12
+    assert (analysis.yourTeamAbbrev, analysis.opponentTeamAbbrev) == ("SA", "WW")
+    assert analysis.opponentTeamName == "Waiver Wire Warriors"
     cats = {c.category: c for c in analysis.categoryProjections}
     assert set(cats) == {
         "points",
@@ -140,6 +145,8 @@ async def test_get_matchups_takes_a_matchup_period(client, espn):
     period3 = await client.get_matchups(matchup_period=3, team_id=MY_TEAM)
     assert [m.matchupPeriodId for m in period3] == [3]
     assert period3[0].home.teamId == MY_TEAM and period3[0].away.teamId == 12
+    assert (period3[0].home.teamAbbrev, period3[0].away.teamAbbrev) == ("SA", "WW")
+    assert period3[0].away.teamName == "Waiver Wire Warriors"
     assert period3[0].home.categoryScores is None, "not started: no scores, no crash"
 
     current = await client.get_matchups(team_id=MY_TEAM)
@@ -155,6 +162,14 @@ async def test_free_agents_have_ownership_percentages(client):
     free_agents = await client.get_free_agents(size=10, verbose=True)
     owned = {p.fullName: p.ownership.percentOwned for p in free_agents}
     assert owned == {"Drew Wing": 61.2, "Kris Big": 48.9, "Zed Streamer": 5.5}
+    # 3. waiver state: Zed Streamer was dropped today and clears Tuesday 08:00 ET
+    by_name = {p.fullName: p for p in free_agents}
+    assert by_name["Drew Wing"].availabilityStatus == "FREEAGENT"
+    assert by_name["Drew Wing"].availabilityNote == "Free agent: can be added now"
+    zed = by_name["Zed Streamer"]
+    assert zed.availabilityStatus == "WAIVERS"
+    assert zed.waiverProcessDateISO == "2026-11-03T08:00:00-05:00"
+    assert zed.availabilityNote == "On waivers; claims process 2026-11-03T08:00:00-05:00"
     assert all(v > 0 for v in owned.values())
     assert free_agents[0].ownership.percentStarted == 40.1
     # verbose stats: games derived when ESPN omits stat 42; shooting splits present
@@ -164,8 +179,11 @@ async def test_free_agents_have_ownership_percentages(client):
 
 @pytest.mark.asyncio
 async def test_search_reports_ownership_and_injury_detail(client):
+    [zed] = await client.search_players("zed streamer", limit=1)
+    assert zed.availabilityStatus == "WAIVERS" and zed.waiverProcessDateISO.startswith("2026-11-03")
     [big] = await client.search_players("kris big", limit=1)
     assert big.isFreeAgent is True and big.percentOwned == 48.9
+    assert big.availabilityStatus == "FREEAGENT"
     assert big.injuryStatus == "DAY_TO_DAY"
     assert big.injuryDetails.startswith("Back (not specified)"), "matched by name"
 
@@ -260,6 +278,23 @@ async def test_past_week_requests_its_final_day(client, espn):
     assert sent == {"6"}
 
 
+@pytest.mark.asyncio
+async def test_future_week_requests_its_first_day(client, espn):
+    """Period 3 starts Monday Nov 2 = scoring period 14: ESPN returns the lineup set for it."""
+    matchup = await client.get_matchup_for_period(MY_TEAM, 3)
+    assert matchup.scoringPeriod == 14
+    sent = {
+        params.get("scoringPeriodId") for _, params, _ in espn.requests_for("league_mRoster.json")
+    }
+    assert sent == {"14"}
+    # a future day is still "current": dropped players are filtered out of it
+    assert matchup.opponentRoster.staleEntriesRemoved == [
+        "Stale Center (onTeamId=0)",
+        "Traded Guard (onTeamId=5)",
+    ]
+    assert matchup.yourRoster.scoringPeriodDate == "2026-11-02"
+
+
 # --------------------------------------------------------------------------- shooting splits
 @pytest.mark.asyncio
 async def test_percentages_from_made_and_attempted(client):
@@ -269,6 +304,7 @@ async def test_percentages_from_made_and_attempted(client):
     }
     assert stats["Jon Collins"]["ft_pct"] == 80.0, "no FT% key from ESPN; 28 FTM / 35 FTA"
     assert stats["Jon Collins"]["fta"] == 5.0
+    # ESPN sends FT% 0.0 for Wallace's 0 attempts; that is not a percentage, so null + fta 0
     assert stats["Cason Wallace"]["ft_pct"] is None and stats["Cason Wallace"]["fta"] == 0.0
     assert stats["Cason Wallace"]["gamesPlayed"] == 9, "stat 42 present"
     assert stats["Ava Guard"]["fg_pct"] == 45.7 and stats["Ava Guard"]["ft_pct"] == 87.5
@@ -286,9 +322,18 @@ async def test_player_stats_tool_data_has_games_and_splits(client):
 @pytest.mark.asyncio
 async def test_settings_describe_limits_and_records(client):
     settings = await client.get_league_settings()
-    assert settings.acquisitionSettings.acquisitionLimitDescription == (
-        "1 acquisition per matchup period; no season-long limit."
+    acq = settings.acquisitionSettings
+    assert acq.matchupLimitPerScoringPeriod is True
+    assert acq.acquisitionLimitDescription == (
+        "1 per day (scoring period), so 7 for matchup period 2 (7 days); no season-long limit."
     )
+    assert acq.effectiveLimitByMatchupPeriod["1"] == 6, "six-day opening week"
+    assert acq.effectiveLimitByMatchupPeriod["3"] == 7
+    assert acq.effectiveLimitByMatchupPeriod["17"] == 14, "two-week All-Star period"
+    assert acq.effectiveLimitCurrentMatchup == 7
+    # 2. waiver order rule
+    assert acq.waiverOrderReset is False
+    assert "back of the waiver order after each successful claim" in acq.waiverOrderDescription
     teams = await client.get_league_teams()
     mine = next(t for t in teams if t.id == MY_TEAM)
     assert (mine.record.overall.wins, mine.record.overall.losses, mine.record.overall.ties) == (
@@ -298,6 +343,14 @@ async def test_settings_describe_limits_and_records(client):
     )
     assert mine.recordType == "categories"
     assert "not matchup wins" in mine.recordDescription
+    # 2./4. waiver rank and acquisitions used vs the effective limit
+    assert mine.waiverRank == 12
+    assert mine.transactionCounter.acquisitions == 3
+    assert mine.transactionCounter.matchupAcquisitionTotals == {"1": 2, "2": 1}
+    assert (mine.acquisitionsThisMatchup, mine.acquisitionLimitThisMatchup) == (1, 7)
+    assert mine.acquisitionsRemainingThisMatchup == 6
+    warriors = next(t for t in teams if t.id == 12)
+    assert (warriors.waiverRank, warriors.acquisitionsRemainingThisMatchup) == (5, 4)
     # live key scheme: 1=PG ... 5=C, with an unexplained key 0
     assert settings.rosterSettings.positionLimitNames == {
         "POS_0": 0,
@@ -313,7 +366,7 @@ async def test_settings_describe_limits_and_records(client):
     ("per_matchup", "per_day", "season", "expected"),
     [
         (1.0, False, -1, "1 acquisition per matchup period; no season-long limit."),
-        (1.0, True, -1, "1 acquisition per day (scoring period); no season-long limit."),
+        (1.0, True, -1, "1 per day (scoring period); no season-long limit."),
         (4.0, False, 60, "4 acquisitions per matchup period; 60 for the whole season."),
         (-1, False, -1, "No limit on acquisitions per matchup period; no season-long limit."),
     ],
@@ -322,6 +375,22 @@ def test_acquisition_limit_description(per_matchup, per_day, season, expected):
     assert (
         ESPNFantasyBasketballClient._describe_acquisition_limit(per_matchup, per_day, season)
         == expected
+    )
+
+
+def test_effective_acquisition_limits():
+    f = ESPNFantasyBasketballClient._effective_acquisition_limits
+    dates = {"1": ["2026-10-20", "2026-10-25"], "2": ["2026-10-26", "2026-11-01"]}
+    assert f(1.0, True, dates) == {"1": 6, "2": 7}
+    assert f(2.0, True, dates) == {"1": 12, "2": 14}
+    assert f(4.0, False, dates) == {"1": 4, "2": 4}
+    assert f(-1, False, dates) is None and f(None, True, dates) is None
+
+
+def test_per_day_description_includes_the_week_total():
+    f = ESPNFantasyBasketballClient._describe_acquisition_limit
+    assert f(1.0, True, -1, days_in_current=6, current_period=1) == (
+        "1 per day (scoring period), so 6 for matchup period 1 (6 days); no season-long limit."
     )
 
 
@@ -355,6 +424,22 @@ async def test_team_roster_tool_reports_period(espn):
     roster = await get_team_roster_tool()
     assert roster["scoringPeriodId"] == 13 and roster["lineupLocked"] is False
     assert roster["staleEntriesRemoved"] is None and roster["note"] is None
+    # 7. which starting slots are locked for this scoring period
+    assert roster["lockedSlots"] == ["PG: Ava Guard"]
+    assert roster["unlockedSlots"] == ["PF: Jon Collins", "SG: Cason Wallace"]
+    assert roster["entries"][0]["lineupLocked"] is True
+    assert roster["entries"][1]["lineupLocked"] is False
+    assert roster["entries"][3]["lineupSlotName"] == "BENCH", "bench is not a starting slot"
+
+
+@pytest.mark.asyncio
+async def test_fully_locked_roster_lists_no_unlocked_slots(client):
+    roster = await client.get_team_roster(12)
+    assert roster.lineupLocked is True
+    assert roster.lockedSlots == ["PF: Loyal Forward", "SF: Solid Wing"]
+    assert roster.unlockedSlots == []
+    slim = await client.get_my_current_matchup(MY_TEAM)
+    assert slim.yourRoster.lockedSlots == ["PG: Ava Guard"], "slim rosters keep lock state"
 
 
 @pytest.mark.asyncio
@@ -362,6 +447,42 @@ async def test_analysis_opponent_roster_excludes_dropped_player(client):
     analysis = await client.analyze_matchup(MY_TEAM, matchup_period=3)
     # Stale Center (TOR, 2 games Nov 2-8) must not add to the opponent's games
     assert analysis.opponentGamesRemaining == 3 + 4, "ATL 3 + MIN 4"
+
+
+# --------------------------------------------------------------------------- transactions
+@pytest.mark.asyncio
+async def test_transactions_explain_waiver_state(client):
+    log = await client.get_transactions()
+    assert [t.id for t in log] == ["t-101", "t-100", "t-99"], "newest first"
+    pending, drop, lineup = log
+    assert pending.type == "WAIVER" and pending.status == "PENDING"
+    assert pending.teamName == "Statistical Anomalies"
+    assert pending.summary == (
+        "Statistical Anomalies added Zed Streamer; dropped Benched Guy "
+        "(waiver claim, pending, 2026-11-01)"
+    )
+    assert drop.summary == (
+        "Fifth Team added Drew Wing; dropped Zed Streamer (free-agent move, 2026-11-01)"
+    )
+    assert drop.processDateISO == "2026-11-01T09:15:00-05:00"
+    assert [i.type for i in drop.items] == ["DROP", "ADD"]
+    assert drop.items[0].playerName == "Zed Streamer" and drop.items[0].toTeamId == 0
+    assert lineup.summary == "Waiver Wire Warriors lineup change (lineup change, 2026-10-31)"
+
+    mine = await client.get_transactions(team_id=MY_TEAM)
+    assert [t.id for t in mine] == ["t-101"]
+    dropped_by_5 = await client.get_transactions(team_id=5, limit=1)
+    assert dropped_by_5[0].id == "t-100"
+
+
+@pytest.mark.asyncio
+async def test_transactions_tool_end_to_end(espn):
+    result = await get_transactions_tool(limit=2)
+    assert len(result) == 2 and result[0]["items"][0]["playerName"] == "Zed Streamer"
+    sent = [params for _, params, _ in espn.requests_for("league_mTransactions.json")]
+    assert sent and all(p["view"] == "mTransactions2" for p in sent)
+    with pytest.raises(ValueError, match="Invalid limit"):
+        await get_transactions_tool(limit=0)
 
 
 # --------------------------------------------------------------------------- 8. injury detail
@@ -465,3 +586,19 @@ def test_injury_lookup_falls_back_from_id_to_link_to_name():
 )
 def test_games_played_derivation(stat_set, expected):
     assert ESPNFantasyBasketballClient._games_played(stat_set) == expected
+
+
+@pytest.mark.parametrize(
+    ("averages", "totals", "expected_ft"),
+    [
+        ({"20": 0.0, "15": 0.0, "16": 0.0}, {}, None),  # no attempts: ESPN's 0.0 is not a pct
+        ({"20": 0.0, "15": 0.0, "16": 2.0}, {}, 0.0),  # attempts but none made: a real 0%
+        ({"15": 3.0, "16": 4.0}, {}, 75.0),  # no ESPN key: made / attempted
+        ({"20": 0.8, "15": 3.0, "16": 4.0}, {}, 80.0),  # ESPN key wins when present
+        ({}, {"15": 28.0, "16": 35.0}, 80.0),  # totals only
+        ({}, {}, None),
+    ],
+)
+def test_ft_pct_is_null_exactly_when_no_attempts(averages, totals, expected_ft):
+    splits = ESPNFantasyBasketballClient._shooting_splits(averages, totals, 7)
+    assert splits["ft_pct"] == expected_ft

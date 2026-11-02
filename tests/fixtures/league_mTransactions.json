@@ -1,0 +1,89 @@
+{
+ "id": 12345,
+ "seasonId": 2027,
+ "scoringPeriodId": 13,
+ "transactions": [
+  {
+   "id": "t-100",
+   "type": "FREEAGENT",
+   "status": "EXECUTED",
+   "executionType": "PROCESS",
+   "teamId": 5,
+   "memberId": "REDACTED-ID",
+   "scoringPeriodId": 13,
+   "proposedDate": 1793542500000,
+   "processDate": 1793542500000,
+   "isPending": false,
+   "rating": 0,
+   "items": [
+    {
+     "playerId": 7003,
+     "type": "DROP",
+     "fromTeamId": 5,
+     "toTeamId": 0,
+     "fromLineupSlotId": 12,
+     "toLineupSlotId": -1
+    },
+    {
+     "playerId": 7001,
+     "type": "ADD",
+     "fromTeamId": 0,
+     "toTeamId": 5,
+     "fromLineupSlotId": -1,
+     "toLineupSlotId": 12
+    }
+   ]
+  },
+  {
+   "id": "t-101",
+   "type": "WAIVER",
+   "status": "PENDING",
+   "executionType": "PROCESS",
+   "teamId": 8,
+   "memberId": "REDACTED-ID",
+   "scoringPeriodId": 15,
+   "proposedDate": 1793551200000,
+   "bidAmount": 0,
+   "isPending": true,
+   "items": [
+    {
+     "playerId": 7003,
+     "type": "ADD",
+     "fromTeamId": 0,
+     "toTeamId": 8,
+     "fromLineupSlotId": -1,
+     "toLineupSlotId": 12
+    },
+    {
+     "playerId": 1004,
+     "type": "DROP",
+     "fromTeamId": 8,
+     "toTeamId": 0,
+     "fromLineupSlotId": 12,
+     "toLineupSlotId": -1
+    }
+   ]
+  },
+  {
+   "id": "t-99",
+   "type": "ROSTER",
+   "status": "EXECUTED",
+   "executionType": "EXECUTE",
+   "teamId": 12,
+   "memberId": "REDACTED-ID",
+   "scoringPeriodId": 12,
+   "proposedDate": 1793480700000,
+   "processDate": 1793480700000,
+   "items": [
+    {
+     "playerId": 3004,
+     "type": "LINEUP",
+     "fromTeamId": 12,
+     "toTeamId": 12,
+     "fromLineupSlotId": 12,
+     "toLineupSlotId": 2
+    }
+   ]
+  }
+ ]
+}

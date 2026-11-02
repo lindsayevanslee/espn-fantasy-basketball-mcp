@@ -830,6 +830,8 @@ async def analyze_matchup(
         opponentTeamId=opponent_team_id,
         yourTeamName=matchup.yourTeam.teamName,
         opponentTeamName=matchup.opponentTeam.teamName,
+        yourTeamAbbrev=matchup.yourTeam.teamAbbrev,
+        opponentTeamAbbrev=matchup.opponentTeam.teamAbbrev,
         categoryProjections=category_projections,
         categoriesWinning=categories_winning,
         categoriesLosing=categories_losing,

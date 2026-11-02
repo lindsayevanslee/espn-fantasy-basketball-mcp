@@ -85,6 +85,16 @@ class TeamRecord(BaseModel):
     overall: OverallRecord | None = None
 
 
+class TransactionCounter(BaseModel):
+    """ESPN's per-team transaction tallies (mTeam view)."""
+
+    acquisitions: int | None = None  # Season adds (free agent + waiver)
+    drops: int | None = None
+    trades: int | None = None
+    moveToIR: int | None = None
+    matchupAcquisitionTotals: dict[str, int] = {}  # matchup period -> adds in that period
+
+
 class Team(BaseModel):
     id: int
     abbrev: str
@@ -93,6 +103,13 @@ class Team(BaseModel):
     logo: str | None = None
     owners: list[str] | None = None  # ESPN returns owner IDs as strings
     record: TeamRecord | None = None
+    waiverRank: int | None = None  # 1 = first claim on waivers
+    transactionCounter: TransactionCounter | None = None
+    # Adds used in the current matchup period against the effective limit (per-day limits are
+    # multiplied by the days in the period). Limit None = no limit.
+    acquisitionsThisMatchup: int | None = None
+    acquisitionLimitThisMatchup: int | None = None
+    acquisitionsRemainingThisMatchup: int | None = None
     # What one win/loss in `record` means: "categories" in an H2H Each Category league (one
     # result per scoring category per matchup), "matchups" in Most Categories or Points leagues.
     recordType: str | None = None
@@ -159,6 +176,8 @@ class MatchupAnalysis(BaseModel):
     opponentTeamId: int
     yourTeamName: str | None = None
     opponentTeamName: str | None = None
+    yourTeamAbbrev: str | None = None
+    opponentTeamAbbrev: str | None = None
 
     # Category analysis
     categoryProjections: list[CategoryProjection]  # Projections for each category
@@ -199,6 +218,9 @@ class PlayerSearchResult(BaseModel):
     injuryStatus: str | None = None
     injuryDetails: str | None = None  # Reason / timeline when ESPN publishes one
     isFreeAgent: bool | None = None  # True if no fantasy team owns the player (None if unknown)
+    availabilityStatus: str | None = None  # FREEAGENT (addable now), WAIVERS, ONTEAM
+    waiverProcessDateISO: str | None = None  # When waiver claims for this player process
+    availabilityNote: str | None = None  # e.g. "On waivers; claims process 2026-11-03T08:00-05:00"
     fantasyTeamId: int | None = None
     fantasyTeamName: str | None = None
     percentOwned: float | None = None
@@ -231,6 +253,11 @@ class Player(BaseModel):
     # "Knee - Sprain (left); expected return 2026-11-10. Williams (knee) is out Tuesday."
     injuryDetails: str | None = None
     injuryReturnDate: str | None = None  # YYYY-MM-DD when ESPN lists an expected return
+    # Free-agent pool state (kona_player_info): FREEAGENT = can be added now, WAIVERS = claims
+    # process at waiverProcessDateISO (ESPN's "WA (Tue)" flag), ONTEAM = rostered.
+    availabilityStatus: str | None = None
+    waiverProcessDateISO: str | None = None
+    availabilityNote: str | None = None
     stats: dict[str, Any] | None = None
     ownership: PlayerOwnership | None = None
     active: bool | None = None
@@ -269,6 +296,7 @@ class RosterEntry(BaseModel):
     acquisitionType: str | None = None
     injuryStatus: str | None = None
     todaysGame: TodaysGame | None = None  # Today's game info if player has a game
+    lineupLocked: bool | None = None  # This slot is locked for the roster's scoring period
 
 
 class Roster(BaseModel):
@@ -280,6 +308,8 @@ class Roster(BaseModel):
     scoringPeriodId: int | None = None
     scoringPeriodDate: str | None = None  # YYYY-MM-DD when it can be determined
     lineupLocked: bool | None = None  # True if every non-bench, non-IR slot is locked
+    lockedSlots: list[str] | None = None  # "SLOT: player" for starting slots already locked
+    unlockedSlots: list[str] | None = None  # "SLOT: player" for starting slots still editable
     note: str | None = None
     # Players ESPN listed under this team whose playerPoolEntry.onTeamId says they now belong to
     # another team or the free-agent pool (a dropped player whose lineup slot was locked). They
@@ -290,6 +320,7 @@ class Roster(BaseModel):
 class MatchupTeam(BaseModel):
     teamId: int | None = None
     teamName: str | None = None  # Fantasy team name (e.g., "John's Squad")
+    teamAbbrev: str | None = None  # Stable even when an owner renames the team mid-week
     totalPoints: float | None = None
     totalProjectedPoints: float | None = None
     gamesPlayed: int | None = None
@@ -517,7 +548,13 @@ class AcquisitionSettings(BaseModel):
     matchupAcquisitionLimit: float  # Max acquisitions per matchup (or per day, see below)
     matchupLimitPerScoringPeriod: bool  # True: the limit above applies per day, not per matchup
     acquisitionLimit: int = -1  # Season limit (-1 = unlimited)
-    acquisitionLimitDescription: str | None = None  # e.g. "1 acquisition per matchup period"
+    acquisitionLimitDescription: str | None = None  # e.g. "1 per day, so 7 for matchup period 2"
+    # Adds allowed per matchup period after applying a per-day limit to the period's length
+    # (a 6-day opening week allows 6, a 7-day week 7). None = no limit.
+    effectiveLimitByMatchupPeriod: dict[str, int] | None = None
+    effectiveLimitCurrentMatchup: int | None = None
+    waiverOrderReset: bool | None = None  # ESPN's raw flag
+    waiverOrderDescription: str | None = None  # What happens to your waiver rank after a claim
     minimumBid: int = 0
 
 
@@ -572,3 +609,29 @@ class LeagueSettings(BaseModel):
     tradeSettings: TradeSettings
     draftSettings: DraftSettings = DraftSettings()
     status: LeagueStatus
+
+
+class TransactionItem(BaseModel):
+    """One player movement inside a transaction."""
+
+    playerId: int | None = None
+    playerName: str | None = None
+    type: str | None = None  # ADD, DROP, LINEUP, ...
+    fromTeamId: int | None = None  # 0 = free-agent pool
+    toTeamId: int | None = None
+
+
+class Transaction(BaseModel):
+    """A league transaction (mTransactions2 view): add/drop, waiver claim, trade, lineup move."""
+
+    id: str | None = None
+    type: str | None = None  # FREEAGENT, WAIVER, TRADE_ACCEPT, ROSTER, DRAFT, ...
+    status: str | None = None  # EXECUTED, PENDING, FAILED_*, ...
+    teamId: int | None = None
+    teamName: str | None = None
+    scoringPeriodId: int | None = None
+    proposedDateISO: str | None = None
+    processDateISO: str | None = None
+    bidAmount: int | None = None
+    items: list[TransactionItem] = []
+    summary: str  # e.g. "Fifth Team dropped Zed Streamer (free-agent move, 2026-11-01)"

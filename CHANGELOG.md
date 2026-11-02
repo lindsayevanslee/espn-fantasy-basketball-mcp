@@ -3,6 +3,32 @@
 ## [Unreleased]
 
 ### Added
+- `get_transactions` tool (ESPN `mTransactions2` view): recent adds, drops, waiver claims and
+  trades, newest first, with player and team names and a one-line summary, filterable by team
+  or scoring period. Answers "who dropped this player and when".
+- Waiver state on free agents and search results: `availabilityStatus` (FREEAGENT = addable
+  now, WAIVERS = ESPN's "WA" flag), `waiverProcessDateISO` and an `availabilityNote`.
+- `get_league_teams`: `waiverRank`, ESPN's `transactionCounter`, and `acquisitionsThisMatchup`
+  / `acquisitionLimitThisMatchup` / `acquisitionsRemainingThisMatchup`.
+- `get_league_settings`: when `matchupLimitPerScoringPeriod` is true the allowance for a
+  matchup period is the per-day limit times its length; `effectiveLimitByMatchupPeriod` (6 for
+  a six-day opening week, 7 for a normal week, 14 for the All-Star fortnight),
+  `effectiveLimitCurrentMatchup`, and the description reads "1 per day (scoring period), so 7
+  for matchup period 2 (7 days)". `waiverOrderReset` with a `waiverOrderDescription`.
+- Per-slot lock state on rosters: each entry's `lineupLocked`, plus `lockedSlots` and
+  `unlockedSlots` ("SLOT: player") for the roster's scoring period.
+- `teamAbbrev` on matchup sides and `yourTeamAbbrev` / `opponentTeamAbbrev` on the analysis,
+  so a team renamed mid-week can still be identified.
+
+### Changed
+- `analyze_matchup` / `get_my_current_matchup` for a *future* matchup period now request the
+  roster for that period's first scoring period (the lineup as set for that day) instead of
+  today's. The stale-entry filter applies to today's and future rosters alike.
+- A player with zero attempts now has `ft_pct` / `fg_pct` null even when ESPN sends 0.0 for the
+  percentage (the docstring promised null; the code returned 0.0). Attempts are alongside.
+- `scripts/record_fixtures.py` also records the transactions view.
+
+### Added (merged in #15)
 - Fixture-backed end-to-end tests (`tests/fixtures/`, `tests/test_fixtures_e2e.py`): every
   ESPN request is answered from an ESPN-shaped JSON file and the clock is frozen on the last
   day of a matchup period, so `analyze_matchup`, `get_matchups`, rosters, free agents,

@@ -19,6 +19,22 @@
    ],
    "primaryOwner": "REDACTED-ID",
    "playoffSeed": 1,
+   "waiverRank": 12,
+   "transactionCounter": {
+    "acquisitionBudgetSpent": 0,
+    "acquisitions": 3,
+    "drops": 3,
+    "trades": 0,
+    "moveToIR": 1,
+    "moveToActive": 4,
+    "misc": 0,
+    "paid": 0,
+    "teamCharges": 0,
+    "matchupAcquisitionTotals": {
+     "1": 2,
+     "2": 1
+    }
+   },
    "record": {
     "overall": {
      "wins": 11,
@@ -46,8 +62,8 @@
        "onTeamId": 8,
        "keeperValue": 0,
        "keeperValueFuture": 0,
-       "lineupLocked": false,
-       "rosterLocked": false,
+       "lineupLocked": true,
+       "rosterLocked": true,
        "tradeLocked": false,
        "status": "ONTEAM",
        "player": {
@@ -432,7 +448,8 @@
            "15": 0.0,
            "16": 0.0,
            "40": 26.0,
-           "19": 0.438
+           "19": 0.438,
+           "20": 0.0
           },
           "stats": {
            "0": 81.0,
@@ -448,7 +465,8 @@
            "16": 0.0,
            "40": 234.0,
            "19": 0.438,
-           "42": 9.0
+           "42": 9.0,
+           "20": 0.0
           },
           "appliedAverage": 17.0,
           "appliedTotal": 0.0
@@ -592,6 +610,21 @@
    ],
    "primaryOwner": "REDACTED-ID",
    "playoffSeed": 1,
+   "waiverRank": 1,
+   "transactionCounter": {
+    "acquisitionBudgetSpent": 0,
+    "acquisitions": 1,
+    "drops": 1,
+    "trades": 0,
+    "moveToIR": 0,
+    "moveToActive": 4,
+    "misc": 0,
+    "paid": 0,
+    "teamCharges": 0,
+    "matchupAcquisitionTotals": {
+     "2": 1
+    }
+   },
    "record": {
     "overall": {
      "wins": 9,
@@ -1135,6 +1168,22 @@
    ],
    "primaryOwner": "REDACTED-ID",
    "playoffSeed": 1,
+   "waiverRank": 5,
+   "transactionCounter": {
+    "acquisitionBudgetSpent": 0,
+    "acquisitions": 5,
+    "drops": 5,
+    "trades": 1,
+    "moveToIR": 0,
+    "moveToActive": 4,
+    "misc": 0,
+    "paid": 0,
+    "teamCharges": 0,
+    "matchupAcquisitionTotals": {
+     "1": 2,
+     "2": 3
+    }
+   },
    "record": {
     "overall": {
      "wins": 7,
@@ -1850,6 +1899,22 @@
    ],
    "primaryOwner": "REDACTED-ID",
    "playoffSeed": 1,
+   "waiverRank": 7,
+   "transactionCounter": {
+    "acquisitionBudgetSpent": 0,
+    "acquisitions": 2,
+    "drops": 2,
+    "trades": 0,
+    "moveToIR": 0,
+    "moveToActive": 4,
+    "misc": 0,
+    "paid": 0,
+    "teamCharges": 0,
+    "matchupAcquisitionTotals": {
+     "1": 1,
+     "2": 1
+    }
+   },
    "record": {
     "overall": {
      "wins": 8,

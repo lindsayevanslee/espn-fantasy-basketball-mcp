@@ -191,9 +191,11 @@
    ],
    "waiverProcessHour": 3,
    "matchupAcquisitionLimit": 1.0,
-   "matchupLimitPerScoringPeriod": false,
+   "matchupLimitPerScoringPeriod": true,
    "acquisitionLimit": -1,
-   "minimumBid": 0
+   "minimumBid": 0,
+   "waiverOrderReset": false,
+   "isUsingAcquisitionBudget": false
   },
   "tradeSettings": {
    "deadlineDate": 1772514000000,
