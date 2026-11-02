@@ -149,3 +149,7 @@ Desktop.ini
 
 # docs
 docs/
+
+# Real ESPN responses recorded by scripts/record_fixtures.py. Sanitised, but they still carry
+# your league's names and rosters; keep them local. The committed fixtures are synthetic.
+tests/fixtures/recorded/

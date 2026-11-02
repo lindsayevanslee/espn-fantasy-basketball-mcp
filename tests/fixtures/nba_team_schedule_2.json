@@ -1,0 +1,274 @@
+{
+ "team": {
+  "id": "2",
+  "abbreviation": "BOS",
+  "displayName": "BOS"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "220261030",
+   "date": "2026-10-30T23:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c20",
+     "date": "2026-10-30T23:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "home",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "220261101",
+   "date": "2026-11-02T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c21",
+     "date": "2026-11-02T00:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "away",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "220261102",
+   "date": "2026-11-03T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c22",
+     "date": "2026-11-03T00:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "home",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "220261104",
+   "date": "2026-11-05T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c23",
+     "date": "2026-11-05T00:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "away",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "220261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c24",
+     "date": "2026-11-07T00:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "home",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "220261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c25",
+     "date": "2026-11-09T00:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "away",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "220261110",
+   "date": "2026-11-11T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c26",
+     "date": "2026-11-11T00:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "home",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "220261112",
+   "date": "2026-11-13T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c27",
+     "date": "2026-11-13T00:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "away",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "220261114",
+   "date": "2026-11-15T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "c28",
+     "date": "2026-11-15T00:00Z",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "home",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

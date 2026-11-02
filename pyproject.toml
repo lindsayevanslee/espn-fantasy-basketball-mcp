@@ -52,8 +52,9 @@ exclude_lines = [
 ]
 show_missing = true
 # Ratchet: the matchup/schedule/settings code added in 2025 had no tests, which pulled
-# coverage from 91% to ~42%; now ~74%. Raise this as tests are added; never lower it.
-fail_under = 70
+# coverage from 91% to ~42%; now ~81% with the fixture-backed end-to-end tests. Raise this as
+# tests are added; never lower it.
+fail_under = 78
 
 [dependency-groups]
 dev = [

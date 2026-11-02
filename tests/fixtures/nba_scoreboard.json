@@ -1,0 +1,41 @@
+{
+ "leagues": [
+  {
+   "id": "46",
+   "abbreviation": "NBA"
+  }
+ ],
+ "day": {
+  "date": "2026-11-01"
+ },
+ "events": [
+  {
+   "id": "401800001",
+   "date": "2026-11-01T20:00Z",
+   "name": "Boston Celtics at Dallas Mavericks",
+   "competitions": [
+    {
+     "id": "401800001",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "home",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "2",
+       "homeAway": "away",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

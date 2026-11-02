@@ -18,32 +18,34 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 ### Available Tools
 
 #### League & Roster Tools
-1. **get_league_teams** - Get all teams in an ESPN Fantasy Basketball league
-2. **get_league_settings** - Scoring categories, roster slots, schedule/matchup periods, waiver and trade rules, current period
-3. **get_team_roster** - Get roster for a specific team, with per-player season stats, injury status, and today's game
+1. **get_league_teams** - All teams with records (labelled as category or matchup wins), waiver rank, and acquisitions used vs. the limit this matchup
+2. **get_league_settings** - Scoring categories, roster slots, matchup period calendar dates, waiver rules (order reset, process time) and acquisition limits in plain English, including the per-matchup allowance when the limit is per day
+3. **get_team_roster** - Roster for a team with per-game stats (incl. FGM/FGA/FTM/FTA), injury status with ESPN's reason and expected return, today's game, which scoring period (day) the roster is for and which starting slots are locked for it; players ESPN still lists but who were dropped are removed and named in `staleEntriesRemoved`
 4. **get_team_season_stats** - Season category totals, record, win percentage, and games back for a team
-5. **get_free_agents** - Get free agents/waiver wire players (pass `verbose=true` for stats)
+5. **get_free_agents** - Free agents/waiver wire players with ownership percentages, injury detail, and whether each is addable now or on waivers until a given time (pass `verbose=true` for stats)
 6. **get_nba_schedule** - Get NBA game schedule for a date
+7. **get_transactions** - Recent adds, drops, waiver claims and trades with player and team names, newest first (answers "why is this player on waivers")
 
 #### Matchup Tools
-7. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
-8. **get_my_current_matchup** - Your current matchup, both rosters, and category scores in one call
-9. **analyze_matchup** - Category-by-category projections, close categories, start/sit priorities, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
-10. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping
+8. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
+9. **get_my_current_matchup** - Your current matchup, both rosters with per-game averages, and category scores in one call (`verbose=true` adds season totals)
+10. **analyze_matchup** - Category-by-category projections, close categories, start/sit priorities, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
+11. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping; pass `player_ids` to compare streaming candidates alongside
+12. **get_player_schedule** - Games this matchup period and next for any ESPN player IDs (free agents, trade targets), with the date windows counted
 
 #### Player Analysis Tools
-11. **search_players** - Find ESPN player IDs by name (last name, partial, accented, or misspelled) and see whether each match is a free agent in your league or who owns them
-12. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
-13. **compare_players** - Compare players across categories
-14. **analyze_trade_proposal** - Value and category impact of a proposed trade
-15. **get_trending_players** - Players trending up or down in ownership
+13. **search_players** - Find ESPN player IDs by name (last name, partial, accented, or misspelled) and see whether each match is a free agent in your league or who owns them
+14. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
+15. **compare_players** - Compare players across categories
+16. **analyze_trade_proposal** - Value and category impact of a proposed trade
+17. **get_trending_players** - Players trending up or down in ownership
 
 #### Live Draft Assistant Tools
-16. **get_draft_status** - Get current draft status including all picks and progress
-17. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
-18. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
-19. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
-20. **get_available_players** - Get top available players for the draft with auction values
+18. **get_draft_status** - Get current draft status including all picks and progress
+19. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
+20. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
+21. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
+22. **get_available_players** - Get top available players for the draft with auction values
 
 Tools that take a `player_id` expect ESPN's numeric ID; use `search_players` to find it from a name. Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_YEAR`, `ESPN_S2`, and `ESPN_SWID` from the environment, so you rarely need to pass them. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
 
@@ -379,11 +381,34 @@ whose abbreviations differ between ESPN endpoints (GSW, UTA, WAS, NOP, NYK, SAS)
 it tells you the next date each one does so you can re-run. It never prints cookie values and
 exits non-zero if any check fails.
 
+### Fixture-Backed Tests and Recording Your League
+
+`tests/test_fixtures_e2e.py` runs the real request path (settings, matchups, rosters, free
+agents, schedules, `analyze_matchup`) against ESPN-shaped JSON files in `tests/fixtures/`, with
+the clock frozen on the last day of a matchup period. `tests/fixture_espn.py` maps each ESPN
+request to a fixture file name; the committed fixtures are synthetic (regenerate them with
+`uv run python tests/fixtures/build_synthetic.py`).
+
+To capture what ESPN actually sends for your league, record it once:
+
+```bash
+uv run python scripts/record_fixtures.py            # writes tests/fixtures/recorded/
+uv run python scripts/record_fixtures.py --redact-names
+```
+
+It makes the same calls the tools make and writes every response under the name the tests
+would look it up by, after removing `members`, owner IDs, every GUID (ESPN SWIDs are GUIDs) and
+every cookie-shaped token. Cookie values are never printed or written. The recorded folder is
+gitignored: it still carries your league's names and rosters, so it stays on your machine.
+Delete it with `rm -rf tests/fixtures/recorded` when you are done.
+`tests/test_fixture_hygiene.py` scans everything under `tests/fixtures/` for `espn_s2`, `SWID`,
+GUIDs and cookie tokens on every test run, so a leaked credential fails CI.
+
 ### Continuous Integration
 
 GitHub Actions (`.github/workflows/test.yml`) runs on every push and on pull requests into `main`, across Python 3.10–3.12. It installs from `uv.lock` (`uv sync --locked`) so CI uses exactly the versions committed here, and it runs the same four checks as `scripts/check.sh`. The workflow has read-only repository permissions and uses no secrets.
 
-Coverage is enforced with `fail_under` in `pyproject.toml` (currently 70%, with coverage around 74%). It is a ratchet: raise it as tests are added, never lower it.
+Coverage is enforced with `fail_under` in `pyproject.toml` (currently 78%, with coverage around 81%). It is a ratchet: raise it as tests are added, never lower it.
 
 ### Project Structure
 
@@ -399,6 +424,10 @@ espn-fantasy-basketball-mcp/
 │   ├── search.py                   # Player name matching
 │   └── models.py                   # Pydantic data models
 ├── tests/                          # Test suite (all ESPN calls are mocked; no network needed)
+│   ├── fixtures/                  # ESPN-shaped JSON responses (synthetic; build_synthetic.py)
+│   ├── fixture_espn.py            # Routes client requests to fixtures; freezes the clock
+│   ├── test_fixtures_e2e.py       # End-to-end tests over the fixtures
+│   ├── test_fixture_hygiene.py    # No credentials or account IDs in any fixture
 │   ├── test_cache.py              # Response cache and request de-duplication
 │   ├── test_client.py             # Client tests
 │   ├── test_draft.py              # Draft client tests
@@ -414,6 +443,8 @@ espn-fantasy-basketball-mcp/
 │   └── test_verify_live.py        # Credential loading for the live verification script
 ├── conftest.py                    # Pytest fixtures
 ├── scripts/check.sh               # Runs the CI checks locally
+├── scripts/verify_live.py         # Read-only checks against your real league
+├── scripts/record_fixtures.py     # Records sanitised ESPN responses into tests/fixtures/recorded/
 ├── .github/workflows/test.yml     # CI
 ├── .github/dependabot.yml         # Weekly GitHub Actions updates
 ├── pyproject.toml                 # Project configuration, tool settings, coverage gate

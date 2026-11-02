@@ -1,0 +1,100 @@
+{
+ "team": {
+  "id": "10",
+  "abbreviation": "HOU",
+  "displayName": "HOU"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "1020261103",
+   "date": "2026-11-04T00:00Z",
+   "name": "HOU vs CHA",
+   "competitions": [
+    {
+     "id": "c100",
+     "date": "2026-11-04T00:00Z",
+     "competitors": [
+      {
+       "id": "10",
+       "homeAway": "home",
+       "team": {
+        "id": "10",
+        "abbreviation": "HOU"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1020261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "HOU vs CHA",
+   "competitions": [
+    {
+     "id": "c101",
+     "date": "2026-11-07T00:00Z",
+     "competitors": [
+      {
+       "id": "10",
+       "homeAway": "away",
+       "team": {
+        "id": "10",
+        "abbreviation": "HOU"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1020261110",
+   "date": "2026-11-11T00:00Z",
+   "name": "HOU vs CHA",
+   "competitions": [
+    {
+     "id": "c102",
+     "date": "2026-11-11T00:00Z",
+     "competitors": [
+      {
+       "id": "10",
+       "homeAway": "home",
+       "team": {
+        "id": "10",
+        "abbreviation": "HOU"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

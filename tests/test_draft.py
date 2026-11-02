@@ -405,7 +405,7 @@ class TestDraftSettingsAware:
                         "13": 2,
                     },
                     # as returned live for a league whose UI shows PG-PF "No Limit" and C max 4
-                    "positionLimits": {"1": 0, "2": -1, "3": -1, "4": -1, "5": -1, "6": 4},
+                    "positionLimits": {"0": 0, "1": -1, "2": -1, "3": -1, "4": -1, "5": 4},
                     "lineupLocktimeType": "INDIVIDUAL_GAME",
                 },
                 "scheduleSettings": {
@@ -439,7 +439,7 @@ class TestDraftSettingsAware:
             "3": ["2026-11-02", "2026-11-15"],  # two-week period
         }
         assert settings.rosterSettings.positionLimitNames == {
-            "POS_1": 0,
+            "POS_0": 0,
             "PG": -1,
             "SG": -1,
             "SF": -1,
@@ -447,8 +447,20 @@ class TestDraftSettingsAware:
             "C": 4,
         }
         assert settings.rosterSettings.lineupSlotNames["11"] == "UTIL"
-        assert settings.acquisitionSettings.waiverProcessHourTimezone == "America/New_York"
-        assert settings.acquisitionSettings.waiverProcessTimeLocal == "07:00 America/Chicago"
+        # waiverProcessHour is UTC (live: hour 8 and process dates at 08:00Z)
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        hour = settings.acquisitionSettings.waiverProcessHour
+        expected = (
+            datetime.now(ZoneInfo("UTC"))
+            .replace(hour=hour, minute=0)
+            .astimezone(ZoneInfo("America/Chicago"))
+        )
+        assert settings.acquisitionSettings.waiverProcessHourTimezone == "UTC"
+        assert settings.acquisitionSettings.waiverProcessTimeLocal == (
+            f"{expected:%H:%M} America/Chicago"
+        )
         assert settings.draftSettings.type == "AUCTION"
         assert settings.draftSettings.auctionBudget == 300
         assert settings.draftSettings.pickOrder == [8, 3, 5]

@@ -2,7 +2,101 @@
 
 ## [Unreleased]
 
+### Added
+- `get_transactions` tool (ESPN `mTransactions2` view): recent adds, drops, waiver claims and
+  trades, newest first, with player and team names and a one-line summary, filterable by team
+  or scoring period. Answers "who dropped this player and when". ESPN logs every lineup save
+  as a `ROSTER` / `FUTURE_ROSTER` transaction; those are hidden unless
+  `include_lineup_changes=true`, while a drop made from the roster page (a `ROSTER`
+  transaction with a `DROP` item) is always shown as a "roster move".
+- Waiver state on free agents and search results: `availabilityStatus` (FREEAGENT = addable
+  now, WAIVERS = ESPN's "WA" flag), `waiverProcessDateISO` and an `availabilityNote`.
+- `get_league_teams`: `waiverRank`, ESPN's `transactionCounter`, and `acquisitionsThisMatchup`
+  / `acquisitionLimitThisMatchup` / `acquisitionsRemainingThisMatchup`.
+- `get_league_settings`: when `matchupLimitPerScoringPeriod` is true the allowance for a
+  matchup period is the per-day limit times its length; `effectiveLimitByMatchupPeriod` (6 for
+  a six-day opening week, 7 for a normal week, 14 for the All-Star fortnight),
+  `effectiveLimitCurrentMatchup`, and the description reads "1 per day (scoring period), so 7
+  for matchup period 2 (7 days)". `waiverOrderReset` with a `waiverOrderDescription`.
+- Per-slot lock state on rosters: each entry's `lineupLocked`, plus `lockedSlots` and
+  `unlockedSlots` ("SLOT: player") for the roster's scoring period.
+- `teamAbbrev` on matchup sides and `yourTeamAbbrev` / `opponentTeamAbbrev` on the analysis,
+  so a team renamed mid-week can still be identified.
+
 ### Fixed
+- `acquisitionSettings.waiverProcessTimeLocal` treated ESPN's `waiverProcessHour` as Eastern
+  time. Recorded live, a league with hour 8 had every on-waivers player's `waiverProcessDate`
+  at 08:00Z (03:00 ET, 02:00 CT), so the hour is UTC; the 1.2.0 conversion reported 07:00 CT.
+  `waiverProcessHourTimezone` now says `UTC`, and each free agent's `waiverProcessDateISO` is
+  the authoritative time.
+
+### Changed
+- `analyze_matchup` / `get_my_current_matchup` for a *future* matchup period now request the
+  roster for that period's first scoring period (the lineup as set for that day) instead of
+  today's. The stale-entry filter applies to today's and future rosters alike.
+- A player with zero attempts now has `ft_pct` / `fg_pct` null even when ESPN sends 0.0 for the
+  percentage (the docstring promised null; the code returned 0.0). Attempts are alongside.
+- `scripts/record_fixtures.py` also records the transactions view.
+
+### Added (merged in #15)
+- Fixture-backed end-to-end tests (`tests/fixtures/`, `tests/test_fixtures_e2e.py`): every
+  ESPN request is answered from an ESPN-shaped JSON file and the clock is frozen on the last
+  day of a matchup period, so `analyze_matchup`, `get_matchups`, rosters, free agents,
+  schedules and settings are exercised through the real request path without the network.
+  `scripts/record_fixtures.py` records your own league into `tests/fixtures/recorded/` with
+  `members`, owner IDs, every GUID (SWIDs) and every cookie-shaped token stripped, and
+  `tests/test_fixture_hygiene.py` scans all fixtures for `espn_s2`, `SWID`, GUIDs and cookie
+  tokens on every run.
+- `get_player_schedule` tool: games this matchup period and next for arbitrary ESPN player IDs
+  (streaming candidates, trade targets), and a `player_ids` parameter on `get_roster_schedule`
+  that lists extras next to your roster (`includedInTotals: false`). Both report the
+  `thisWeek` / `nextWeek` date windows they counted.
+- Injury detail. ESPN's public NBA injury report is fetched once (cached 10 minutes); its
+  athlete blocks carry an ID, a player-card link with the ID, or only names, and all three are
+  matched (the fantasy player object itself has no injury fields, confirmed live). Each
+  player's `injuryDetails` ("Knee - Sprain (left); expected return 2026-11-10. <ESPN note>")
+  and `injuryReturnDate` appear on rosters, free agents, search results and in
+  `analyze_matchup` lineup warnings. Any `injuryDetails` / `injuries` fields ESPN puts on the
+  fantasy player object itself are used first.
+- `get_league_settings`: `acquisitionSettings.acquisitionLimitDescription` ("1 acquisition per
+  matchup period; no season-long limit."), `scheduleSettings.matchupPeriodsNote` explaining
+  that `matchupPeriods` is week-indexed and `matchupPeriodDates` is authoritative, and
+  `status.currentMatchupPeriodDates` / `status.latestScoringPeriodDate`.
+- `get_league_teams`: `recordType` ("categories" or "matchups") and `recordDescription`, so a
+  record in an H2H Each Category league is not misread as matchup wins; `record.overall.ties`.
+- `get_team_roster`: `scoringPeriodId` and `scoringPeriodDate` say which day the roster is
+  for, `lineupLocked` whether that day's lineup can still be changed, and a `note` points at
+  `scoring_period + 1` for the next day's lineup when it cannot.
+
+### Fixed
+- `analyze_matchup` still crashed for a matchup that has not started. Live data shows ESPN
+  sends `cumulativeScore: {wins: 0, losses: 0, ties: 0, scoreByStat: null}`, a non-null object
+  with a null inside, which the earlier null-safety pass (and its fixture) did not cover. The
+  percentage-category lookups now treat a null `scoreByStat` (and null entries in it) as empty,
+  and the fixture carries the live shape.
+- `rosterSettings.positionLimitNames` was off by one. Recorded live, `positionLimits` is keyed
+  by defaultPositionId (1=PG ... 5=C, plus an unused key 0); a league with a maximum of 4
+  centers returns `{"5": 4}`. The 1.2.0 note claiming keys 2-6 was wrong, and the limit was
+  reported on PF.
+- Free agents all showed `percentOwned: 0.0`. ESPN nests ownership under
+  `players[].player.ownership`; the code read `players[].ownership`, which does not exist.
+  Affects `get_free_agents`, `get_trending_players` and `search_players`.
+- `get_my_current_matchup` dropped every stat when `verbose=False`. Rosters now keep the
+  per-game averages `get_team_roster` returns (plus injury details and today's game); only
+  the season `totals` block needs `verbose=True`.
+- `gamesPlayed` was 0 for players with a full stat line: ESPN sometimes omits stat 42. It is
+  now derived from season totals / per-game averages, and `null` (not 0) when unknown.
+- `ft_pct` / `fg_pct` were `null` for players with games played: a 0.0 percentage from ESPN was
+  treated as missing, and a missing percentage key was never computed. Percentages now come
+  from ESPN's value when present, else from made / attempted (stat IDs 13-16); per-game `fgm`,
+  `fga`, `ftm`, `fta` are returned alongside, so a null FT% always comes with `fta: 0`.
+- Rosters listed players ESPN still had under the team but who had been dropped after their
+  slot locked (`onTeamId` 0 or another team). Today's roster now excludes them and names them
+  in `staleEntriesRemoved`; a roster requested for an explicit past scoring period is kept as
+  stored, since `onTeamId` is always the player's current team.
+- `get_my_current_matchup` / `analyze_matchup` no longer send `scoringPeriodId` for the current
+  or a future week (ESPN's default is today), so the stale-entry filter applies to the rosters
+  they analyse. A past week still requests its final day.
 - `analyze_matchup` (and `get_matchups`) crashed with `'NoneType' object has no attribute 'get'`
   for a matchup period that had not started: ESPN sends explicit nulls (`cumulativeScore: null`,
   sometimes a null side) rather than omitting keys. Every nested lookup now treats null as empty.
