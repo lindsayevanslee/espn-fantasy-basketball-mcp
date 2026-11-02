@@ -5,8 +5,8 @@ between you asking Claude "who should I start tonight?" and the answer coming ba
 is organised, how it talks to ESPN, and how to extend and test it. The [README](README.md) is the
 reference for installation and the tool list; this document is the explanation of the mechanism.
 
-Everything below describes the code as it is in this repository. Line references are
-approximate and may drift; function names are stable.
+Everything below describes the code as it is in this repository as of version 1.3 (November
+2026). Line references are approximate and may drift; function names are stable.
 
 ## Contents
 
@@ -60,7 +60,7 @@ sprawling JSON into a compact, named, typed answer.
 
 Three ideas carry most of the weight:
 
-- **One process, many tools.** The server exposes 20 tools. Each is an `async` Python function
+- **One process, many tools.** The server exposes 22 tools. Each is an `async` Python function
   decorated with `@mcp.tool()`. Claude picks a tool, the function runs, the return value goes
   back as JSON.
 - **The client does the real work.** Every tool creates an `ESPNFantasyBasketballClient` and
@@ -90,7 +90,7 @@ printed to stdout would corrupt the JSON-RPC stream. That is why logging is conf
 `logging.basicConfig(...)`, which writes to stderr by default, and why nothing in the codebase
 uses `print()` outside of `scripts/verify_live.py`, which is not the server.
 
-The server provides **tools only**. It does not expose MCP resources or prompts. All 20 tools
+The server provides **tools only**. It does not expose MCP resources or prompts. All 22 tools
 are read-only against ESPN: the server never changes a lineup, makes a trade, or places a bid.
 
 ## 3. The life of one request
@@ -118,8 +118,9 @@ Suppose you ask Claude: "How is my matchup going?" Here is what happens, step by
 
 5. **The client makes requests.** For this tool it fetches league settings (to learn the current
    matchup period), the schedule view (to find your matchup), the team list (for names), today's
-   NBA scoreboard (to annotate each player with their game tonight), and both rosters. Many of
-   these are served from cache if another tool asked recently.
+   NBA scoreboard (to annotate each player with their game tonight), ESPN's public NBA injury
+   report (for the reason behind each injury status), and both rosters. Many of these are
+   served from cache if another tool asked recently.
 
 6. **Raw JSON becomes a model.** The client assembles a `CurrentMatchup` Pydantic model. The
    model declares which fields exist, and the client fills them with named categories, slot
@@ -162,7 +163,8 @@ change what a tool does, change its docstring; that is the part Claude sees.
 A few tools do slightly more than the five-line shape:
 
 - `get_matchups` and `analyze_matchup` coerce `matchup_period` from a string to an int, because
-  some MCP clients send numbers as strings.
+  some MCP clients send numbers as strings; `get_player_schedule` and `get_roster_schedule` do
+  the same for `player_ids`.
 - `get_nba_schedule` needs no league at all, so it builds a client with a dummy league ID of `1`.
 - `get_player_stats` accepts either one ID or a list and returns a dict or a list accordingly.
 - `analyze_my_draft_strategy` combines two client calls and computes `budget_per_remaining_player`
@@ -198,14 +200,16 @@ helpers, the cache, the request layer, and then one or more methods per tool.
 
 **Two base URLs.** The fantasy API lives at
 `https://lm-api-reads.fantasy.espn.com/apis/v3/games/fba` and is where league, roster, matchup,
-player, and draft data come from. The public NBA site API at
-`https://site.api.espn.com/apis/site/v2/sports/basketball/nba` supplies today's scoreboard and
-each NBA team's season schedule. The second one needs no cookies and no league.
+player, transaction, and draft data come from. The public NBA site API at
+`https://site.api.espn.com/apis/site/v2/sports/basketball/nba` supplies today's scoreboard
+(`/scoreboard?dates=YYYYMMDD`; the singular `date` is silently ignored), each NBA team's season
+schedule, and the league-wide injury report (`/injuries`). The second one needs no cookies and
+no league.
 
 **One league URL, many views.** Almost every fantasy request hits the same URL,
 `/seasons/{year}/segments/0/leagues/{league_id}`, and selects what to get back with a `view`
-query parameter: `mTeam`, `mSettings`, `mRoster`, `mMatchup`, `mDraftDetail`, or
-`kona_player_info`. The section below on ESPN's API has the full table.
+query parameter: `mTeam`, `mSettings`, `mRoster`, `mMatchup`, `mTransactions2`, `mDraftDetail`,
+or `kona_player_info`. The section below on ESPN's API has the full table.
 
 **Player queries use a header, not a query string.** When you ask for players (free agents, stats
 for specific IDs, draft rankings), ESPN expects a JSON filter in an `x-fantasy-filter` request
@@ -272,7 +276,8 @@ other's data. Entries expire per endpoint:
 | League settings (`mSettings`) | 10 minutes | Commissioner edits are rare |
 | League team list (`mTeam`) | 5 minutes | Names and records move slowly |
 | Today's scoreboard | 60 seconds | Games tip off and finish |
-| Everything else (rosters, matchups, players, draft) | 15 seconds | Live data |
+| NBA injury report | 10 minutes | Updated a few times a day |
+| Everything else (rosters, matchups, players, transactions, draft) | 15 seconds | Live data |
 
 The 15-second lifetime is the key design choice. It is long enough to collapse the burst of
 identical requests inside one tool call, and short enough that a roster move you just made shows
@@ -287,7 +292,7 @@ data. `tests/test_cache.py` covers all of this.
 
 ### 4.5 Models: shaping what Claude sees
 
-`espn_fantasy_basketball_mcp/models.py` holds just over 40 Pydantic models. They serve two purposes.
+`espn_fantasy_basketball_mcp/models.py` holds about 50 Pydantic models. They serve two purposes.
 
 First, **they are the contract.** `Roster`, `CurrentMatchup`, `MatchupAnalysis`,
 `LeagueSettings`, and the rest define exactly which fields a tool returns. When a client method
@@ -308,9 +313,15 @@ readable thing (`categoryScores`), and separate out the supporting numbers (`com
 that the analysis needs to compute percentages correctly.
 
 A detail worth knowing: several tools have a `verbose` flag that defaults to `False`. For
-rosters, `_make_roster_slim()` strips per-player season stats and keeps only lineup information.
-This exists because a full two-roster response with stats is large, and Claude reads better from
-a smaller payload. Ask for `verbose=true` when you actually want the numbers.
+rosters, `_make_roster_slim()` keeps every player's per-game averages, injury detail, lock state
+and today's game, and drops only the season `totals` block; for free agents, `verbose=false`
+omits stats entirely. Ask for `verbose=true` when you want season totals or free-agent stats.
+
+Several models also carry fields that exist only to prevent misreading: a team's `recordType`
+says whether its record counts categories or matchups; a roster's `scoringPeriodId`,
+`scoringPeriodDate` and `lockedSlots` say which day it is for and what can still be changed;
+`staleEntriesRemoved` names players ESPN still listed under a team after they were dropped; and
+settings carry `acquisitionLimitDescription` and `matchupPeriodsNote` in plain English.
 
 ### 4.6 Constants: ESPN's three numbering schemes
 
@@ -326,8 +337,9 @@ are confidently wrong.
   page order and have not been seen in live data. Used in `lineupSlotId` and `eligibleSlots`.
 - **Player position IDs** (`POSITION_NAMES`): `1` PG through `5` C. One-based, unlike slots. Used
   in `defaultPositionId`.
-- **Position-limit keys** (`POSITION_LIMIT_NAMES`): `2` PG through `6` C. One higher again.
-  Used only in `rosterSettings.positionLimits`.
+- **Position-limit keys** (`POSITION_LIMIT_NAMES`): `1` PG through `5` C, the same as position
+  IDs, plus an unexplained key `0`. Used only in `rosterSettings.positionLimits`. (An earlier
+  version assumed keys 2 through 6; a recorded league with a four-center limit showed `{"5": 4}`.)
 
 The file also holds `PRO_TEAM_ABBREVS` (fantasy `proTeamId` 1–30 to a canonical three-letter
 code, with `0` meaning unsigned) and `ABBREV_ALIASES`, which reconciles the codes ESPN's two APIs
@@ -367,7 +379,15 @@ The conversion works like this:
 
 `get_matchup_period_dates()` on the client ties these together, and
 `get_league_settings` exposes the result as `scheduleSettings.matchupPeriodDates` so you can see
-each week's boundaries directly.
+each week's boundaries directly. That mapping is the authoritative one; the raw `matchupPeriods`
+is easy to misread as days, which is why the settings also carry a `matchupPeriodsNote`,
+`status.currentMatchupPeriodDates` and `status.latestScoringPeriodDate`.
+
+Which day's roster a tool fetches follows from the same arithmetic. `get_matchup_for_period`
+asks ESPN for today's roster for the current week (its default), the first day's for a future
+week (ESPN returns the lineup as set for that day) and the last day's for a past week. Per-day
+acquisition limits use the window length too: a limit of one per day allows six adds in a
+six-day opening week and seven in a normal one (`effectiveLimitByMatchupPeriod`).
 
 ### 4.8 Search: finding a player ID from a name
 
@@ -392,7 +412,8 @@ Anything below 0.6 is discarded; live testing showed "Jokic" scoring 0.5 against
 like "Josh Okogie", which is where that floor comes from.
 
 With `include_league_status=true` (the default), one extra request against your league fills in
-whether each match is a free agent, which fantasy team owns them, and their ownership percentage.
+whether each match is a free agent, which fantasy team owns them, their ownership percentage,
+whether they are on waivers (and until when), and the injury detail from ESPN's injury report.
 
 ### 4.9 Analysis: how `analyze_matchup` projects a week
 
@@ -431,8 +452,9 @@ games remaining, −1 or −2 for questionable or doubtful status, and a bonus f
 categories. Cap at 1–10 and sort.
 
 **Step 6: warn about dead slots.** Any starter (not bench, not IR) with a factor of 0.0 and games
-left produces a `lineupWarnings` entry naming them and the slot. Starters who are questionable
-get a softer "check status before tip-off" warning.
+left produces a `lineupWarnings` entry naming them, the slot, and ESPN's injury note when there
+is one ("is OUT (Knee - Sprain (left); expected return 2026-11-10 ...)"). Starters who are
+questionable get a softer "check status before tip-off" warning.
 
 **Step 7: write strategy notes.** Projected record, which categories to focus on, the expected
 games edge between the two teams, and which losing categories to prioritise.
@@ -454,6 +476,7 @@ section collects it so you do not have to rediscover it.
 | `mSettings` | Scoring, roster, schedule, acquisition, trade, draft settings and `status` | `get_league_settings`, and internally almost everywhere |
 | `mRoster` (with `mTeam`) | Each team's roster entries with nested player objects | `get_team_roster` and everything built on it |
 | `mMatchup` | The `schedule` array: every matchup of every period with cumulative scores | `get_matchups`, `get_team_season_stats`, matchup tools |
+| `mTransactions2` | The `transactions` array: adds, drops, waiver claims, trades, and every lineup save | `get_transactions` |
 | `mDraftDetail` | `draftDetail.picks`, draft state | draft tools |
 | `kona_player_info` | Players matching the `x-fantasy-filter` header | free agents, stats, trending, draft rankings, search status |
 
@@ -463,17 +486,36 @@ leans on these for "what week is it" and for the date anchoring described in sec
 
 **Stat splits.** A player's `stats` array holds several entries distinguished by `id`:
 `00YYYY` season actuals, `10YYYY` projections, `01YYYY` last 7 days, `02YYYY` last 15,
-`03YYYY` last 30. Each has `stats` (totals) and usually `averages` (per game), keyed by stat ID.
+`03YYYY` last 30. Each has `stats` (totals) and `averageStats` (per game), keyed by stat ID.
+Stat 42 (games played) is sometimes missing, so the client can derive it from a total divided
+by its average. The FT% key is absent from the per-game block but present in totals; FG% and
+FT% are null exactly when a player has no attempts, with the attempt counts alongside.
 
 **Where injury status hides.** It can be on the player object, on the roster entry, or inside an
 `injury` sub-object. The client checks all three, player-level first, because entry-level often
-says `NORMAL` when the player-level says `DAY_TO_DAY`.
+says `NORMAL` when the player-level says `DAY_TO_DAY`. The fantasy player object carries no
+reason or timeline, only `injuryStatus`, `injured` and `lastNewsDate`; those come from the site
+API's injury report, matched by athlete ID, by the ID inside the athlete's player-card link, or
+by name (a live payload had no athlete ID at all).
+
+**Other fields the tools lean on.** `players[].player.ownership` (not the entry level) holds
+ownership percentages; `players[].status` is `FREEAGENT`, `WAIVERS` or `ONTEAM`, with
+`waiverProcessDate` while on waivers; `teams[].waiverRank` and `teams[].transactionCounter`
+give the waiver order and adds used; `playerPoolEntry.lineupLocked` is the per-slot lock;
+`playerPoolEntry.onTeamId` is the player's *current* team even in a roster list, which is how a
+dropped player can still appear under his old team for a locked day. ESPN's
+`waiverProcessHour` is UTC (a league reporting 8 had every process date at 08:00Z).
 
 **Quirks the server works around.**
 
 - Explicit `null` values instead of missing keys, especially for a week that has not started.
 - `scoringPeriodId` as a query parameter is a **day** index. Sending a week number there returns
   nonsense, which an earlier version of `get_matchups` did.
+- A matchup that has not started has `cumulativeScore: {wins: 0, losses: 0, ties: 0,
+  scoreByStat: null}`, a non-null object with a null inside, not a null `cumulativeScore`.
+- Every lineup save is logged as a `ROSTER` or `FUTURE_ROSTER` transaction, and a drop made
+  from the roster page arrives as `ROSTER` with a `DROP` item. `get_transactions` hides pure
+  lineup saves unless asked.
 - The free-agent query returns at most 50 players per request.
 - Team `location` is not provided.
 - The two APIs disagree on six team abbreviations (section 4.6).
@@ -494,11 +536,13 @@ Let us trace `search_players(query="jokic")`, which is simple but touches most l
    concurrently fetches `kona_player_info` filtered to those five IDs (for `onTeamId` and
    ownership) and `mTeam` (for team names). `asyncio.gather` runs them together.
 5. **Model.** Five `PlayerSearchResult` objects are built with `playerId`, `fullName`,
-   `matchScore`, position, NBA team, injury status, and the league fields.
+   `matchScore`, position, NBA team, injury status and detail, waiver state, and the league
+   fields.
 6. **Return.** The tool returns `[r.model_dump() for r in results]`. Claude sees a list and can
    now call `get_player_stats` with the right ID.
 
-Three ESPN requests at most, one of which is almost always cached.
+Four ESPN requests at most (the injury report is the fourth), two of which are almost always
+cached.
 
 ## 7. Worked example: a composite tool end to end
 
@@ -510,8 +554,9 @@ Now `analyze_matchup()` with no arguments, for a 13-player roster on each side.
 2. **Matchup.** `get_matchup_for_period()` → `get_matchups()` → `mMatchup`, plus `mTeam` for
    names. Finds the one schedule item for your team in that period, decides which side is you,
    and extracts named category scores. Then both rosters are fetched concurrently with
-   `mRoster`, each of which also hits the NBA scoreboard once (cached 60 seconds) to annotate
-   `todaysGame`.
+   `mRoster` for the first day of the target week, each of which also hits the NBA scoreboard
+   (cached 60 seconds) to annotate `todaysGame` and the injury report (cached 10 minutes) for
+   `injuryDetails`.
 3. **Window.** `get_matchup_period_dates()` turns the target period into first and last calendar
    days using the anchoring in section 4.7. If that fails for any reason, it falls back to seven
    days from today and logs a warning.
@@ -538,26 +583,31 @@ Some patterns make the tools work better.
   pass the resulting ID to `get_player_stats`, `compare_players`, or `analyze_trade_proposal`.
 - **Reach for the composite tools.** `get_my_current_matchup` replaces three calls;
   `analyze_matchup` replaces about a dozen and adds the reasoning. `get_roster_schedule` is the
-  right tool for "who has four games this week?"
-- **Use `verbose=true` only when you want numbers.** Rosters and free-agent lists are slimmed by
-  default to keep responses small.
+  right tool for "who has four games this week?", and `get_player_schedule` answers the same
+  question for a free agent you are thinking of streaming.
+- **Use `verbose=true` only when you want season totals or free-agent stats.** Rosters keep
+  per-game averages either way.
+- **Waivers and adds have their own tools.** `get_free_agents` says whether a player is addable
+  now or on waivers until a given time; `get_league_teams` shows the waiver order and adds used
+  this matchup; `get_transactions` shows who dropped whom and when.
 - **Specify the week when it matters.** `analyze_matchup` defaults to **next** week.
   `get_matchups` and `get_roster_schedule` default to the **current** week. Pass
   `matchup_period` to pin either.
 - **Know what is ESPN and what is Claude.** Everything in a tool response comes from ESPN's
-  data: stats, projections, injury status codes, ownership, schedules. Anything about why a
-  player is injured, trade rumours, or advanced metrics is not in ESPN's fantasy API and Claude
-  is supplying it from general knowledge. The projections in `analyze_matchup` are ESPN's
-  per-game projections multiplied out by this server; the thresholds and priorities are this
-  server's heuristics.
+  data: stats, projections, injury status codes and ESPN's injury notes, ownership, schedules,
+  transactions. Trade rumours, advanced metrics and anything beyond ESPN's injury blurb are not
+  in these APIs, so Claude is supplying them from general knowledge. The projections in
+  `analyze_matchup` are ESPN's per-game projections multiplied out by this server; the
+  thresholds and priorities are this server's heuristics.
 - **If a tool errors,** the message is usually precise: a missing team ID, an invalid timeframe
   string, a player not found. An HTTP 401 or 403 almost always means the cookies have expired;
   refresh them from your browser.
 
 ## 9. Adding a new tool
 
-Suppose you want a tool that returns a team's transaction count this season. The pattern has
-four parts.
+Suppose you want a tool that returns a team's transaction count this season. (The real server
+now exposes these counters on `get_league_teams`; the example stays because it is small.) The
+pattern has four parts.
 
 **1. Add a model** in `models.py` for the return shape:
 
@@ -571,8 +621,8 @@ class TeamActivity(BaseModel):
 ```
 
 **2. Add a client method** in `client.py`. Use `_make_request`, parse defensively, return the
-model. The example assumes ESPN's `mTeam` view carries a `transactionCounter` object per team;
-confirm the field against a live response from your league before relying on it:
+model. ESPN's `mTeam` view carries a `transactionCounter` object per team (confirmed in a
+recorded response; for a new field, record one with `scripts/record_fixtures.py` first):
 
 ```python
 async def get_team_activity(self, team_id: int) -> TeamActivity:
@@ -626,8 +676,11 @@ async def get_team_activity(
     return (await client.get_team_activity(team_id)).model_dump()
 ```
 
-**4. Add tests.** Two kinds, mirroring the existing suite:
+**4. Add tests.** Three kinds, mirroring the existing suite:
 
+- A fixture-backed end-to-end test in `tests/test_fixtures_e2e.py`: add the field to the
+  synthetic payload in `tests/fixtures/build_synthetic.py`, regenerate, and assert on the tool's
+  output. This is the preferred style because it runs the real request path.
 - A client test that patches `_make_request` to return a small fake payload and asserts the
   model is built correctly (see `tests/test_client.py` for the style).
 - A server test that patches `ESPNFantasyBasketballClient` in the `espn_fantasy_basketball`
@@ -643,12 +696,12 @@ stdout clean; and coerce string arguments to int where an MCP client might send 
 
 ## 10. Testing and verification
 
-The project has three distinct testing layers, and it helps to know which one answers which
+The project has four distinct testing layers, and it helps to know which one answers which
 question.
 
-**Unit tests (`tests/`, 189 of them, run in about two seconds).** Every ESPN call is mocked.
-Nothing touches the network. They answer: *does the code do what it says with the data shapes we
-have seen?* Run them with:
+**Unit tests (`tests/`, about 260 of them, run in about three seconds).** Every ESPN call is
+mocked or served from a fixture. Nothing touches the network. They answer: *does the code do
+what it says with the data shapes we have seen?* Run them with:
 
 ```bash
 uv run pytest
@@ -658,8 +711,20 @@ Notable files: `test_cache.py` proves the lifetimes, de-duplication, and never-c
 behaviour; `test_matchup_analysis.py` proves the projection and availability rules;
 `test_matchup_periods.py` proves the calendar math against ESPN's week map;
 `test_pro_teams.py` proves the abbreviation reconciliation; `test_server.py` proves credential
-resolution and the season default. Coverage is enforced at 70% by `fail_under` in
+resolution and the season default. Coverage is enforced at 78% by `fail_under` in
 `pyproject.toml`, and the comment there asks that it only ever be raised.
+
+**Fixture-backed end-to-end tests (`tests/test_fixtures_e2e.py`).** `tests/fixture_espn.py`
+maps each ESPN request (URL, view, filter header) to a JSON file in `tests/fixtures/` and
+installs itself in place of `_make_request`, with the clock frozen on the last day of a matchup
+period. The committed fixtures are synthetic but ESPN-shaped (regenerate them with
+`tests/fixtures/build_synthetic.py`), and each file corresponds to one request. These tests run
+the real request path, so a parser reading the wrong key fails here rather than against ESPN.
+`scripts/record_fixtures.py` records your own league into the gitignored
+`tests/fixtures/recorded/` under the same file names, after stripping `members`, owner IDs,
+every GUID (SWIDs) and cookie-shaped tokens; `tests/test_fixture_hygiene.py` scans every fixture
+for credentials on each run. Several bugs in this project were found by comparing a recording
+with the synthetic fixture.
 
 **The full local check (`./scripts/check.sh`).** Runs the same four steps as CI: `ruff check`,
 `ruff format --check`, `mypy` on the package and entry point, and `pytest` with coverage. mypy
@@ -668,8 +733,9 @@ why every function in the package has full type annotations.
 
 **Live verification (`scripts/verify_live.py`).** Read-only, against your real league. It answers
 the question unit tests cannot: *does ESPN still send what we think it sends?* It checks the
-season your settings resolve to, today's scoreboard against the team codes on your roster, and a
-current-week `analyze_matchup` for sane games-remaining and projection numbers. It reads
+season your settings resolve to, today's scoreboard against the team codes on your roster, a
+current-week `analyze_matchup` for sane games-remaining and projection numbers, and player
+search. It reads
 credentials from the environment or from the `env` block of your Claude Desktop config, never
 prints cookie values, and exits non-zero on failure. Run it when ESPN changes something, when a
 tool starts returning odd numbers, or after a season rollover:
@@ -697,7 +763,9 @@ remains your responsibility.
 - All tools are read-only. There is no code path that writes to ESPN.
 - Inputs are validated: league ID and year ranges, positive integers for IDs, size limits,
   date formats, and allowed timeframe strings.
-- CI runs with read-only permissions and no secrets; `.env` is gitignored.
+- CI runs with read-only permissions and no secrets; `.env` and `tests/fixtures/recorded/` are
+  gitignored, and a test scans every committed fixture for `espn_s2`, `SWID`, GUIDs and
+  cookie-shaped tokens.
 
 **What you need to do.**
 
@@ -719,9 +787,10 @@ server does not sanitise it beyond type validation.
 Knowing what the server cannot tell you is as useful as knowing what it can, especially so you
 can tell when Claude has switched from ESPN data to its own knowledge.
 
-**Not available from ESPN's fantasy API, so not available here:**
+**Not available from ESPN's APIs, so not available here:**
 
-- Player news and injury detail beyond the status codes (`OUT`, `DAY_TO_DAY`, and so on).
+- Player news beyond ESPN's injury blurb (body part, severity, side, expected return date, and
+  a one-line note come from the public injury report; anything more is not available).
 - Advanced or per-possession metrics, play-by-play, or shot charts.
 - Daily fantasy or betting data.
 - Team `location` (ESPN simply does not send it).
@@ -731,7 +800,10 @@ can tell when Claude has switched from ESPN data to its own knowledge.
 
 - `analyze_matchup` uses ESPN's own projections and a set of fixed heuristic thresholds.
 - Lineup slots 7–10 have names inferred from ESPN's settings page, not confirmed by data.
+- Position-limit key `0` is reported as `POS_0` because nothing in the UI matches it.
 - Week start day is inferred from waiver processing days and defaults to Monday.
+- The meaning of `waiverOrderReset` (true = order resets, false = claimant moves to last) is
+  from ESPN's settings page wording, not observed behaviour.
 - Season start, out of season, is inferred from the Lakers' schedule as a stand-in for any team.
 
 **Operational limits:**
