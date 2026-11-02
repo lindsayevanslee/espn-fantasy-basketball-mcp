@@ -22,7 +22,8 @@
        "homeAway": "home",
        "team": {
         "id": "6",
-        "abbreviation": "DAL"
+        "abbreviation": "DAL",
+        "displayName": "Dallas Mavericks"
        }
       },
       {
@@ -30,7 +31,8 @@
        "homeAway": "away",
        "team": {
         "id": "2",
-        "abbreviation": "BOS"
+        "abbreviation": "BOS",
+        "displayName": "Boston Celtics"
        }
       }
      ]

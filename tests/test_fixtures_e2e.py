@@ -312,6 +312,34 @@ async def test_percentages_from_made_and_attempted(client):
 
 
 @pytest.mark.asyncio
+async def test_per_game_numbers_come_from_average_stats(client, espn):
+    """ESPN's per-game block is `averageStats`. Ava Guard's fixture has no stat 42, so a parser
+    reading the wrong key would have no per-game line at all; she must still show 22.0 points."""
+    season = next(
+        s
+        for s in espn.load("league_mRoster.json")["teams"][0]["roster"]["entries"][0][
+            "playerPoolEntry"
+        ]["player"]["stats"]
+        if s["id"] == "002027"
+    )
+    assert "averageStats" in season and "averages" not in season and "42" not in season["stats"]
+    roster = await client.get_team_roster(MY_TEAM)
+    guard = roster.entries[0].playerPoolEntry.player.stats
+    assert (guard["points"], guard["minutes"], guard["gamesPlayed"]) == (22.0, 34.0, 8)
+
+
+@pytest.mark.asyncio
+async def test_nba_schedule_requests_the_given_day(client, espn):
+    """ESPN's scoreboard reads `dates=YYYYMMDD`; `date=` is ignored and returns today."""
+    games = await client.get_nba_schedule("2026-11-01")
+    assert games
+    sent = [params for _, params, _ in espn.requests_for("nba_scoreboard.json")]
+    assert sent == [{"dates": "20261101"}]
+    await client.get_nba_schedule()
+    assert espn.requests_for("nba_scoreboard.json")[-1][1] == {}
+
+
+@pytest.mark.asyncio
 async def test_player_stats_tool_data_has_games_and_splits(client):
     [proj] = await client.get_player_stats([1001], "projections")
     assert proj.gamesPlayed == 82 and proj.freeThrowsAttempted == pytest.approx(3.88)
@@ -607,6 +635,27 @@ def test_injury_lookup_falls_back_from_id_to_link_to_name():
 )
 def test_games_played_derivation(stat_set, expected):
     assert ESPNFantasyBasketballClient._games_played(stat_set) == expected
+
+
+def test_parse_player_stats_reads_average_stats_without_games_played():
+    client = ESPNFantasyBasketballClient(LEAGUE, YEAR)
+    stats = client._parse_player_stats(
+        [
+            {
+                "id": f"00{YEAR}",
+                "averageStats": {"0": 18.5, "6": 7.0, "40": 31.0, "15": 3.0, "16": 4.0},
+                "stats": {"0": 111.0, "6": 42.0, "40": 186.0, "15": 18.0, "16": 24.0},
+            }
+        ]
+    )
+    assert stats["points"] == 18.5 and stats["rebounds"] == 7.0
+    assert stats["gamesPlayed"] == 6, "186 minutes / 31.0 per game"
+    assert stats["ft_pct"] == 75.0
+    # the earlier key name still parses, for any payload that uses it
+    legacy = client._parse_player_stats(
+        [{"id": f"00{YEAR}", "averages": {"0": 10.0}, "stats": {"0": 50.0, "42": 5.0}}]
+    )
+    assert (legacy["points"], legacy["gamesPlayed"]) == (10.0, 5)
 
 
 @pytest.mark.parametrize(

@@ -288,7 +288,7 @@ def stat_set(
         "proTeamId": 0,
         "scoringPeriodId": 0,
         "externalId": str(SEASON),
-        "averages": averages,
+        "averageStats": averages,  # ESPN's key (recorded live); not "averages"
         "stats": totals,
         "appliedAverage": round(
             sum(per_game.get(k, 0) for k in ("0", "1", "2", "3", "6", "17")), 1
@@ -351,7 +351,7 @@ def full_stats(pid: int) -> list[dict]:
     gp, per_game, omit = SEASON_STATS[pid]
     season = stat_set(f"00{SEASON}", gp, per_game, omit)
     if pid == 1003:  # live: ESPN reports FT% 0.0 for a player with 0 FTA
-        season["averages"]["20"] = 0.0
+        season["averageStats"]["20"] = 0.0
         season["stats"]["20"] = 0.0
     return [
         season,
@@ -887,8 +887,24 @@ scoreboard_response = {
                 {
                     "id": "401800001",
                     "competitors": [
-                        {"id": "6", "homeAway": "home", "team": {"id": "6", "abbreviation": "DAL"}},
-                        {"id": "2", "homeAway": "away", "team": {"id": "2", "abbreviation": "BOS"}},
+                        {
+                            "id": "6",
+                            "homeAway": "home",
+                            "team": {
+                                "id": "6",
+                                "abbreviation": "DAL",
+                                "displayName": "Dallas Mavericks",
+                            },
+                        },
+                        {
+                            "id": "2",
+                            "homeAway": "away",
+                            "team": {
+                                "id": "2",
+                                "abbreviation": "BOS",
+                                "displayName": "Boston Celtics",
+                            },
+                        },
                     ],
                 }
             ],
