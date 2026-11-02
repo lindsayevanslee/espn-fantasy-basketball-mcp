@@ -59,10 +59,11 @@ POSITION_NAMES: dict[int, str] = {
 }
 
 
-# rosterSettings.positionLimits is keyed one higher than defaultPositionId. Observed live: a league
-# whose UI shows "No Limit" for PG-PF and a maximum of 4 centers returned {1: 0, 2: -1, 3: -1,
-# 4: -1, 5: -1, 6: 4}. Key 1 matches nothing in the UI and is left unnamed.
-POSITION_LIMIT_NAMES: dict[int, str] = {2: "PG", 3: "SG", 4: "SF", 5: "PF", 6: "C"}
+# rosterSettings.positionLimits is keyed by defaultPositionId (1=PG ... 5=C). Recorded live
+# (2026-11-01) from a league whose UI shows "No Limit" for PG-PF and a maximum of 4 centers:
+# {"0": 0, "1": -1, "2": -1, "3": -1, "4": -1, "5": 4}. Key 0 matches nothing in the UI and is
+# left unnamed (reported as POS_0). An earlier note claiming keys 2-6 was wrong.
+POSITION_LIMIT_NAMES: dict[int, str] = {1: "PG", 2: "SG", 3: "SF", 4: "PF", 5: "C"}
 
 # ESPN Fantasy proTeamId -> canonical abbreviation. The ID -> team identity was validated against
 # the ESPN Fantasy UI. Abbreviations are the canonical codes normalize_nba_abbrev produces, so

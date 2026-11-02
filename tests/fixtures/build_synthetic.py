@@ -80,7 +80,7 @@ settings = {
                 "12": 3,
                 "13": 1,
             },
-            "positionLimits": {"1": 0, "2": -1, "3": -1, "4": -1, "5": -1, "6": 4},
+            "positionLimits": {"0": 0, "1": -1, "2": -1, "3": -1, "4": -1, "5": 4},
             "lineupLocktimeType": "INDIVIDUAL_GAME",
             "rosterLocktimeType": "INDIVIDUAL_GAME",
             "isBenchUnlimited": False,
@@ -729,14 +729,35 @@ def injury(
     detail: str,
     side_: str,
     return_date: str,
+    athlete_shape: str = "id",
 ) -> dict:
+    """One injury-report item. athlete_shape mirrors what ESPN has been seen to send:
+    "id" (athlete.id present), "link" (live 2026-11-01: names and links only, ID in the
+    href), or "name" (names only)."""
+    first, last = PLAYERS[athlete_id][0].split(" ", 1)
+    athlete: dict = {
+        "firstName": first,
+        "lastName": last,
+        "displayName": PLAYERS[athlete_id][0],
+        "shortName": f"{first[0]}. {last}",
+    }
+    if athlete_shape == "id":
+        athlete["id"] = str(athlete_id)
+    if athlete_shape in ("id", "link"):
+        athlete["links"] = [
+            {
+                "rel": ["playercard", "desktop", "athlete"],
+                "href": f"https://www.espn.com/nba/player/_/id/{athlete_id}/x",
+            }
+        ]
     return {
         "id": str(900000 + athlete_id),
         "longComment": long_,
         "shortComment": short,
         "status": status,
         "date": "2026-10-30T17:35Z",
-        "athlete": {"id": str(athlete_id), "displayName": PLAYERS[athlete_id][0]},
+        "athlete": athlete,
+        "source": {"id": "1", "description": "manual"},
         "type": {
             "id": "1",
             "name": f"INJURY_STATUS_{status.upper().replace('-', '_')}",
@@ -747,7 +768,7 @@ def injury(
             "fantasyStatus": {"description": status.upper(), "abbreviation": status[0]},
             "type": body,
             "location": "Leg",
-            "detail": detail,
+            **({"detail": detail} if detail else {}),  # live payloads omit this key
             "side": side_,
             "returnDate": return_date,
         },
@@ -786,6 +807,7 @@ injuries_response = {
                     "Sprain",
                     "Right",
                     "",
+                    athlete_shape="link",
                 ),
             ],
         },
@@ -799,9 +821,10 @@ injuries_response = {
                     "Big (back) is probable for Tuesday.",
                     "Big is dealing with back spasms but is expected to play.",
                     "Back",
-                    "Spasms",
+                    "",
                     "Not Specified",
                     "",
+                    athlete_shape="name",
                 ),
             ],
         },

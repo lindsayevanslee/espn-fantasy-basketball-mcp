@@ -15,8 +15,25 @@
      "status": "Out",
      "date": "2026-10-30T17:35Z",
      "athlete": {
+      "firstName": "Jon",
+      "lastName": "Collins",
+      "displayName": "Jon Collins",
+      "shortName": "J. Collins",
       "id": "1002",
-      "displayName": "Jon Collins"
+      "links": [
+       {
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/1002/x"
+       }
+      ]
+     },
+     "source": {
+      "id": "1",
+      "description": "manual"
      },
      "type": {
       "id": "1",
@@ -49,8 +66,24 @@
      "status": "Day-To-Day",
      "date": "2026-10-30T17:35Z",
      "athlete": {
-      "id": "2002",
-      "displayName": "Dee Wing"
+      "firstName": "Dee",
+      "lastName": "Wing",
+      "displayName": "Dee Wing",
+      "shortName": "D. Wing",
+      "links": [
+       {
+        "rel": [
+         "playercard",
+         "desktop",
+         "athlete"
+        ],
+        "href": "https://www.espn.com/nba/player/_/id/2002/x"
+       }
+      ]
+     },
+     "source": {
+      "id": "1",
+      "description": "manual"
      },
      "type": {
       "id": "1",
@@ -83,8 +116,14 @@
      "status": "Day-To-Day",
      "date": "2026-10-30T17:35Z",
      "athlete": {
-      "id": "7002",
-      "displayName": "Kris Big"
+      "firstName": "Kris",
+      "lastName": "Big",
+      "displayName": "Kris Big",
+      "shortName": "K. Big"
+     },
+     "source": {
+      "id": "1",
+      "description": "manual"
      },
      "type": {
       "id": "1",
@@ -99,7 +138,6 @@
       },
       "type": "Back",
       "location": "Leg",
-      "detail": "Spasms",
       "side": "Not Specified",
       "returnDate": ""
      }

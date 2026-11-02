@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import date, datetime, timedelta
 from typing import Any, overload
@@ -778,7 +779,10 @@ class ESPNFantasyBasketballClient:
                     # If still no status, preserve None rather than defaulting (let the model handle it)
                     # This way we don't mask DTD players that ESPN marks differently
                     injury_details, injury_return = self._injury_details(
-                        player_data, injury_report.get(player_data.get("id"))
+                        player_data,
+                        self._injury_for(
+                            injury_report, player_data.get("id"), player_data.get("fullName")
+                        ),
                     )
 
                     # Parse player stats
@@ -1074,7 +1078,7 @@ class ESPNFantasyBasketballClient:
                 return candidate
         return {}
 
-    async def _injury_report(self) -> dict[int, dict[str, Any]]:
+    async def _injury_report(self) -> dict[int | str, dict[str, Any]]:
         """ESPN's public NBA injury report keyed by athlete ID (same IDs as fantasy players).
 
         One request, cached for TTL_INJURIES. Returns {} when unavailable; callers treat the
@@ -1088,11 +1092,18 @@ class ESPNFantasyBasketballClient:
         return self._parse_injury_report(data)
 
     @staticmethod
-    def _parse_injury_report(data: Any) -> dict[int, dict[str, Any]]:
-        """Flatten the injuries endpoint ({injuries: [{team..., injuries: [...]}]}) by athlete."""
-        report: dict[int, dict[str, Any]] = {}
+    def _parse_injury_report(data: Any) -> dict[int | str, dict[str, Any]]:
+        """Flatten the injuries endpoint ({injuries: [{team..., injuries: [...]}]}) by athlete.
+
+        Each item is stored under the athlete's numeric ID when the payload has one (directly,
+        or inside an athlete link such as .../id/4066648/...) and under the normalised display
+        name, because a live response carried firstName/lastName/displayName/links on the
+        athlete and the ID is not guaranteed. Look up with _injury_for.
+        """
+        report: dict[int | str, dict[str, Any]] = {}
         if not isinstance(data, dict):
             return report
+        id_in_link = re.compile(r"/id/(\d+)")
         for team in data.get("injuries") or []:
             if not isinstance(team, dict):
                 continue
@@ -1100,15 +1111,44 @@ class ESPNFantasyBasketballClient:
                 if not isinstance(item, dict):
                     continue
                 athlete = item.get("athlete") or {}
+                if not isinstance(athlete, dict):
+                    continue
+                athlete_id: int | None = None
                 raw_id = athlete.get("id")
-                if raw_id is None:
-                    continue
-                try:
-                    athlete_id = int(raw_id)
-                except (TypeError, ValueError):
-                    continue
-                report[athlete_id] = item
+                if raw_id is not None:
+                    try:
+                        athlete_id = int(raw_id)
+                    except (TypeError, ValueError):
+                        athlete_id = None
+                if athlete_id is None:
+                    for link in athlete.get("links") or []:
+                        href = link.get("href", "") if isinstance(link, dict) else ""
+                        match = id_in_link.search(href)
+                        if match:
+                            athlete_id = int(match.group(1))
+                            break
+                if athlete_id is not None:
+                    report[athlete_id] = item
+                name = athlete.get("displayName") or " ".join(
+                    str(athlete.get(k, "")) for k in ("firstName", "lastName")
+                )
+                key = normalize_name(name) if name else ""
+                if key:
+                    report.setdefault(key, item)
         return report
+
+    @staticmethod
+    def _injury_for(
+        report: dict[int | str, dict[str, Any]], player_id: Any, full_name: str | None
+    ) -> dict[str, Any] | None:
+        """Injury report entry for a player: by ESPN ID first, then by normalised name."""
+        if not report:
+            return None
+        if isinstance(player_id, int) and player_id in report:
+            return report[player_id]
+        if full_name:
+            return report.get(normalize_name(full_name))
+        return None
 
     @classmethod
     def _injury_details(
@@ -1385,7 +1425,8 @@ class ESPNFantasyBasketballClient:
                 ]
 
             injury_details, injury_return = self._injury_details(
-                player_info, injury_report.get(player_info.get("id"))
+                player_info,
+                self._injury_for(injury_report, player_info.get("id"), player_info.get("fullName")),
             )
 
             player = Player(
@@ -2556,7 +2597,9 @@ class ESPNFantasyBasketballClient:
             player_info = entry.get("player") or {}
             r.injuryStatus = player_info.get("injuryStatus") or r.injuryStatus
             r.injuryDetails = (
-                self._injury_details(player_info, injury_report.get(r.playerId))[0]
+                self._injury_details(
+                    player_info, self._injury_for(injury_report, r.playerId, r.fullName)
+                )[0]
                 or r.injuryDetails
             )
 

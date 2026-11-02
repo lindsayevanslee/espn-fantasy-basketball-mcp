@@ -167,7 +167,7 @@ async def test_search_reports_ownership_and_injury_detail(client):
     [big] = await client.search_players("kris big", limit=1)
     assert big.isFreeAgent is True and big.percentOwned == 48.9
     assert big.injuryStatus == "DAY_TO_DAY"
-    assert big.injuryDetails.startswith("Back - Spasms")
+    assert big.injuryDetails.startswith("Back (not specified)"), "matched by name"
 
 
 # --------------------------------------------------------------------------- 4. player schedules
@@ -298,6 +298,15 @@ async def test_settings_describe_limits_and_records(client):
     )
     assert mine.recordType == "categories"
     assert "not matchup wins" in mine.recordDescription
+    # live key scheme: 1=PG ... 5=C, with an unexplained key 0
+    assert settings.rosterSettings.positionLimitNames == {
+        "POS_0": 0,
+        "PG": -1,
+        "SG": -1,
+        "SF": -1,
+        "PF": -1,
+        "C": 4,
+    }
 
 
 @pytest.mark.parametrize(
@@ -369,9 +378,15 @@ async def test_injury_details_surface_everywhere(client):
     healthy = roster.entries[0].playerPoolEntry.player
     assert healthy.injuryDetails is None and healthy.injuryReturnDate is None
 
+    # Dee Wing's report entry has no athlete.id, only a player-card link carrying the ID
+    opponent = await client.get_team_roster(3)
+    wing = opponent.entries[1].playerPoolEntry.player
+    assert wing.injuryDetails == "Ankle - Sprain (right). Wing (ankle) is questionable for Monday."
+
+    # Kris Big's entry has neither an ID nor a link: matched by name, and no detail key
     free_agents = await client.get_free_agents()
     big = next(p for p in free_agents if p.fullName == "Kris Big")
-    assert big.injuryDetails == "Back - Spasms (not specified). Big (back) is probable for Tuesday."
+    assert big.injuryDetails == "Back (not specified). Big (back) is probable for Tuesday."
     assert big.injuryReturnDate is None
 
     analysis = await client.analyze_matchup(MY_TEAM, matchup_period=3)
@@ -400,13 +415,41 @@ def test_injury_details_from_fantasy_player_object_shapes():
 def test_injury_report_parsing_is_defensive():
     parse = ESPNFantasyBasketballClient._parse_injury_report
     assert parse(None) == {}
-    assert (
-        parse({"injuries": [{"injuries": [{"athlete": {}}, {"athlete": {"id": "x"}}, "junk"]}]})
-        == {}
+    junk = {"injuries": [{"injuries": [{"athlete": {}}, {"athlete": {"id": "x"}}, "junk"]}]}
+    assert parse(junk) == {}
+    report = parse({"injuries": [{"injuries": [{"athlete": {"id": "77"}, "status": "Out"}]}]})
+    assert list(report) == [77]
+
+
+def test_injury_lookup_falls_back_from_id_to_link_to_name():
+    parse = ESPNFantasyBasketballClient._parse_injury_report
+    lookup = ESPNFantasyBasketballClient._injury_for
+    report = parse(
+        {
+            "injuries": [
+                {
+                    "injuries": [
+                        {"athlete": {"id": "1", "displayName": "By Id"}, "status": "Out"},
+                        {
+                            "athlete": {
+                                "firstName": "Link",
+                                "lastName": "Only",
+                                "displayName": "Link Only",
+                                "links": [{"href": "https://www.espn.com/nba/player/_/id/2/x"}],
+                            },
+                            "status": "Day-To-Day",
+                        },
+                        {"athlete": {"displayName": "Nikola Jokić"}, "status": "Questionable"},
+                    ]
+                }
+            ]
+        }
     )
-    assert list(
-        parse({"injuries": [{"injuries": [{"athlete": {"id": "77"}, "status": "Out"}]}]})
-    ) == [77]
+    assert lookup(report, 1, "Someone Else")["status"] == "Out"
+    assert lookup(report, 2, None)["status"] == "Day-To-Day", "ID taken from the link"
+    assert lookup(report, 999, "Link Only")["status"] == "Day-To-Day", "name fallback"
+    assert lookup(report, 3, "nikola jokic")["status"] == "Questionable", "accents ignored"
+    assert lookup(report, 4, "Nobody") is None and lookup({}, 1, "x") is None
 
 
 # --------------------------------------------------------------------------- games played

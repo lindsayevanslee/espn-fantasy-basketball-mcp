@@ -15,7 +15,9 @@
   (streaming candidates, trade targets), and a `player_ids` parameter on `get_roster_schedule`
   that lists extras next to your roster (`includedInTotals: false`). Both report the
   `thisWeek` / `nextWeek` date windows they counted.
-- Injury detail. ESPN's public NBA injury report is fetched once (cached 10 minutes) and each
+- Injury detail. ESPN's public NBA injury report is fetched once (cached 10 minutes); its
+  athlete blocks carry an ID, a player-card link with the ID, or only names, and all three are
+  matched (the fantasy player object itself has no injury fields, confirmed live). Each
   player's `injuryDetails` ("Knee - Sprain (left); expected return 2026-11-10. <ESPN note>")
   and `injuryReturnDate` appear on rosters, free agents, search results and in
   `analyze_matchup` lineup warnings. Any `injuryDetails` / `injuries` fields ESPN puts on the
@@ -36,6 +38,10 @@
   with a null inside, which the earlier null-safety pass (and its fixture) did not cover. The
   percentage-category lookups now treat a null `scoreByStat` (and null entries in it) as empty,
   and the fixture carries the live shape.
+- `rosterSettings.positionLimitNames` was off by one. Recorded live, `positionLimits` is keyed
+  by defaultPositionId (1=PG ... 5=C, plus an unused key 0); a league with a maximum of 4
+  centers returns `{"5": 4}`. The 1.2.0 note claiming keys 2-6 was wrong, and the limit was
+  reported on PF.
 - Free agents all showed `percentOwned: 0.0`. ESPN nests ownership under
   `players[].player.ownership`; the code read `players[].ownership`, which does not exist.
   Affects `get_free_agents`, `get_trending_players` and `search_players`.
