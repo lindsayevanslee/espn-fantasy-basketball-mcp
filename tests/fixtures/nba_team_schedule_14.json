@@ -1,0 +1,158 @@
+{
+ "team": {
+  "id": "14",
+  "abbreviation": "MIA",
+  "displayName": "MIA"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "1420261102",
+   "date": "2026-11-03T00:00Z",
+   "name": "MIA vs CHA",
+   "competitions": [
+    {
+     "id": "c140",
+     "date": "2026-11-03T00:00Z",
+     "competitors": [
+      {
+       "id": "14",
+       "homeAway": "home",
+       "team": {
+        "id": "14",
+        "abbreviation": "MIA"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1420261104",
+   "date": "2026-11-05T00:00Z",
+   "name": "MIA vs CHA",
+   "competitions": [
+    {
+     "id": "c141",
+     "date": "2026-11-05T00:00Z",
+     "competitors": [
+      {
+       "id": "14",
+       "homeAway": "away",
+       "team": {
+        "id": "14",
+        "abbreviation": "MIA"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1420261107",
+   "date": "2026-11-08T00:00Z",
+   "name": "MIA vs CHA",
+   "competitions": [
+    {
+     "id": "c142",
+     "date": "2026-11-08T00:00Z",
+     "competitors": [
+      {
+       "id": "14",
+       "homeAway": "home",
+       "team": {
+        "id": "14",
+        "abbreviation": "MIA"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1420261109",
+   "date": "2026-11-10T00:00Z",
+   "name": "MIA vs CHA",
+   "competitions": [
+    {
+     "id": "c143",
+     "date": "2026-11-10T00:00Z",
+     "competitors": [
+      {
+       "id": "14",
+       "homeAway": "away",
+       "team": {
+        "id": "14",
+        "abbreviation": "MIA"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1420261110",
+   "date": "2026-11-11T00:00Z",
+   "name": "MIA vs CHA",
+   "competitions": [
+    {
+     "id": "c144",
+     "date": "2026-11-11T00:00Z",
+     "competitors": [
+      {
+       "id": "14",
+       "homeAway": "home",
+       "team": {
+        "id": "14",
+        "abbreviation": "MIA"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

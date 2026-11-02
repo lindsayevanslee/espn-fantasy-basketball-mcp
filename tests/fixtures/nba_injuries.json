@@ -1,0 +1,110 @@
+{
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "injuries": [
+  {
+   "id": "6",
+   "displayName": "Dallas Mavericks",
+   "injuries": [
+    {
+     "id": "901002",
+     "longComment": "Collins sprained his left knee Friday and will be re-evaluated in 10 days.",
+     "shortComment": "Collins (knee) is out through at least Nov. 10.",
+     "status": "Out",
+     "date": "2026-10-30T17:35Z",
+     "athlete": {
+      "id": "1002",
+      "displayName": "Jon Collins"
+     },
+     "type": {
+      "id": "1",
+      "name": "INJURY_STATUS_OUT",
+      "description": "out",
+      "abbreviation": "O"
+     },
+     "details": {
+      "fantasyStatus": {
+       "description": "OUT",
+       "abbreviation": "O"
+      },
+      "type": "Knee",
+      "location": "Leg",
+      "detail": "Sprain",
+      "side": "Left",
+      "returnDate": "2026-11-10"
+     }
+    }
+   ]
+  },
+  {
+   "id": "18",
+   "displayName": "New York Knicks",
+   "injuries": [
+    {
+     "id": "902002",
+     "longComment": "Wing rolled his right ankle Saturday; he is listed as questionable.",
+     "shortComment": "Wing (ankle) is questionable for Monday.",
+     "status": "Day-To-Day",
+     "date": "2026-10-30T17:35Z",
+     "athlete": {
+      "id": "2002",
+      "displayName": "Dee Wing"
+     },
+     "type": {
+      "id": "1",
+      "name": "INJURY_STATUS_DAY_TO_DAY",
+      "description": "day-to-day",
+      "abbreviation": "D"
+     },
+     "details": {
+      "fantasyStatus": {
+       "description": "DAY-TO-DAY",
+       "abbreviation": "D"
+      },
+      "type": "Ankle",
+      "location": "Leg",
+      "detail": "Sprain",
+      "side": "Right",
+      "returnDate": ""
+     }
+    }
+   ]
+  },
+  {
+   "id": "12",
+   "displayName": "LA Clippers",
+   "injuries": [
+    {
+     "id": "907002",
+     "longComment": "Big is dealing with back spasms but is expected to play.",
+     "shortComment": "Big (back) is probable for Tuesday.",
+     "status": "Day-To-Day",
+     "date": "2026-10-30T17:35Z",
+     "athlete": {
+      "id": "7002",
+      "displayName": "Kris Big"
+     },
+     "type": {
+      "id": "1",
+      "name": "INJURY_STATUS_DAY_TO_DAY",
+      "description": "day-to-day",
+      "abbreviation": "D"
+     },
+     "details": {
+      "fantasyStatus": {
+       "description": "DAY-TO-DAY",
+       "abbreviation": "D"
+      },
+      "type": "Back",
+      "location": "Leg",
+      "detail": "Spasms",
+      "side": "Not Specified",
+      "returnDate": ""
+     }
+    }
+   ]
+  }
+ ]
+}

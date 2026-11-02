@@ -1,0 +1,187 @@
+{
+ "team": {
+  "id": "18",
+  "abbreviation": "NYK",
+  "displayName": "NYK"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "1820261103",
+   "date": "2026-11-04T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "c180",
+     "date": "2026-11-04T00:00Z",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "home",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1820261105",
+   "date": "2026-11-06T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "c181",
+     "date": "2026-11-06T00:00Z",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "away",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1820261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "c182",
+     "date": "2026-11-07T00:00Z",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "home",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1820261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "c183",
+     "date": "2026-11-09T00:00Z",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "away",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1820261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "c184",
+     "date": "2026-11-12T00:00Z",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "home",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "1820261114",
+   "date": "2026-11-15T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "c185",
+     "date": "2026-11-15T00:00Z",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "away",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

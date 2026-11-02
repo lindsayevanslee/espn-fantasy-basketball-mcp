@@ -629,6 +629,9 @@ async def analyze_matchup(
         )
         is_starter = entry.lineupSlotId not in (SLOT_BENCH, SLOT_IR)
 
+        # ESPN's reason/timeline for the status, when it publishes one
+        detail = f" ({player.injuryDetails})" if player.injuryDetails else ""
+
         # A starter who cannot play is a dead lineup slot; say so explicitly.
         if is_starter and factor == 0.0:
             if availability == "FA":
@@ -638,7 +641,7 @@ async def analyze_matchup(
                 )
             elif games_remaining > 0:
                 lineup_warnings.append(
-                    f"{player.fullName} ({slot_name}) is {availability} with "
+                    f"{player.fullName} ({slot_name}) is {availability}{detail} with "
                     f"{games_remaining} game(s) left; move to bench and start a healthy player"
                 )
         elif (
@@ -647,7 +650,8 @@ async def analyze_matchup(
             and availability not in ("ACTIVE", "NORMAL", "PROBABLE")
         ):
             lineup_warnings.append(
-                f"{player.fullName} ({slot_name}) is {availability}; check status before tip-off"
+                f"{player.fullName} ({slot_name}) is {availability}{detail}; "
+                "check status before tip-off"
             )
 
         # Skip players who cannot play or have no games left

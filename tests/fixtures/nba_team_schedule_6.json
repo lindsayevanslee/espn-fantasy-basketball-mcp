@@ -1,0 +1,245 @@
+{
+ "team": {
+  "id": "6",
+  "abbreviation": "DAL",
+  "displayName": "DAL"
+ },
+ "season": {
+  "year": 2027,
+  "type": 2
+ },
+ "events": [
+  {
+   "id": "620261101",
+   "date": "2026-11-02T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "c60",
+     "date": "2026-11-02T00:00Z",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "home",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "620261103",
+   "date": "2026-11-04T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "c61",
+     "date": "2026-11-04T00:00Z",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "away",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "620261105",
+   "date": "2026-11-06T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "c62",
+     "date": "2026-11-06T00:00Z",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "home",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "620261107",
+   "date": "2026-11-08T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "c63",
+     "date": "2026-11-08T00:00Z",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "away",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "620261109",
+   "date": "2026-11-10T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "c64",
+     "date": "2026-11-10T00:00Z",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "home",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "620261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "c65",
+     "date": "2026-11-12T00:00Z",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "away",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "620261113",
+   "date": "2026-11-14T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "c66",
+     "date": "2026-11-14T00:00Z",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "home",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "620261115",
+   "date": "2026-11-16T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "c67",
+     "date": "2026-11-16T00:00Z",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "away",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

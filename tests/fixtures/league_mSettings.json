@@ -1,0 +1,237 @@
+{
+ "id": 12345,
+ "seasonId": 2027,
+ "segmentId": 0,
+ "scoringPeriodId": 13,
+ "gameId": 3,
+ "members": [
+  {
+   "id": "REDACTED-ID",
+   "displayName": "REDACTED",
+   "isLeagueManager": true
+  }
+ ],
+ "settings": {
+  "name": "Fixture League",
+  "size": 12,
+  "isPublic": false,
+  "scoringSettings": {
+   "scoringType": "H2H_CATEGORY",
+   "playerRankType": "STANDARD",
+   "matchupTieRule": "NONE",
+   "allowOutOfPositionScoring": false,
+   "scoringItems": [
+    {
+     "statId": 0,
+     "points": 1.0,
+     "isReverseItem": false,
+     "pointsOverrides": {}
+    },
+    {
+     "statId": 1,
+     "points": 1.0,
+     "isReverseItem": false,
+     "pointsOverrides": {}
+    },
+    {
+     "statId": 2,
+     "points": 1.0,
+     "isReverseItem": false,
+     "pointsOverrides": {}
+    },
+    {
+     "statId": 3,
+     "points": 1.0,
+     "isReverseItem": false,
+     "pointsOverrides": {}
+    },
+    {
+     "statId": 6,
+     "points": 1.0,
+     "isReverseItem": false,
+     "pointsOverrides": {}
+    },
+    {
+     "statId": 11,
+     "points": 1.0,
+     "isReverseItem": true,
+     "pointsOverrides": {}
+    },
+    {
+     "statId": 17,
+     "points": 1.0,
+     "isReverseItem": false,
+     "pointsOverrides": {}
+    },
+    {
+     "statId": 19,
+     "points": 1.0,
+     "isReverseItem": false,
+     "pointsOverrides": {}
+    },
+    {
+     "statId": 20,
+     "points": 1.0,
+     "isReverseItem": false,
+     "pointsOverrides": {}
+    }
+   ]
+  },
+  "scheduleSettings": {
+   "matchupPeriodCount": 23,
+   "matchupPeriodLength": 1,
+   "matchupPeriods": {
+    "1": [
+     1
+    ],
+    "2": [
+     2
+    ],
+    "3": [
+     3
+    ],
+    "4": [
+     4
+    ],
+    "5": [
+     5
+    ],
+    "6": [
+     6
+    ],
+    "7": [
+     7
+    ],
+    "8": [
+     8
+    ],
+    "9": [
+     9
+    ],
+    "10": [
+     10
+    ],
+    "11": [
+     11
+    ],
+    "12": [
+     12
+    ],
+    "13": [
+     13
+    ],
+    "14": [
+     14
+    ],
+    "15": [
+     15
+    ],
+    "16": [
+     16
+    ],
+    "17": [
+     17,
+     18
+    ],
+    "18": [
+     19
+    ],
+    "19": [
+     20
+    ],
+    "20": [
+     21
+    ],
+    "21": [
+     22
+    ],
+    "22": [
+     23
+    ],
+    "23": [
+     24
+    ]
+   },
+   "periodTypeId": 2,
+   "playoffTeamCount": 6,
+   "playoffMatchupPeriodLength": 1,
+   "playoffSeedingRule": "TOTAL_POINTS_SCORED"
+  },
+  "rosterSettings": {
+   "lineupSlotCounts": {
+    "0": 1,
+    "1": 1,
+    "2": 1,
+    "3": 1,
+    "4": 1,
+    "5": 1,
+    "6": 1,
+    "11": 3,
+    "12": 3,
+    "13": 1
+   },
+   "positionLimits": {
+    "1": 0,
+    "2": -1,
+    "3": -1,
+    "4": -1,
+    "5": -1,
+    "6": 4
+   },
+   "lineupLocktimeType": "INDIVIDUAL_GAME",
+   "rosterLocktimeType": "INDIVIDUAL_GAME",
+   "isBenchUnlimited": false,
+   "moveLimit": -1
+  },
+  "acquisitionSettings": {
+   "acquisitionType": "WAIVERS_TRADITIONAL",
+   "waiverHours": 24,
+   "waiverProcessDays": [
+    "SUNDAY"
+   ],
+   "waiverProcessHour": 3,
+   "matchupAcquisitionLimit": 1.0,
+   "matchupLimitPerScoringPeriod": false,
+   "acquisitionLimit": -1,
+   "minimumBid": 0
+  },
+  "tradeSettings": {
+   "deadlineDate": 1772514000000,
+   "vetoVotesRequired": 4,
+   "revisionHours": 48,
+   "max": -1,
+   "allowOutOfUniverse": false
+  },
+  "draftSettings": {
+   "type": "AUCTION",
+   "auctionBudget": 200,
+   "pickOrder": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+   ],
+   "keeperCount": 0,
+   "date": 1760400000000
+  }
+ },
+ "status": {
+  "currentMatchupPeriod": 2,
+  "latestScoringPeriod": 13,
+  "firstScoringPeriod": 1,
+  "finalScoringPeriod": 174,
+  "isActive": true,
+  "transactionScoringPeriod": 14,
+  "previousSeasons": [
+   2026
+  ]
+ }
+}

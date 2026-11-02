@@ -51,11 +51,14 @@ class TestESPNFantasyBasketballClient:
             assert teams[1].id == 2
             assert teams[1].name == "Test Team 2"
 
-            # Verify the request was made correctly
-            mock_request.assert_called_once()
-            args, kwargs = mock_request.call_args
-            params = args[1] if len(args) > 1 else kwargs.get("params", {})
-            assert params.get("view") == "mTeam"
+            # Verify the team list was requested (settings are also consulted, to label the
+            # record as category or matchup wins; here they are absent and ignored)
+            views = [
+                (c.args[1] if len(c.args) > 1 else c.kwargs.get("params", {})).get("view")
+                for c in mock_request.call_args_list
+            ]
+            assert "mTeam" in views
+            assert teams[0].recordType is None
 
     @pytest.mark.asyncio
     async def test_get_team_roster_success(self, client):

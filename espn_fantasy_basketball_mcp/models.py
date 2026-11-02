@@ -77,6 +77,7 @@ class Owner(BaseModel):
 class OverallRecord(BaseModel):
     wins: int
     losses: int
+    ties: int | None = None
     percentage: float | None = None
 
 
@@ -92,6 +93,10 @@ class Team(BaseModel):
     logo: str | None = None
     owners: list[str] | None = None  # ESPN returns owner IDs as strings
     record: TeamRecord | None = None
+    # What one win/loss in `record` means: "categories" in an H2H Each Category league (one
+    # result per scoring category per matchup), "matchups" in Most Categories or Points leagues.
+    recordType: str | None = None
+    recordDescription: str | None = None
 
 
 class TeamSeasonStats(BaseModel):
@@ -192,6 +197,7 @@ class PlayerSearchResult(BaseModel):
     defaultPosition: str | None = None
     proTeamAbbrev: str | None = None  # "FA" if not on an NBA roster
     injuryStatus: str | None = None
+    injuryDetails: str | None = None  # Reason / timeline when ESPN publishes one
     isFreeAgent: bool | None = None  # True if no fantasy team owns the player (None if unknown)
     fantasyTeamId: int | None = None
     fantasyTeamName: str | None = None
@@ -221,6 +227,10 @@ class Player(BaseModel):
     )
     injured: bool | None = None
     injuryStatus: str | None = None
+    # Human-readable reason/timeline behind injuryStatus when ESPN publishes one, e.g.
+    # "Knee - Sprain (left); expected return 2026-11-10. Williams (knee) is out Tuesday."
+    injuryDetails: str | None = None
+    injuryReturnDate: str | None = None  # YYYY-MM-DD when ESPN lists an expected return
     stats: dict[str, Any] | None = None
     ownership: PlayerOwnership | None = None
     active: bool | None = None
@@ -264,6 +274,17 @@ class RosterEntry(BaseModel):
 class Roster(BaseModel):
     teamId: int
     entries: list[RosterEntry]
+    # Which day this roster is for. ESPN's scoring periods are days (1 = opening night); the
+    # default is today's, whose lineup may already be locked. Pass scoring_period = this + 1 for
+    # tomorrow's (editable) lineup.
+    scoringPeriodId: int | None = None
+    scoringPeriodDate: str | None = None  # YYYY-MM-DD when it can be determined
+    lineupLocked: bool | None = None  # True if every non-bench, non-IR slot is locked
+    note: str | None = None
+    # Players ESPN listed under this team whose playerPoolEntry.onTeamId says they now belong to
+    # another team or the free-agent pool (a dropped player whose lineup slot was locked). They
+    # are removed from `entries` so projections never count them.
+    staleEntriesRemoved: list[str] | None = None
 
 
 class MatchupTeam(BaseModel):
@@ -342,15 +363,20 @@ class PlayerSchedule(BaseModel):
     games: list[PlayerScheduleGame]
     gamesThisWeek: int  # Games in this matchup period (or week)
     gamesNextWeek: int  # Games in the next matchup period (or week)
+    includedInTotals: bool = True  # False for extras (player_ids), unsigned or failed lookups
     note: str | None = None  # e.g. "Not on an NBA roster; cannot play"
 
 
 class RosterScheduleSummary(BaseModel):
-    """Schedule summary for an entire fantasy roster."""
+    """Schedule summary for a fantasy roster, or for an arbitrary list of players."""
 
-    teamId: int
-    scoringPeriod: int
+    teamId: int | None = None  # None when built from player IDs rather than a roster
+    scoringPeriod: int  # The matchup period "this week" refers to (0 if unknown)
+    thisWeek: list[str] | None = None  # [first_day, last_day] counted as gamesThisWeek
+    nextWeek: list[str] | None = None  # [first_day, last_day] counted as gamesNextWeek
     playerSchedules: list[PlayerSchedule]
+    # Totals and the average cover players with includedInTotals=True: rostered players who can
+    # play. Extras passed via player_ids and unsigned players are listed but excluded.
     totalGamesThisWeek: int
     totalGamesNextWeek: int = 0
     averageGamesPerPlayer: float
@@ -450,6 +476,11 @@ class ScheduleSettings(BaseModel):
     # matchupPeriodDates for calendar dates.
     matchupPeriods: dict[str, list[int]]
     matchupPeriodDates: dict[str, list[str]] | None = None  # period -> [first_day, last_day]
+    matchupPeriodsNote: str = (
+        "matchupPeriods maps each matchup period to the week number(s) it covers; it is NOT a "
+        "list of scoring periods (days). Use matchupPeriodDates for calendar dates. "
+        "status.latestScoringPeriod is a daily counter where 1 is opening night."
+    )
     periodTypeId: int
     playoffTeamCount: int
     playoffMatchupPeriodLength: int
@@ -483,9 +514,10 @@ class AcquisitionSettings(BaseModel):
     waiverProcessTimeLocal: str | None = (
         None  # Same time in MY_TIMEZONE, e.g. "07:00 America/Chicago"
     )
-    matchupAcquisitionLimit: float  # Max acquisitions per matchup
-    matchupLimitPerScoringPeriod: bool
+    matchupAcquisitionLimit: float  # Max acquisitions per matchup (or per day, see below)
+    matchupLimitPerScoringPeriod: bool  # True: the limit above applies per day, not per matchup
     acquisitionLimit: int = -1  # Season limit (-1 = unlimited)
+    acquisitionLimitDescription: str | None = None  # e.g. "1 acquisition per matchup period"
     minimumBid: int = 0
 
 
@@ -522,6 +554,8 @@ class LeagueStatus(BaseModel):
     finalScoringPeriod: int
     isActive: bool
     transactionScoringPeriod: int | None = None
+    currentMatchupPeriodDates: list[str] | None = None  # [first_day, last_day]
+    latestScoringPeriodDate: str | None = None  # Calendar day latestScoringPeriod refers to
 
 
 class LeagueSettings(BaseModel):
