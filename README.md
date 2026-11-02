@@ -11,6 +11,8 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 >
 > This repository is a fork of [dylancharris/espn-fantasy-basketball-mcp](https://github.com/dylancharris/espn-fantasy-basketball-mcp) with additional tools, bug fixes, and hardening.
 
+> **New here?** [TUTORIAL.md](TUTORIAL.md) explains how the server works end to end: the request lifecycle, each module, how ESPN's API is shaped, and how to add and test a tool.
+
 ## Features
 
 ### Available Tools
