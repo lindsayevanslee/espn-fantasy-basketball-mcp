@@ -547,9 +547,15 @@ async def main() -> int:
             espn_txt = f"{o.wins}-{o.losses}-{o.ties or 0}" if o else "?"
             matchup_txt = f"{m.wins}-{m.losses}-{m.ties}" if m else "?"
             print(
-                f"       {t.standingsRank}. {t.abbrev:<6}{t.name[:24]:<26}"
-                f"ESPN {espn_txt:<9} matchups {matchup_txt}"
+                f"       {t.standingsRank:>2}. {t.abbrev:<6}{t.name[:24]:<26}"
+                f"ESPN {espn_txt:<9} matchups {matchup_txt:<7} seed {t.playoffSeed or '?'}"
             )
+        seeds = [t.playoffSeed for t in teams]
+        report.info(
+            "standings order from ESPN playoffSeed"
+            if seeds and len(set(seeds)) == len(teams)
+            else "standings order from ESPN record (playoffSeed not distinct); ties keep ESPN's order"
+        )
         if settings.scoringSettings.scoringType == "H2H_CATEGORY":
             total = sum(
                 t.record.overall.wins + t.record.overall.losses + (t.record.overall.ties or 0)
