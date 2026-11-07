@@ -10,14 +10,29 @@ from zoneinfo import ZoneInfo
 
 from .constants import (
     AVAILABILITY_FACTORS,
+    CATEGORY_HELP_THRESHOLDS,
+    CLOSE_MARGINS,
+    CLOSE_PERCENTAGE_FALLBACK,
+    CLOSE_PERCENTAGE_MAKES,
+    HURTS_RATIO,
     LINEUP_SLOT_NAMES,
     SHOOTING_THRESHOLDS,
     SLOT_BENCH,
     SLOT_IR,
     STAT_ID_TO_CATEGORY,
+    TURNOVER_HELPS_BELOW,
+    TURNOVER_HURTS_ABOVE,
 )
 from .dates import games_remaining_by_player
-from .models import CategoryProjection, MatchupAnalysis, PlayerRecommendation, RosterEntry
+from .models import (
+    CategoryProjection,
+    MatchupAnalysis,
+    OpponentPlayerSummary,
+    PlayerRecommendation,
+    PlayerStats,
+    Roster,
+    RosterEntry,
+)
 
 if TYPE_CHECKING:
     from .client import ESPNFantasyBasketballClient
@@ -40,6 +55,104 @@ def player_availability(entry: RosterEntry) -> tuple[str, float]:
     status = (entry.injuryStatus or player.injuryStatus or "ACTIVE").upper()
     label = "SUSPENDED" if status == "SUSPENSION" else status
     return label, AVAILABILITY_FACTORS.get(status, 1.0)
+
+
+def category_close_threshold(
+    category: str, is_percentage: bool, your_current: float, attempts: float | None
+) -> tuple[float, str]:
+    """How small a projected margin must be for `category` to count as close, and why.
+
+    Counting categories use a per-category margin (CLOSE_MARGINS: roughly what two strong
+    player-games swing), so blocks at 0.4 and points at 0.4 are not judged on one scale.
+    Percentage categories are judged in made shots: the lead is close when it is worth no more
+    than CLOSE_PERCENTAGE_MAKES makes over the week's projected attempts, which is what a
+    reader means by "one basket decides it".
+    """
+    if is_percentage:
+        if attempts and attempts > 0:
+            threshold = CLOSE_PERCENTAGE_MAKES / attempts
+            return threshold, (
+                f"lead worth at most {CLOSE_PERCENTAGE_MAKES:g} made shots over about "
+                f"{attempts:.0f} projected attempts (margin <= {threshold:.4f})"
+            )
+        threshold = CLOSE_PERCENTAGE_FALLBACK.get(category, 0.01)
+        return threshold, f"margin <= {threshold} (projected attempts unknown)"
+    if category in CLOSE_MARGINS:
+        threshold = CLOSE_MARGINS[category]
+        return threshold, f"margin <= {threshold:g} (about two strong player-games)"
+    threshold = max(abs(your_current) * 0.05, 2.0)
+    return threshold, f"margin <= {threshold:g} (5% of the current total, minimum 2)"
+
+
+def category_verdict(category: str, value: float) -> tuple[str, str] | None:
+    """Does a per-game value help or hurt a category? Returns ("helps"|"hurts", display) or
+    None when it is unremarkable. The display carries the number so the claim is checkable."""
+    if category == "turnovers":
+        display = f"{category} ({value:.1f}/g)"
+        if value <= TURNOVER_HELPS_BELOW:
+            return "helps", display
+        if value >= TURNOVER_HURTS_ABOVE:
+            return "hurts", display
+        return None
+    if category in SHOOTING_THRESHOLDS:
+        # PlayerStats stores percentages on a 0-100 scale (e.g. 47.8); tolerate a fraction.
+        pct = value * 100.0 if value <= 1.0 else value
+        good, poor = SHOOTING_THRESHOLDS[category]
+        display = f"{category} ({pct:.1f}%)"
+        if pct >= good:
+            return "helps", display
+        if pct < poor:
+            return "hurts", display
+        return None
+    threshold = CATEGORY_HELP_THRESHOLDS.get(category, 5.0)
+    display = f"{category} ({value:.1f}/g)"
+    if value >= threshold:
+        return "helps", display
+    if value < threshold * HURTS_RATIO:
+        return "hurts", display
+    return None
+
+
+def expected_games_breakdown(
+    roster: Roster,
+    games_left: dict[int, int],
+    availability: dict[int, tuple[str, float]],
+) -> list[str]:
+    """One line per player whose remaining games are discounted, plus the arithmetic."""
+    lines: list[str] = []
+    scheduled = 0
+    expected = 0.0
+    for entry in roster.entries:
+        games = games_left.get(entry.playerId, 0)
+        label, factor = availability.get(entry.playerId, ("ACTIVE", 1.0))
+        scheduled += games
+        expected += games * factor
+        if games > 0 and factor < 1.0:
+            player = entry.playerPoolEntry.player
+            detail = f"; {player.injuryDetails}" if player.injuryDetails else ""
+            lines.append(
+                f"{player.fullName}: {games} scheduled, {games * factor:g} expected "
+                f"({label}{detail})"
+            )
+    if lines:
+        lines.append(
+            f"{scheduled} scheduled - {scheduled - expected:g} discounted = {expected:g} expected"
+        )
+    return lines
+
+
+def projection_method(end_date: str) -> str:
+    """Spell out how the projections are built, so the reader can weigh them."""
+    return (
+        "Projected total = current matchup total + sum over rostered players of (ESPN's "
+        "projected per-game average x expected remaining games). Expected games are the "
+        f"player's scheduled games from now through {end_date} multiplied by an availability "
+        "factor: OUT, suspended, in the IR slot or unsigned = 0; DOUBTFUL = 0.5; everything "
+        "else = 1. A player listed OUT contributes nothing even if his expected return date "
+        "falls inside the window. FG% and FT% are projected as made/attempted. The per-game "
+        "averages are ESPN's season projections (get_player_stats timeframe 'projections'), "
+        "not recent form, and no confidence range is given: early-season numbers are noisy."
+    )
 
 
 async def analyze_matchup(
@@ -193,11 +306,12 @@ async def analyze_matchup(
     your_expected_games = round(sum(your_expected.values()), 1)
     opponent_expected_games = round(sum(opponent_expected.values()), 1)
 
-    for stat_id in scoring_stat_ids:
+    for stat_id in sorted(scoring_stat_ids):
         category_name = stat_mapping.get(str(stat_id))
         if not category_name:
             continue
 
+        attempts_basis: float | None = None  # projected attempts, for percentage closeness
         your_current = your_category_scores.get(category_name, 0.0)
         opponent_current = opponent_category_scores.get(category_name, 0.0)
         current_lead = your_current - opponent_current
@@ -350,6 +464,7 @@ async def analyze_matchup(
 
                 # Calculate projected percentages using weighted average formula
                 # Projected = (currentFGM + projectedFGM) / (currentFGA + projectedFGA)
+                attempts_basis = max(your_projected_fga, opponent_projected_fga)
                 if your_projected_fga > 0:
                     your_projected = your_projected_fgm / your_projected_fga
                 else:
@@ -484,6 +599,7 @@ async def analyze_matchup(
 
                 # Calculate projected percentages using weighted average formula
                 # Projected = (currentFTM + projectedFTM) / (currentFTA + projectedFTA)
+                attempts_basis = max(your_projected_fta, opponent_projected_fta)
                 if your_projected_fta > 0:
                     your_projected = your_projected_ftm / your_projected_fta
                 else:
@@ -540,43 +656,32 @@ async def analyze_matchup(
             else None
         )
 
-        # Determine projected result with appropriate thresholds
+        # Projected result, and whether the category is close on its own scale
         projected_result = None
         margin = None
         is_close = False
+        close_threshold: float | None = None
+        closeness_rule: str | None = None
 
         if projected_lead is not None:
             margin = abs(projected_lead)
+            close_threshold, closeness_rule = category_close_threshold(
+                category_name, is_percentage_category, your_current, attempts_basis
+            )
+            is_close = margin <= close_threshold
 
-            # Use much smaller threshold for percentage categories
-            if is_percentage_category:
-                # For percentages, use 0.002 (0.2 percentage points) as threshold
-                threshold = 0.002
-                is_close = margin <= threshold
-
-                if projected_lead > 0.002:
-                    projected_result = "win"
-                    categories_winning.append(category_name)
-                elif projected_lead < -0.002:
-                    projected_result = "loss"
-                    categories_losing.append(category_name)
-                else:
-                    projected_result = "tie"
-                    categories_tied.append(category_name)
+            # A tie is a lead too small to mean anything: a fifth of a percentage point, or a
+            # tenth of a counting stat. Win/loss is decided by the sign of anything larger.
+            epsilon = 0.002 if is_percentage_category else 0.1
+            if projected_lead > epsilon:
+                projected_result = "win"
+                categories_winning.append(category_name)
+            elif projected_lead < -epsilon:
+                projected_result = "loss"
+                categories_losing.append(category_name)
             else:
-                # For non-percentage categories, use original logic
-                threshold = max(abs(your_current) * 0.05, 2.0)  # 5% or minimum 2.0
-                is_close = margin <= threshold
-
-                if projected_lead > 0.1:
-                    projected_result = "win"
-                    categories_winning.append(category_name)
-                elif projected_lead < -0.1:
-                    projected_result = "loss"
-                    categories_losing.append(category_name)
-                else:
-                    projected_result = "tie"
-                    categories_tied.append(category_name)
+                projected_result = "tie"
+                categories_tied.append(category_name)
 
             if is_close:
                 close_categories.append(category_name)
@@ -612,6 +717,8 @@ async def analyze_matchup(
                 projectedResult=projected_result,
                 margin=margin,
                 isClose=is_close,
+                closeThreshold=close_threshold,
+                closenessRule=closeness_rule,
             )
         )
 
@@ -664,58 +771,48 @@ async def analyze_matchup(
         if not proj_stats:
             continue
 
-        # Determine which categories this player helps with
-        categories_helped = []
-        categories_hurt = []
+        # Which categories this player moves, weighted by whether they are still in play.
+        # Close categories (winnable or losable by a start/sit) count most. A category
+        # projected lost by a wide margin is not penalised: hurting it costs nothing, and
+        # helping it earns only a little. Categories safely won are ignored.
+        categories_helped: list[str] = []
+        categories_hurt: list[str] = []
+        close_helped: list[str] = []
+        close_hurt: list[str] = []
+        shown_close_helped: list[str] = []
+        shown_close_hurt: list[str] = []
+        shown_trail_helped: list[str] = []
+        shown_trail_hurt: list[str] = []
         priority_score = 5  # Base priority
 
-        # Check each close category or category we're losing
-        relevant_categories = set(close_categories + categories_losing)
-
-        for category in relevant_categories:
+        close_set = set(close_categories)
+        for category in [c.category for c in category_projections]:
+            if category not in close_set and category not in categories_losing:
+                continue
             category_value = getattr(proj_stats, category, None)
             if category_value is None:
                 continue
-
-            # Check if this player helps in this category
-            if category == "turnovers":
-                # Lower turnovers is better
-                if category_value < 3.0:  # Low turnover player
-                    categories_helped.append(category)
-                    priority_score += 2
-                elif category_value > 4.0:  # High turnover player
-                    categories_hurt.append(category)
-                    priority_score -= 1
-            elif category in ["fieldGoalPercentage", "freeThrowPercentage"]:
-                # Higher percentage is better. PlayerStats stores percentages on a
-                # 0-100 scale (e.g. 47.8); tolerate a 0-1 fraction just in case.
-                pct = category_value * 100.0 if category_value <= 1.0 else category_value
-                good, poor = SHOOTING_THRESHOLDS[category]
-                if pct >= good:
-                    categories_helped.append(category)
+            verdict = category_verdict(category, category_value)
+            if verdict is None:
+                continue
+            kind, display = verdict
+            if kind == "helps":
+                categories_helped.append(category)
+                if category in close_set:
+                    close_helped.append(category)
+                    shown_close_helped.append(display)
+                    priority_score += 3
+                else:
+                    shown_trail_helped.append(display)
                     priority_score += 1
-                elif pct < poor:
-                    categories_hurt.append(category)
-                    priority_score -= 1
             else:
-                # Higher is better for most categories
-                # Compare to league average (rough estimates)
-                thresholds = {
-                    "points": 15.0,
-                    "rebounds": 6.0,
-                    "assists": 4.0,
-                    "steals": 1.0,
-                    "blocks": 0.8,
-                    "threePointMade": 1.5,
-                }
-                threshold = thresholds.get(category, 5.0)
-
-                if category_value >= threshold:
-                    categories_helped.append(category)
-                    priority_score += 2
-                elif category_value < threshold * 0.7:
-                    categories_hurt.append(category)
-                    priority_score -= 1
+                categories_hurt.append(category)
+                if category in close_set:
+                    close_hurt.append(category)
+                    shown_close_hurt.append(display)
+                    priority_score -= 2
+                else:
+                    shown_trail_hurt.append(display)
 
         # Boost priority for players with more games remaining
         if games_remaining >= 3:
@@ -729,25 +826,34 @@ async def analyze_matchup(
         elif availability in ("DAY_TO_DAY", "QUESTIONABLE"):
             priority_score -= 1
 
-        # Boost priority if player helps in multiple categories
-        if len(categories_helped) >= 3:
+        # Boost priority if player helps in several close categories
+        if len(close_helped) >= 3:
             priority_score += 2
-        elif len(categories_helped) >= 2:
+        elif len(close_helped) >= 2:
             priority_score += 1
 
         # Cap priority between 1-10
         priority_score = max(1, min(10, priority_score))
 
-        # Build reasoning
+        # Build reasoning, with the per-game numbers behind every claim
         reasoning_parts = []
-        if categories_helped:
-            reasoning_parts.append(f"Strong in: {', '.join(categories_helped)}")
+        if shown_close_helped:
+            reasoning_parts.append(f"Helps close categories: {', '.join(shown_close_helped)}")
+        if shown_close_hurt:
+            reasoning_parts.append(f"Hurts close categories: {', '.join(shown_close_hurt)}")
+        if shown_trail_helped:
+            reasoning_parts.append(f"Helps categories you trail: {', '.join(shown_trail_helped)}")
+        if shown_trail_hurt:
+            reasoning_parts.append(
+                "Hurts categories already projected lost (not penalised): "
+                f"{', '.join(shown_trail_hurt)}"
+            )
         if games_remaining >= 3:
             reasoning_parts.append(f"{games_remaining} games remaining")
         if availability not in ("ACTIVE", "NORMAL"):
-            reasoning_parts.append(f"Status: {availability}")
+            reasoning_parts.append(f"Status: {availability}{detail}")
         if not reasoning_parts:
-            reasoning_parts.append("Active player")
+            reasoning_parts.append("Active player; no close or trailing category moved")
 
         reasoning = ". ".join(reasoning_parts)
 
@@ -775,13 +881,50 @@ async def analyze_matchup(
                 reasoning=reasoning,
                 categoriesHelped=categories_helped,
                 categoriesHurt=categories_hurt,
+                closeCategoriesHelped=close_helped,
+                closeCategoriesHurt=close_hurt,
                 injuryStatus=entry.injuryStatus,
+                injuryDetails=player.injuryDetails,
                 todaysGame=entry.todaysGame,
             )
         )
 
-    # Sort recommendations by priority (highest first)
-    player_recommendations.sort(key=lambda x: x.priority, reverse=True)
+    # Sort recommendations by priority (highest first), then by expected games
+    player_recommendations.sort(key=lambda x: (x.priority, x.expectedGames or 0), reverse=True)
+
+    # The opponent's side of the projection, player by player
+    category_names = [
+        name for sid in sorted(scoring_stat_ids) if (name := stat_mapping.get(str(sid)))
+    ]
+    opponent_players: list[OpponentPlayerSummary] = []
+    for entry in matchup.opponentRoster.entries:
+        player = entry.playerPoolEntry.player
+        games = opponent_games_left.get(entry.playerId, 0)
+        label, factor = opponent_availability.get(entry.playerId, ("ACTIVE", 1.0))
+        opp_proj: PlayerStats | None = player_projections.get(entry.playerId)
+        per_game = (
+            {
+                name: value
+                for name in category_names
+                if (value := getattr(opp_proj, name, None)) is not None
+            }
+            if opp_proj
+            else None
+        )
+        opponent_players.append(
+            OpponentPlayerSummary(
+                playerId=entry.playerId,
+                playerName=player.fullName,
+                lineupSlotName=entry.lineupSlotName
+                or dict(LINEUP_SLOT_NAMES).get(entry.lineupSlotId, f"SLOT_{entry.lineupSlotId}"),
+                gamesRemaining=games,
+                availability=label,
+                expectedGames=round(games * factor, 1),
+                injuryStatus=entry.injuryStatus or player.injuryStatus,
+                injuryDetails=player.injuryDetails,
+                projectedPerGame=per_game or None,
+            )
+        )
 
     # Generate strategy notes
     strategy_notes = []
@@ -838,10 +981,18 @@ async def analyze_matchup(
         categoriesTied=categories_tied,
         closeCategories=close_categories,
         playerRecommendations=player_recommendations,
+        projectionMethod=projection_method(end_date),
         yourGamesRemaining=your_games_remaining,
         opponentGamesRemaining=opponent_games_remaining,
         yourExpectedGames=your_expected_games,
         opponentExpectedGames=opponent_expected_games,
+        expectedGamesBreakdown=expected_games_breakdown(
+            matchup.yourRoster, your_games_left, your_availability
+        ),
+        opponentExpectedGamesBreakdown=expected_games_breakdown(
+            matchup.opponentRoster, opponent_games_left, opponent_availability
+        ),
+        opponentPlayers=opponent_players,
         currentCategoryWins=current_category_wins,
         currentCategoryLosses=current_category_losses,
         currentCategoryTies=current_category_ties,

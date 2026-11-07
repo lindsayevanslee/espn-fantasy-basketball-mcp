@@ -2,7 +2,65 @@
 
 ## [Unreleased]
 
+### Security
+- The ESPN cookies (`espn_s2`, `swid`) are no longer tool parameters on any of the 22 tools.
+  They are read from `ESPN_S2` / `ESPN_SWID` only. A cookie passed as a tool argument would have
+  been written into the conversation transcript; a test now fails if any tool schema exposes
+  them.
+
 ### Fixed
+- `get_team_season_stats` reported ESPN's record as `matchupWins` / `matchupLosses`. In an H2H
+  Each Category league that record counts categories (4-12 after two weeks of eight categories),
+  so it was a category record relabelled. The matchup W-L-T is now derived from the schedule's
+  decided results (`completedMatchupPeriods` says how many it covers, ties are a count, not
+  null), ESPN's record is alongside as `espnRecord` with `espnRecordType` /
+  `espnRecordDescription`, and `gamesBack` is on the matchup record with a description.
+  `totalGamesPlayed`, which ESPN always sends as 0, is gone.
+- Roster lock notes said "pass scoring_period=N", a parameter `get_my_current_matchup` does not
+  have. The note now names the tool that has it (`get_team_roster`), and a test checks that
+  every parameter named in a response note exists on the tool it names.
+- A player ESPN sends no stat line for had `stats: null`; it now has `gamesPlayed: 0` with a
+  note.
+- `get_player_stats(timeframe="projections")` could pick a previous season's projection set
+  when ESPN sent both; the requested season's set is preferred.
+
+### Added
+- `get_league_teams`: `isMyTeam`, `standingsRank` (teams are returned in standings order),
+  ESPN's `playoffSeed`, and `matchupRecord` (matchup-level W-L-T from completed periods). A
+  `matchupAcquisitionTotalsNote` explains an acquisition entry for a period that has not
+  started.
+- `injuryStatusNote` on roster and free-agent players when ESPN fantasy's status and ESPN's
+  NBA injury report disagree by two steps or more (OUT vs. "probable"), saying which is which.
+- `get_league_settings`: `lineupLocktimeDescription` explains `INDIVIDUAL_GAME` and
+  `FIRSTGAME_WEEKLY`, and says plainly when a code (such as `INDIVIDUAL_FIRSTGAME_WEEKLY`) is
+  not recognised, pointing at the per-slot `lineupLocked` flags.
+- Matchup sides carry `categoryWins` / `categoryLosses` / `categoryTies` for the week so far.
+- `analyze_matchup`: `projectionMethod` states how projections are built; `expectedGamesBreakdown`
+  itemises why expected games are below games remaining (one line per discounted player, with
+  the arithmetic); `opponentPlayers` shows the opponent's roster as the projection sees it;
+  each category projection carries `closeThreshold` and a `closenessRule`; each recommendation
+  carries `closeCategoriesHelped` / `closeCategoriesHurt` and `injuryDetails`.
+
+### Changed
+- `analyze_matchup` closeness is per category: counting stats use a per-category margin
+  (`CLOSE_MARGINS`, roughly two strong player-games, so blocks at 0.4 and points at 0.4 are not
+  judged on one scale) and percentages are judged in made shots over the projected attempts
+  (`CLOSE_PERCENTAGE_MAKES`), so an FG% lead worth one basket is close; the flat 0.002 was not.
+- `analyze_matchup` start/sit priority is driven by close categories. Helping a close category
+  is worth most, hurting one costs, helping a category you trail by a wide margin earns a little,
+  and hurting a category already projected lost by a mile costs nothing (a shot-blocker is no
+  longer ranked last for hurting points, assists and threes you were losing anyway). The
+  "helps" thresholds were tightened (blocks 1.0, threes 2.0, steals 1.2, points 18, rebounds 7,
+  assists 5) and every claim in `reasoning` shows the per-game number behind it.
+- Tool output leaves out null fields and the raw `cumulativeScore` stat-ID block (category
+  scores, component stats and category W/L/T carry the same data by name). Slim rosters
+  (`get_my_current_matchup` without `verbose`) also drop numeric `eligibleSlots` (names are
+  kept), `jersey`, keeper values and the millisecond acquisition date. A current-matchup
+  response is roughly half the size it was.
+- Synthetic fixtures: team records now sum to one completed period of nine categories and match
+  the period-1 cumulative scores, so the category-record invariant holds on the fixture league.
+
+### Fixed (earlier in this release)
 - `get_nba_schedule(date=...)` always returned today's games: ESPN's scoreboard reads the
   `dates` query parameter and silently ignores `date`. (Ported from the unmerged PR #14.)
 - Per-game stats were read from a key ESPN does not send (`averages`); the real key is

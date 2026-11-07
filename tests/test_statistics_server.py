@@ -20,6 +20,12 @@ from espn_fantasy_basketball import (
 class TestStatisticalAnalysisMCPTools:
     """Test cases for statistical analysis MCP server tool functions."""
 
+    @pytest.fixture(autouse=True)
+    def _cookies_from_env(self, monkeypatch):
+        """Cookies are environment-only (never tool parameters); the mocks assert they arrive."""
+        monkeypatch.setenv("ESPN_S2", "test_s2")
+        monkeypatch.setenv("ESPN_SWID", "test_swid")
+
     @pytest.mark.asyncio
     async def test_get_player_stats_tool(self):
         """Test the get_player_stats MCP tool."""
@@ -38,7 +44,7 @@ class TestStatisticalAnalysisMCPTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_stats_obj = type(
-                "PlayerStats", (), {"model_dump": lambda self: mock_player_stats}
+                "PlayerStats", (), {"model_dump": lambda self, **kw: mock_player_stats}
             )()
             mock_client_instance.get_player_stats = AsyncMock(return_value=mock_stats_obj)
 
@@ -47,8 +53,6 @@ class TestStatisticalAnalysisMCPTools:
                 year=2025,
                 player_id=12345,
                 timeframe="season",
-                espn_s2="test_s2",
-                swid="test_swid",
             )
 
             assert result["playerId"] == 12345
@@ -77,7 +81,7 @@ class TestStatisticalAnalysisMCPTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_comparison_obj = type(
-                "PlayerComparison", (), {"model_dump": lambda self: mock_comparison}
+                "PlayerComparison", (), {"model_dump": lambda self, **kw: mock_comparison}
             )()
             mock_client_instance.compare_players = AsyncMock(return_value=mock_comparison_obj)
 
@@ -86,8 +90,6 @@ class TestStatisticalAnalysisMCPTools:
                 year=2025,
                 player_ids=[12345, 54321],
                 categories=["points", "rebounds"],
-                espn_s2="test_s2",
-                swid="test_swid",
             )
 
             assert len(result["players"]) == 2
@@ -123,7 +125,7 @@ class TestStatisticalAnalysisMCPTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_analysis_obj = type(
-                "TradeAnalysis", (), {"model_dump": lambda self: mock_trade_analysis}
+                "TradeAnalysis", (), {"model_dump": lambda self, **kw: mock_trade_analysis}
             )()
             mock_client_instance.analyze_trade_proposal = AsyncMock(return_value=mock_analysis_obj)
 
@@ -132,8 +134,6 @@ class TestStatisticalAnalysisMCPTools:
                 year=2025,
                 your_player_ids=[12345],
                 their_player_ids=[54321],
-                espn_s2="test_s2",
-                swid="test_swid",
             )
 
             assert result["your_total_value"] == 40.0
@@ -173,8 +173,16 @@ class TestStatisticalAnalysisMCPTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_trending_objs = [
-                type("TrendingPlayer", (), {"model_dump": lambda self: mock_trending_players[0]})(),
-                type("TrendingPlayer", (), {"model_dump": lambda self: mock_trending_players[1]})(),
+                type(
+                    "TrendingPlayer",
+                    (),
+                    {"model_dump": lambda self, **kw: mock_trending_players[0]},
+                )(),
+                type(
+                    "TrendingPlayer",
+                    (),
+                    {"model_dump": lambda self, **kw: mock_trending_players[1]},
+                )(),
             ]
             mock_client_instance.get_trending_players = AsyncMock(return_value=mock_trending_objs)
 
@@ -183,8 +191,6 @@ class TestStatisticalAnalysisMCPTools:
                 year=2025,
                 direction="up",
                 limit=20,
-                espn_s2="test_s2",
-                swid="test_swid",
             )
 
             assert len(result) == 2
@@ -198,8 +204,10 @@ class TestStatisticalAnalysisMCPTools:
             mock_client_instance.get_trending_players.assert_called_once_with("up", 20)
 
     @pytest.mark.asyncio
-    async def test_tools_with_minimal_params(self):
+    async def test_tools_with_minimal_params(self, monkeypatch):
         """Test statistical analysis tools with minimal required parameters."""
+        monkeypatch.delenv("ESPN_S2", raising=False)
+        monkeypatch.delenv("ESPN_SWID", raising=False)
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
 
@@ -208,19 +216,21 @@ class TestStatisticalAnalysisMCPTools:
                 return_value=type(
                     "PlayerStats",
                     (),
-                    {"model_dump": lambda self: {"playerId": 12345, "playerName": "Test"}},
+                    {"model_dump": lambda self, **kw: {"playerId": 12345, "playerName": "Test"}},
                 )()
             )
             mock_client_instance.compare_players = AsyncMock(
                 return_value=type(
                     "PlayerComparison",
                     (),
-                    {"model_dump": lambda self: {"players": [], "categories": []}},
+                    {"model_dump": lambda self, **kw: {"players": [], "categories": []}},
                 )()
             )
             mock_client_instance.analyze_trade_proposal = AsyncMock(
                 return_value=type(
-                    "TradeAnalysis", (), {"model_dump": lambda self: {"recommendation": "neutral"}}
+                    "TradeAnalysis",
+                    (),
+                    {"model_dump": lambda self, **kw: {"recommendation": "neutral"}},
                 )()
             )
             mock_client_instance.get_trending_players = AsyncMock(return_value=[])
@@ -253,7 +263,9 @@ class TestStatisticalAnalysisMCPTools:
 
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_stats_obj = type("PlayerStats", (), {"model_dump": lambda self: mock_stats})()
+            mock_stats_obj = type(
+                "PlayerStats", (), {"model_dump": lambda self, **kw: mock_stats}
+            )()
             mock_client_instance.get_player_stats = AsyncMock(return_value=mock_stats_obj)
 
             # Test projections timeframe

@@ -25,6 +25,12 @@ from espn_fantasy_basketball import (
 class TestMCPServerTools:
     """Test cases for MCP server tool functions."""
 
+    @pytest.fixture(autouse=True)
+    def _cookies_from_env(self, monkeypatch):
+        """Cookies are environment-only (never tool parameters); the mocks assert they arrive."""
+        monkeypatch.setenv("ESPN_S2", "test_s2")
+        monkeypatch.setenv("ESPN_SWID", "test_swid")
+
     @pytest.mark.asyncio
     async def test_get_league_teams_tool(self):
         """Test the get_league_teams MCP tool."""
@@ -45,11 +51,11 @@ class TestMCPServerTools:
             mock_client_instance.get_league_teams = AsyncMock(
                 return_value=[type("Team", (), mock_teams[0])()]
             )
-            mock_client_instance.get_league_teams.return_value[0].model_dump = lambda: mock_teams[0]
-
-            result = await get_league_teams(
-                league_id=12345, year=2025, espn_s2="test_s2", swid="test_swid"
+            mock_client_instance.get_league_teams.return_value[0].model_dump = (
+                lambda **kw: mock_teams[0]
             )
+
+            result = await get_league_teams(league_id=12345, year=2025)
 
             assert len(result) == 1
             assert result[0]["id"] == 1
@@ -77,12 +83,10 @@ class TestMCPServerTools:
 
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_roster_obj = type("Roster", (), {"model_dump": lambda self: mock_roster})()
+            mock_roster_obj = type("Roster", (), {"model_dump": lambda self, **kw: mock_roster})()
             mock_client_instance.get_team_roster = AsyncMock(return_value=mock_roster_obj)
 
-            result = await get_team_roster(
-                league_id=12345, year=2025, team_id=1, espn_s2="test_s2", swid="test_swid"
-            )
+            result = await get_team_roster(league_id=12345, year=2025, team_id=1)
 
             assert result["teamId"] == 1
             assert len(result["entries"]) == 1
@@ -105,7 +109,9 @@ class TestMCPServerTools:
 
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_player_objs = [type("Player", (), {"model_dump": lambda self: mock_players[0]})()]
+            mock_player_objs = [
+                type("Player", (), {"model_dump": lambda self, **kw: mock_players[0]})()
+            ]
             mock_client_instance.get_free_agents = AsyncMock(return_value=mock_player_objs)
 
             result = await get_free_agents(league_id=12345, year=2025, size=10, position_id=1)
@@ -133,7 +139,7 @@ class TestMCPServerTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_matchup_objs = [
-                type("Matchup", (), {"model_dump": lambda self: mock_matchups[0]})()
+                type("Matchup", (), {"model_dump": lambda self, **kw: mock_matchups[0]})()
             ]
             mock_client_instance.get_matchups = AsyncMock(return_value=mock_matchup_objs)
 
@@ -166,7 +172,7 @@ class TestMCPServerTools:
 
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_game_objs = [type("Game", (), {"model_dump": lambda self: mock_games[0]})()]
+            mock_game_objs = [type("Game", (), {"model_dump": lambda self, **kw: mock_games[0]})()]
             mock_client_instance.get_nba_schedule = AsyncMock(return_value=mock_game_objs)
 
             result = await get_nba_schedule(date="2025-01-15")
@@ -179,8 +185,10 @@ class TestMCPServerTools:
             mock_client_instance.get_nba_schedule.assert_called_once_with("2025-01-15")
 
     @pytest.mark.asyncio
-    async def test_tools_with_minimal_params(self):
+    async def test_tools_with_minimal_params(self, monkeypatch):
         """Test tools with minimal required parameters."""
+        monkeypatch.delenv("ESPN_S2", raising=False)
+        monkeypatch.delenv("ESPN_SWID", raising=False)
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_client_instance.get_league_teams = AsyncMock(return_value=[])
@@ -249,7 +257,7 @@ class TestTeamIdEnvVariable:
 
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_roster_obj = type("Roster", (), {"model_dump": lambda self: mock_roster})()
+            mock_roster_obj = type("Roster", (), {"model_dump": lambda self, **kw: mock_roster})()
             mock_client_instance.get_team_roster = AsyncMock(return_value=mock_roster_obj)
 
             result = await get_team_roster(league_id=12345, year=2025)
@@ -267,7 +275,7 @@ class TestTeamIdEnvVariable:
 
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
-            mock_roster_obj = type("Roster", (), {"model_dump": lambda self: mock_roster})()
+            mock_roster_obj = type("Roster", (), {"model_dump": lambda self, **kw: mock_roster})()
             mock_client_instance.get_team_roster = AsyncMock(return_value=mock_roster_obj)
 
             result = await get_team_roster(league_id=12345, year=2025, team_id=3)

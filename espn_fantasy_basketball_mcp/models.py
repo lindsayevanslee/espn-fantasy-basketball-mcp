@@ -95,6 +95,16 @@ class TransactionCounter(BaseModel):
     matchupAcquisitionTotals: dict[str, int] = {}  # matchup period -> adds in that period
 
 
+class MatchupRecord(BaseModel):
+    """Matchup-level wins, losses and ties from completed matchup periods (one result per
+    period), computed from the league schedule's winner field."""
+
+    wins: int = 0
+    losses: int = 0
+    ties: int = 0
+    completedMatchupPeriods: int = 0  # periods with a decided winner that this record covers
+
+
 class Team(BaseModel):
     id: int
     abbrev: str
@@ -114,6 +124,18 @@ class Team(BaseModel):
     # result per scoring category per matchup), "matchups" in Most Categories or Points leagues.
     recordType: str | None = None
     recordDescription: str | None = None
+    # One result per completed matchup period, derived from the schedule. In an H2H Each
+    # Category league this is NOT what ESPN ranks the standings by (that is `record`), but it is
+    # the only place a matchup W-L-T is available.
+    matchupRecord: MatchupRecord | None = None
+    # Place in the standings, 1 = first: ESPN's playoffSeed when it provides one, otherwise the
+    # order of `record` (percentage, then wins). get_league_teams returns teams in this order.
+    standingsRank: int | None = None
+    playoffSeed: int | None = None  # ESPN's own current seed, as sent (mTeam.playoffSeed)
+    isMyTeam: bool | None = None  # True for the team ESPN_TEAM_ID (or team_id) points at
+    # transactionCounter.matchupAcquisitionTotals can carry a key for a matchup period that has
+    # not started yet (ESPN books a move under the period it takes effect in). Reported as sent.
+    matchupAcquisitionTotalsNote: str | None = None
 
 
 class TeamSeasonStats(BaseModel):
@@ -123,12 +145,21 @@ class TeamSeasonStats(BaseModel):
     teamName: str | None = None
     categoryScores: dict[str, float]  # Season totals for each scoring category
     componentStats: dict[str, float] | None = None  # Component stats (FGM, FGA, FTM, FTA) totals
-    totalGamesPlayed: int | None = None  # Total games played across all matchups
-    matchupWins: int | None = None  # Number of matchup wins
-    matchupLosses: int | None = None  # Number of matchup losses
-    matchupTies: int | None = None  # Number of matchup ties
-    winPercentage: float | None = None  # Win percentage (wins / (wins + losses), excludes ties)
-    gamesBack: float | None = None  # Games behind the league leader
+    # Matchup results from completed matchup periods, one per period, derived from the
+    # schedule's winner field. These are never category tallies.
+    matchupWins: int | None = None
+    matchupLosses: int | None = None
+    matchupTies: int | None = None
+    completedMatchupPeriods: int | None = None  # periods the matchup record covers
+    winPercentage: float | None = None  # matchupWins / (matchupWins + matchupLosses)
+    # ESPN's own record for the team (mTeam record.overall). In an H2H Each Category league it
+    # counts categories (every category in every matchup is one W/L/T) and is what ESPN's
+    # standings use; in Most Categories and Points leagues it equals the matchup record.
+    espnRecord: OverallRecord | None = None
+    espnRecordType: str | None = None  # "categories" or "matchups"
+    espnRecordDescription: str | None = None
+    gamesBack: float | None = None  # Games behind the leader, on the matchup record
+    gamesBackDescription: str | None = None
 
 
 class CategoryProjection(BaseModel):
@@ -143,7 +174,12 @@ class CategoryProjection(BaseModel):
     projectedLead: float | None = None  # Projected lead
     projectedResult: str | None = None  # "win", "loss", "tie", or "close"
     margin: float | None = None  # Projected margin (absolute value)
-    isClose: bool = False  # Whether this category is close (within threshold)
+    isClose: bool = False  # margin <= closeThreshold
+    # The closeness threshold used for this category and how it was chosen. Counting
+    # categories use a per-category margin (roughly what two good player-games swing);
+    # percentages use the lead expressed in made shots over the projected attempts.
+    closeThreshold: float | None = None
+    closenessRule: str | None = None
 
 
 class PlayerRecommendation(BaseModel):
@@ -161,10 +197,27 @@ class PlayerRecommendation(BaseModel):
     expectedGames: float | None = None  # gamesRemaining discounted by availability
     priority: int  # Priority score (1-10, higher = more important to start)
     reasoning: str
-    categoriesHelped: list[str]  # Categories this player helps with
-    categoriesHurt: list[str] = []  # Categories this player hurts (e.g., turnovers, low FT%)
+    categoriesHelped: list[str]  # Close or losing categories this player helps in
+    categoriesHurt: list[str] = []  # Close or losing categories this player hurts in
+    closeCategoriesHelped: list[str] = []  # Subset of categoriesHelped that are close
+    closeCategoriesHurt: list[str] = []  # Subset of categoriesHurt that are close
     injuryStatus: str | None = None
+    injuryDetails: str | None = None
     todaysGame: TodaysGame | None = None
+
+
+class OpponentPlayerSummary(BaseModel):
+    """What the opponent's projection is built from, one line per rostered player."""
+
+    playerId: int
+    playerName: str
+    lineupSlotName: str | None = None
+    gamesRemaining: int = 0
+    availability: str | None = None
+    expectedGames: float = 0.0
+    injuryStatus: str | None = None
+    injuryDetails: str | None = None
+    projectedPerGame: dict[str, float] | None = None  # scoring categories only
 
 
 class MatchupAnalysis(BaseModel):
@@ -189,6 +242,9 @@ class MatchupAnalysis(BaseModel):
     # Player recommendations
     playerRecommendations: list[PlayerRecommendation]  # Prioritized player recommendations
 
+    # How the numbers were produced, so a reader can judge them
+    projectionMethod: str | None = None
+
     # Additional context
     yourGamesRemaining: int | None = None  # Scheduled games not yet played, all rostered players
     opponentGamesRemaining: int | None = None
@@ -196,6 +252,11 @@ class MatchupAnalysis(BaseModel):
         None  # Games remaining discounted by availability (OUT, IR, FA...)
     )
     opponentExpectedGames: float | None = None
+    # Why expected games are below games remaining: one line per discounted player
+    expectedGamesBreakdown: list[str] = []
+    opponentExpectedGamesBreakdown: list[str] = []
+    # The opponent's roster as the projection sees it
+    opponentPlayers: list[OpponentPlayerSummary] = []
     currentCategoryWins: int | None = None  # Current category wins
     currentCategoryLosses: int | None = None  # Current category losses
     currentCategoryTies: int | None = None  # Current category ties
@@ -253,6 +314,9 @@ class Player(BaseModel):
     # "Knee - Sprain (left); expected return 2026-11-10. Williams (knee) is out Tuesday."
     injuryDetails: str | None = None
     injuryReturnDate: str | None = None  # YYYY-MM-DD when ESPN lists an expected return
+    # Set when injuryStatus (ESPN fantasy's code) and injuryDetails (ESPN's NBA injury report)
+    # disagree, e.g. fantasy says OUT while the report says probable. Says which is which.
+    injuryStatusNote: str | None = None
     # Free-agent pool state (kona_player_info): FREEAGENT = can be added now, WAIVERS = claims
     # process at waiverProcessDateISO (ESPN's "WA (Tue)" flag), ONTEAM = rostered.
     availabilityStatus: str | None = None
@@ -324,9 +388,13 @@ class MatchupTeam(BaseModel):
     totalPoints: float | None = None
     totalProjectedPoints: float | None = None
     gamesPlayed: int | None = None
-    cumulativeScore: dict[str, Any] | None = (
-        None  # Original stat IDs (deprecated, use categoryScores instead)
-    )
+    # ESPN's raw cumulativeScore (stat IDs). Kept on the model for the percentage math in
+    # analyze_matchup; the tools leave it out of their output because categoryScores,
+    # componentStats and categoryWins/Losses/Ties carry everything in it.
+    cumulativeScore: dict[str, Any] | None = None
+    categoryWins: int | None = None  # Categories this side leads in this matchup so far
+    categoryLosses: int | None = None
+    categoryTies: int | None = None
     categoryScores: dict[str, float] | None = None  # Scoring categories only (human-readable names)
     componentStats: dict[str, float] | None = (
         None  # Component stats (FGM, FGA, FTM, FTA) that aren't scoring categories
@@ -527,7 +595,8 @@ class RosterSettings(BaseModel):
     )
     positionLimits: dict[str, int]  # Maps position ID to max count (-1 = unlimited)
     positionLimitNames: dict[str, int] | None = None  # Same limits keyed by position name
-    lineupLocktimeType: str  # When lineups lock
+    lineupLocktimeType: str  # When lineups lock (ESPN's code)
+    lineupLocktimeDescription: str | None = None  # The code in plain English, when known
     rosterSize: int | None = None  # Total roster spots excluding IR (sum of lineupSlotCounts)
     rosterLocktimeType: str | None = None
     isBenchUnlimited: bool = False
