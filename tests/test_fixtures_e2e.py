@@ -308,7 +308,11 @@ async def test_percentages_from_made_and_attempted(client):
     assert stats["Cason Wallace"]["ft_pct"] is None and stats["Cason Wallace"]["fta"] == 0.0
     assert stats["Cason Wallace"]["gamesPlayed"] == 9, "stat 42 present"
     assert stats["Ava Guard"]["fg_pct"] == 45.7 and stats["Ava Guard"]["ft_pct"] == 87.5
-    assert stats["Benched Guy"] is None
+    # a player ESPN sends no stat line for is 0 games played, not "no data"
+    assert (
+        stats["Benched Guy"]["gamesPlayed"] == 0
+        and "no season stat line" in (stats["Benched Guy"]["note"])
+    )
 
 
 @pytest.mark.asyncio
@@ -368,10 +372,10 @@ async def test_settings_describe_limits_and_records(client):
     teams = await client.get_league_teams()
     mine = next(t for t in teams if t.id == MY_TEAM)
     assert (mine.record.overall.wins, mine.record.overall.losses, mine.record.overall.ties) == (
-        11,
         6,
-        1,
-    )
+        3,
+        0,
+    ), "one completed period of nine categories"
     assert mine.recordType == "categories"
     assert "not matchup wins" in mine.recordDescription
     # 2./4. waiver rank and acquisitions used vs the effective limit
@@ -442,7 +446,8 @@ async def test_dropped_players_leave_todays_roster(client):
     assert roster.staleEntriesRemoved == ["Stale Center (onTeamId=0)", "Traded Guard (onTeamId=5)"]
     assert roster.scoringPeriodId == 13 and roster.scoringPeriodDate == "2026-11-01"
     assert roster.lineupLocked is True
-    assert "pass scoring_period=14" in roster.note
+    # the hint names the tool that has the parameter, so it can be followed from any response
+    assert "get_team_roster with scoring_period=14" in roster.note
 
     # a historical day is returned as stored: onTeamId is always the *current* team
     history = await client.get_team_roster(12, scoring_period=10)
@@ -454,7 +459,8 @@ async def test_dropped_players_leave_todays_roster(client):
 async def test_team_roster_tool_reports_period(espn):
     roster = await get_team_roster_tool()
     assert roster["scoringPeriodId"] == 13 and roster["lineupLocked"] is False
-    assert roster["staleEntriesRemoved"] is None and roster["note"] is None
+    # null fields are left out of tool output entirely
+    assert "staleEntriesRemoved" not in roster and "note" not in roster
     # 7. which starting slots are locked for this scoring period
     assert roster["lockedSlots"] == ["PG: Ava Guard"]
     assert roster["unlockedSlots"] == ["PF: Jon Collins", "SG: Cason Wallace"]

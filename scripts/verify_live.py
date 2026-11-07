@@ -532,6 +532,114 @@ async def main() -> int:
         report.error("search_players", exc)
         traceback.print_exc()
 
+    # ------------------------------------------------------------------ 6. invariants
+    section("6. Data invariants -> records, rosters, injury statuses, response notes")
+    try:
+        teams = await client.get_league_teams(my_team_id=team_id)
+        st = settings.status
+        completed = max(0, st.currentMatchupPeriod - 1)
+        n_cats = len(settings.scoringSettings.scoringItems)
+        mine = next((t for t in teams if t.id == team_id), None)
+        report.check(mine is not None and mine.isMyTeam is True, "get_league_teams marks your team")
+        for t in teams:
+            o = t.record.overall if t.record else None
+            m = t.matchupRecord
+            espn_txt = f"{o.wins}-{o.losses}-{o.ties or 0}" if o else "?"
+            matchup_txt = f"{m.wins}-{m.losses}-{m.ties}" if m else "?"
+            print(
+                f"       {t.standingsRank:>2}. {t.abbrev:<6}{t.name[:24]:<26}"
+                f"ESPN {espn_txt:<9} matchups {matchup_txt:<7} seed {t.playoffSeed or '?'}"
+            )
+        seeds = [t.playoffSeed for t in teams]
+        report.info(
+            "standings order from ESPN playoffSeed"
+            if seeds and len(set(seeds)) == len(teams)
+            else "standings order from ESPN record (playoffSeed not distinct); ties keep ESPN's order"
+        )
+        if settings.scoringSettings.scoringType == "H2H_CATEGORY":
+            total = sum(
+                t.record.overall.wins + t.record.overall.losses + (t.record.overall.ties or 0)
+                for t in teams
+                if t.record and t.record.overall
+            )
+            report.check(
+                total == n_cats * len(teams) * completed,
+                "ESPN record sums to categories x teams x completed periods (category record)",
+                f"{total} vs {n_cats} x {len(teams)} x {completed}",
+            )
+        over = [
+            f"{t.abbrev}: {t.matchupRecord.wins + t.matchupRecord.losses + t.matchupRecord.ties}"
+            for t in teams
+            if t.matchupRecord
+            and t.matchupRecord.wins + t.matchupRecord.losses + t.matchupRecord.ties > completed
+        ]
+        report.check(
+            not over,
+            "Every matchup record covers at most the completed matchup periods",
+            "; ".join(over) or f"{completed} completed",
+        )
+        stats = await client.get_team_season_stats(team_id)
+        report.info(
+            f"season stats: matchups {stats.matchupWins}-{stats.matchupLosses}-{stats.matchupTies} "
+            f"over {stats.completedMatchupPeriods} completed; ESPN {stats.espnRecord} "
+            f"({stats.espnRecordType}); gamesBack={stats.gamesBack}"
+        )
+        report.check(
+            (stats.matchupWins or 0) + (stats.matchupLosses or 0) + (stats.matchupTies or 0)
+            <= completed,
+            "get_team_season_stats matchup record is bounded by completed periods",
+        )
+        foreign: list[str] = []
+        conflicts: list[str] = []
+        notes: list[str] = []
+        for t in teams:
+            r = await client.get_team_roster(t.id)
+            if r.note:
+                notes.append(r.note)
+            for e in r.entries:
+                p = e.playerPoolEntry.player
+                if e.playerPoolEntry.onTeamId not in (None, t.id):
+                    foreign.append(
+                        f"{t.abbrev}: {p.fullName} onTeamId={e.playerPoolEntry.onTeamId}"
+                    )
+                details = (p.injuryDetails or "").lower()
+                if (
+                    (p.injuryStatus or "").upper() == "OUT"
+                    and ("probable" in details or "questionable" in details)
+                    and not p.injuryStatusNote
+                ):
+                    conflicts.append(f"{p.fullName}: OUT but {p.injuryDetails!r}")
+        report.check(not foreign, "No roster entry belongs to another team", "; ".join(foreign))
+        report.check(
+            not conflicts,
+            "Every OUT status contradicted by the injury report carries injuryStatusNote",
+            "; ".join(conflicts),
+        )
+        import re as _re
+
+        from espn_fantasy_basketball import mcp as _mcp
+
+        schemas = {tool.name: tool.inputSchema for tool in await _mcp.list_tools()}
+        bad_hints = []
+        for note in notes:
+            for tool_name, param in _re.findall(r"call (\w+) with (\w+)=", note):
+                if param not in schemas.get(tool_name, {}).get("properties", {}):
+                    bad_hints.append(f"{tool_name}.{param}")
+        report.check(
+            not bad_hints,
+            "Every parameter named in a response note exists on the tool it names",
+            "; ".join(bad_hints) or f"{len(notes)} note(s) checked",
+        )
+        leaking = [
+            name
+            for name, schema in schemas.items()
+            if {"espn_s2", "swid"} & set(schema.get("properties", {}))
+        ]
+        report.check(not leaking, "No tool schema accepts the ESPN cookies", "; ".join(leaking))
+    except Exception as exc:  # noqa: BLE001
+        report.error("Data invariants", exc)
+        traceback.print_exc()
+
     report.summary()
     return 1 if report.failed else 0
 

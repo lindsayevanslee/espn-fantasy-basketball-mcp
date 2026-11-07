@@ -21,6 +21,12 @@ from espn_fantasy_basketball import (
 class TestDraftMCPTools:
     """Test cases for draft MCP server tool functions."""
 
+    @pytest.fixture(autouse=True)
+    def _cookies_from_env(self, monkeypatch):
+        """Cookies are environment-only (never tool parameters); the mocks assert they arrive."""
+        monkeypatch.setenv("ESPN_S2", "test_s2")
+        monkeypatch.setenv("ESPN_SWID", "test_swid")
+
     @pytest.mark.asyncio
     async def test_get_draft_status_tool(self):
         """Test the get_draft_status MCP tool."""
@@ -46,13 +52,11 @@ class TestDraftMCPTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_status_obj = type(
-                "DraftStatus", (), {"model_dump": lambda self: mock_draft_status}
+                "DraftStatus", (), {"model_dump": lambda self, **kw: mock_draft_status}
             )()
             mock_client_instance.get_draft_status = AsyncMock(return_value=mock_status_obj)
 
-            result = await get_draft_status(
-                league_id=12345, year=2025, espn_s2="test_s2", swid="test_swid"
-            )
+            result = await get_draft_status(league_id=12345, year=2025)
 
             assert result["inProgress"] is True
             assert result["drafted"] is False
@@ -79,7 +83,7 @@ class TestDraftMCPTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_recommendation_obj = type(
-                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+                "DraftRecommendation", (), {"model_dump": lambda self, **kw: mock_recommendation}
             )()
             mock_client_instance.get_draft_recommendation = AsyncMock(
                 return_value=mock_recommendation_obj
@@ -90,8 +94,6 @@ class TestDraftMCPTools:
                 year=2025,
                 team_id=1,
                 current_player_id=12345,
-                espn_s2="test_s2",
-                swid="test_swid",
             )
 
             assert result["action"] == "bid"
@@ -118,7 +120,7 @@ class TestDraftMCPTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_recommendation_obj = type(
-                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+                "DraftRecommendation", (), {"model_dump": lambda self, **kw: mock_recommendation}
             )()
             mock_client_instance.get_draft_recommendation = AsyncMock(
                 return_value=mock_recommendation_obj
@@ -159,7 +161,7 @@ class TestDraftMCPTools:
                 "TeamDraftSummary",
                 (),
                 {
-                    "model_dump": lambda self: mock_team_summary,
+                    "model_dump": lambda self, **kw: mock_team_summary,
                     "remainingBudget": 50,
                     "playersCount": 8,
                     "rosterSize": 13,
@@ -204,8 +206,8 @@ class TestDraftMCPTools:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_player_objs = [
-                type("PlayerDraftInfo", (), {"model_dump": lambda self: mock_players[0]})(),
-                type("PlayerDraftInfo", (), {"model_dump": lambda self: mock_players[1]})(),
+                type("PlayerDraftInfo", (), {"model_dump": lambda self, **kw: mock_players[0]})(),
+                type("PlayerDraftInfo", (), {"model_dump": lambda self, **kw: mock_players[1]})(),
             ]
             mock_client_instance.get_available_players = AsyncMock(return_value=mock_player_objs)
 
@@ -221,8 +223,10 @@ class TestDraftMCPTools:
             mock_client_instance.get_available_players.assert_called_once_with(25)
 
     @pytest.mark.asyncio
-    async def test_tools_with_minimal_params(self):
+    async def test_tools_with_minimal_params(self, monkeypatch):
         """Test draft tools with minimal required parameters."""
+        monkeypatch.delenv("ESPN_S2", raising=False)
+        monkeypatch.delenv("ESPN_SWID", raising=False)
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_client_instance.get_draft_status = AsyncMock(
@@ -230,7 +234,7 @@ class TestDraftMCPTools:
                     "DraftStatus",
                     (),
                     {
-                        "model_dump": lambda self: {
+                        "model_dump": lambda self, **kw: {
                             "inProgress": False,
                             "drafted": True,
                             "picks": [],
@@ -243,7 +247,7 @@ class TestDraftMCPTools:
                     "DraftRecommendation",
                     (),
                     {
-                        "model_dump": lambda self: {
+                        "model_dump": lambda self, **kw: {
                             "action": "pass",
                             "reasoning": "No good options",
                             "priority": 1,
@@ -286,7 +290,7 @@ class TestDraftToolsWithTeamIdEnv:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_recommendation_obj = type(
-                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+                "DraftRecommendation", (), {"model_dump": lambda self, **kw: mock_recommendation}
             )()
             mock_client_instance.get_draft_recommendation = AsyncMock(
                 return_value=mock_recommendation_obj
@@ -315,7 +319,7 @@ class TestDraftToolsWithTeamIdEnv:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_recommendation_obj = type(
-                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+                "DraftRecommendation", (), {"model_dump": lambda self, **kw: mock_recommendation}
             )()
             mock_client_instance.get_draft_recommendation = AsyncMock(
                 return_value=mock_recommendation_obj
@@ -347,7 +351,7 @@ class TestDraftToolsWithTeamIdEnv:
         with patch("espn_fantasy_basketball.ESPNFantasyBasketballClient") as MockClient:
             mock_client_instance = MockClient.return_value
             mock_recommendation_obj = type(
-                "DraftRecommendation", (), {"model_dump": lambda self: mock_recommendation}
+                "DraftRecommendation", (), {"model_dump": lambda self, **kw: mock_recommendation}
             )()
             mock_client_instance.get_draft_recommendation = AsyncMock(
                 return_value=mock_recommendation_obj
@@ -383,7 +387,7 @@ class TestDraftToolsWithTeamIdEnv:
                 "TeamDraftSummary",
                 (),
                 {
-                    "model_dump": lambda self: mock_team_summary,
+                    "model_dump": lambda self, **kw: mock_team_summary,
                     "remainingBudget": 100,
                     "playersCount": 5,
                     "rosterSize": 13,

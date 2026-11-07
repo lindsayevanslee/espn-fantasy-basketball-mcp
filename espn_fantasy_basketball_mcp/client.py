@@ -17,6 +17,8 @@ from .analysis import player_availability
 from .constants import (
     ABBREV_ALIASES,
     AVAILABILITY_FACTORS,
+    INJURY_SEVERITY,
+    LINEUP_LOCK_DESCRIPTIONS,
     LINEUP_SLOT_NAMES,
     POSITION_LIMIT_NAMES,
     POSITION_NAMES,
@@ -44,8 +46,10 @@ from .models import (
     LeagueStatus,
     Matchup,
     MatchupAnalysis,
+    MatchupRecord,
     MatchupTeam,
     NBAGame,
+    OverallRecord,
     Player,
     PlayerComparison,
     PlayerDraftInfo,
@@ -346,8 +350,12 @@ class ESPNFantasyBasketballClient:
             logger.error(f"Request error for {url}: {e}")
             raise
 
-    async def get_league_teams(self) -> list[Team]:
-        """Get all teams in the league."""
+    async def get_league_teams(self, my_team_id: int | None = None) -> list[Team]:
+        """Get all teams in the league, in standings order.
+
+        Args:
+            my_team_id: The caller's team, marked isMyTeam=True (optional)
+        """
         url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
         params = {"view": "mTeam"}
 
@@ -370,6 +378,19 @@ class ESPNFantasyBasketballClient:
         except Exception as e:  # noqa: BLE001
             logger.debug(f"Could not determine record type from settings: {e}")
 
+        # Matchup-level W-L-T from the schedule (one result per completed period). ESPN's own
+        # record counts categories in an Each Category league, so this is the only place a
+        # true matchup record comes from. Never fatal: the team list still works without it.
+        matchup_records: dict[int, MatchupRecord] = {}
+        if current_period is not None:
+            try:
+                schedule_data = await self._make_request(url, {"view": "mMatchup"})
+                matchup_records = self._matchup_records_from_schedule(
+                    schedule_data.get("schedule", []), current_period
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"Could not derive matchup records from the schedule: {e}")
+
         for team_data in data.get("teams", []):
             counter_data = team_data.get("transactionCounter") or {}
             counter = None
@@ -390,6 +411,20 @@ class ESPNFantasyBasketballClient:
                 if used is not None and limit_this_matchup is not None
                 else None
             )
+            future_keys = sorted(
+                int(k)
+                for k in (counter.matchupAcquisitionTotals if counter else {})
+                if current_period is not None and str(k).isdigit() and int(k) > current_period
+            )
+            totals_note = (
+                "matchupAcquisitionTotals has entries for matchup period(s) "
+                f"{future_keys} which have not started. Most likely a move that takes effect in "
+                "that period (such as a pending waiver claim); the API does not say, so the "
+                "value is reported as sent."
+                if future_keys
+                else None
+            )
+            seed = team_data.get("playoffSeed")
             team = Team(
                 id=team_data["id"],
                 abbrev=team_data.get("abbrev", ""),
@@ -405,10 +440,99 @@ class ESPNFantasyBasketballClient:
                 acquisitionsThisMatchup=used,
                 acquisitionLimitThisMatchup=limit_this_matchup,
                 acquisitionsRemainingThisMatchup=remaining,
+                matchupRecord=matchup_records.get(team_data["id"]),
+                playoffSeed=seed if isinstance(seed, int) and seed > 0 else None,
+                isMyTeam=(team_data["id"] == my_team_id) if my_team_id is not None else None,
+                matchupAcquisitionTotalsNote=totals_note,
             )
             teams.append(team)
 
-        return teams
+        return self._rank_teams(teams)
+
+    @staticmethod
+    def _rank_teams(teams: list[Team]) -> list[Team]:
+        """Set standingsRank and return the teams in standings order.
+
+        ESPN's playoffSeed is used when it distinguishes the teams (a fresh or synthetic league
+        can report 1 for everyone); otherwise the order of ESPN's record (percentage, then
+        wins, then fewer losses), the order a record-based standings table shows.
+        """
+        seeds = [t.playoffSeed for t in teams]
+        if teams and all(isinstance(x, int) for x in seeds) and len(set(seeds)) == len(teams):
+            ordered = sorted(teams, key=lambda t: t.playoffSeed or 0)
+        else:
+
+            def key(t: Team) -> tuple[float, int, int]:
+                overall = t.record.overall if t.record else None
+                if overall is None:
+                    return (-1.0, 0, 0)
+                total = overall.wins + overall.losses + (overall.ties or 0)
+                pct = (
+                    overall.percentage
+                    if overall.percentage is not None
+                    else ((overall.wins + 0.5 * (overall.ties or 0)) / total if total else 0.0)
+                )
+                return (pct, overall.wins, -overall.losses)
+
+            ordered = sorted(teams, key=key, reverse=True)
+        for rank, team in enumerate(ordered, start=1):
+            team.standingsRank = rank
+        return ordered
+
+    @staticmethod
+    def _matchup_records_from_schedule(
+        schedule: list[dict[str, Any]], current_matchup_period: int
+    ) -> dict[int, MatchupRecord]:
+        """Matchup W-L-T per team from the schedule's decided results.
+
+        Counts only matchup periods before the current one whose ``winner`` ESPN has set to
+        HOME, AWAY or TIE. UNDECIDED items (the week in progress, or a finished week ESPN has
+        not yet closed) are skipped, so wins + losses + ties never exceeds the number of
+        completed periods.
+        """
+        records: dict[int, MatchupRecord] = {}
+
+        def rec(team_id: int) -> MatchupRecord:
+            if team_id not in records:
+                records[team_id] = MatchupRecord()
+            return records[team_id]
+
+        for item in schedule:
+            period = item.get("matchupPeriodId")
+            if not isinstance(period, int) or period >= current_matchup_period:
+                continue
+            home_id = (item.get("home") or {}).get("teamId")
+            away_id = (item.get("away") or {}).get("teamId")
+            winner = item.get("winner")
+            if winner not in ("HOME", "AWAY", "TIE"):
+                continue
+            sides = [(home_id, "HOME"), (away_id, "AWAY")]
+            for team_id, side in sides:
+                if not isinstance(team_id, int):
+                    continue
+                r = rec(team_id)
+                r.completedMatchupPeriods += 1
+                if winner == "TIE":
+                    r.ties += 1
+                elif winner == side:
+                    r.wins += 1
+                else:
+                    r.losses += 1
+        return records
+
+    @staticmethod
+    def _describe_lock_type(code: str | None) -> str | None:
+        """ESPN's lineupLocktimeType in plain English, or an honest "not recognised"."""
+        if not code:
+            return None
+        known = LINEUP_LOCK_DESCRIPTIONS.get(code)
+        if known:
+            return known
+        return (
+            f"Lock type {code} is not recognised by this server. The per-slot lineupLocked "
+            "flags, lockedSlots and unlockedSlots on get_team_roster show what is actually "
+            "editable for a given scoring period."
+        )
 
     @staticmethod
     def _describe_record(scoring_type: str | None) -> tuple[str | None, str | None]:
@@ -574,6 +698,9 @@ class ESPNFantasyBasketballClient:
             positionLimits=position_limits,
             positionLimitNames=self._name_position_limits(position_limits),
             lineupLocktimeType=roster_data.get("lineupLocktimeType", "FIRSTGAME_WEEKLY"),
+            lineupLocktimeDescription=self._describe_lock_type(
+                roster_data.get("lineupLocktimeType", "FIRSTGAME_WEEKLY")
+            ),
             rosterLocktimeType=roster_data.get("rosterLocktimeType"),
             isBenchUnlimited=roster_data.get("isBenchUnlimited", False),
             moveLimit=roster_data.get("moveLimit", -1),
@@ -889,15 +1016,20 @@ class ESPNFantasyBasketballClient:
                             )
                     # If still no status, preserve None rather than defaulting (let the model handle it)
                     # This way we don't mask DTD players that ESPN marks differently
-                    injury_details, injury_return = self._injury_details(
-                        player_data,
-                        self._injury_for(
-                            injury_report, player_data.get("id"), player_data.get("fullName")
-                        ),
+                    report_item = self._injury_for(
+                        injury_report, player_data.get("id"), player_data.get("fullName")
+                    )
+                    injury_details, injury_return = self._injury_details(player_data, report_item)
+                    injury_note = self._injury_status_note(
+                        injury_status, injury_details, report_item
                     )
 
-                    # Parse player stats
-                    stats_data = self._parse_player_stats(player_data.get("stats", []))
+                    # Parse player stats. ESPN sends no stat sets at all for a player who has
+                    # not appeared this season; say 0 games rather than nothing.
+                    stats_data = (
+                        self._parse_player_stats(player_data.get("stats", []))
+                        or self._no_stats_yet()
+                    )
 
                     pro_team_id = player_data.get("proTeamId")
                     # Use consistent fallback logic for team abbreviation
@@ -937,6 +1069,7 @@ class ESPNFantasyBasketballClient:
                         injuryStatus=injury_status,
                         injuryDetails=injury_details,
                         injuryReturnDate=injury_return,
+                        injuryStatusNote=injury_note,
                         active=player_data.get("active"),
                         droppable=player_data.get("droppable"),
                         stats=stats_data,
@@ -1017,8 +1150,9 @@ class ESPNFantasyBasketballClient:
                 if lineup_locked and period_id is not None:
                     note = (
                         f"Lineup for scoring period {period_id}"
-                        f"{' (' + period_date + ')' if period_date else ''} is locked; pass "
-                        f"scoring_period={period_id + 1} to see or plan the next day's lineup"
+                        f"{' (' + period_date + ')' if period_date else ''} is locked; call "
+                        f"get_team_roster with scoring_period={period_id + 1} to see or plan "
+                        "the next day's lineup"
                     )
                 return Roster(
                     teamId=team_id,
@@ -1057,27 +1191,30 @@ class ESPNFantasyBasketballClient:
                 {k: v for k, v in full_stats.items() if k != "totals"} if full_stats else None
             )
             # Create slim player; preserve position/slot mappings from original player
+            # Compact: eligibleSlotNames stands in for the numeric eligibleSlots, the ISO
+            # acquisition date for the millisecond one; jersey, keeper values and ownership
+            # (never populated on roster views) are left out.
+            src = entry.playerPoolEntry.player
             slim_player = Player(
-                id=entry.playerPoolEntry.player.id,
-                fullName=entry.playerPoolEntry.player.fullName,
-                firstName=entry.playerPoolEntry.player.firstName,
-                lastName=entry.playerPoolEntry.player.lastName,
-                jersey=entry.playerPoolEntry.player.jersey,
-                proTeamId=entry.playerPoolEntry.player.proTeamId,
-                proTeamAbbrev=entry.playerPoolEntry.player.proTeamAbbrev,  # Preserve team mapping
-                proTeamName=entry.playerPoolEntry.player.proTeamName,  # Preserve team mapping
-                defaultPositionId=entry.playerPoolEntry.player.defaultPositionId,
-                defaultPosition=entry.playerPoolEntry.player.defaultPosition,
-                eligibleSlots=entry.playerPoolEntry.player.eligibleSlots,
-                eligibleSlotNames=entry.playerPoolEntry.player.eligibleSlotNames,
-                injured=entry.playerPoolEntry.player.injured,
-                injuryStatus=entry.playerPoolEntry.player.injuryStatus,
-                injuryDetails=entry.playerPoolEntry.player.injuryDetails,
-                injuryReturnDate=entry.playerPoolEntry.player.injuryReturnDate,
+                id=src.id,
+                fullName=src.fullName,
+                firstName=src.firstName,
+                lastName=src.lastName,
+                proTeamId=src.proTeamId,
+                proTeamAbbrev=src.proTeamAbbrev,  # Preserve team mapping
+                proTeamName=src.proTeamName,  # Preserve team mapping
+                defaultPositionId=src.defaultPositionId,
+                defaultPosition=src.defaultPosition,
+                eligibleSlots=None if src.eligibleSlotNames else src.eligibleSlots,
+                eligibleSlotNames=src.eligibleSlotNames,
+                injured=src.injured,
+                injuryStatus=src.injuryStatus,
+                injuryDetails=src.injuryDetails,
+                injuryReturnDate=src.injuryReturnDate,
+                injuryStatusNote=src.injuryStatusNote,
                 stats=slim_stats or None,  # per-game averages only; season totals dropped
-                ownership=entry.playerPoolEntry.player.ownership,
-                active=entry.playerPoolEntry.player.active,
-                droppable=entry.playerPoolEntry.player.droppable,
+                active=src.active,
+                droppable=src.droppable,
             )
 
             # Create slim player pool entry
@@ -1085,8 +1222,6 @@ class ESPNFantasyBasketballClient:
                 id=entry.playerPoolEntry.id,
                 player=slim_player,
                 onTeamId=entry.playerPoolEntry.onTeamId,
-                keeperValue=entry.playerPoolEntry.keeperValue,
-                keeperValueFuture=entry.playerPoolEntry.keeperValueFuture,
                 lineupLocked=entry.playerPoolEntry.lineupLocked,
             )
 
@@ -1096,7 +1231,6 @@ class ESPNFantasyBasketballClient:
                 playerPoolEntry=slim_player_pool_entry,
                 lineupSlotId=entry.lineupSlotId,
                 lineupSlotName=entry.lineupSlotName,  # Preserve slot name
-                acquisitionDate=entry.acquisitionDate,
                 acquisitionDateISO=entry.acquisitionDateISO,  # Preserve ISO date
                 acquisitionType=entry.acquisitionType,
                 injuryStatus=entry.injuryStatus,
@@ -1277,6 +1411,75 @@ class ESPNFantasyBasketballClient:
         if full_name:
             return report.get(normalize_name(full_name))
         return None
+
+    @staticmethod
+    def _no_stats_yet() -> dict[str, Any]:
+        """Stats block for a player ESPN sends no season stat line for (no games played)."""
+        return {
+            "gamesPlayed": 0,
+            "note": "ESPN returned no season stat line for this player; 0 games played so far",
+        }
+
+    _STATUS_WORDS = re.compile(r"\b(probable|questionable|doubtful|day-to-day|out)\b", re.I)
+
+    @classmethod
+    def _report_status(
+        cls, details: str | None, report_item: dict[str, Any] | None
+    ) -> tuple[str | None, int | None]:
+        """What ESPN's NBA injury report says about availability: (label, severity).
+
+        The report's comment ("Big (back) is probable for Tuesday") is more specific than its
+        status ("Day-To-Day"), so a status word in the comment wins; the status is the fallback.
+        """
+        comment = None
+        status = None
+        if report_item:
+            for key in ("shortComment", "longComment"):
+                value = report_item.get(key)
+                if isinstance(value, str) and value.strip():
+                    comment = value.strip()
+                    break
+            raw_status = report_item.get("status")
+            if isinstance(raw_status, str) and raw_status.strip():
+                status = raw_status.strip()
+        text = comment or details or ""
+        match = cls._STATUS_WORDS.search(text)
+        if match:
+            word = match.group(1).lower()
+            code = word.upper().replace("-", "_")
+            label = word if status is None else f"{word} ({status})"
+            return label, INJURY_SEVERITY.get(code)
+        if status:
+            code = status.upper().replace("-", "_").replace(" ", "_")
+            return status, INJURY_SEVERITY.get(code)
+        return None, None
+
+    @classmethod
+    def _injury_status_note(
+        cls,
+        fantasy_status: str | None,
+        details: str | None,
+        report_item: dict[str, Any] | None,
+    ) -> str | None:
+        """Flag a fantasy injuryStatus that disagrees with ESPN's NBA injury report.
+
+        ESPN fantasy's code (OUT, DAY_TO_DAY, ...) and the newsroom report behind injuryDetails
+        are updated separately and can be two steps apart (OUT vs "probable"). When they are,
+        say so and say which is which, instead of leaving the reader to guess.
+        """
+        if not fantasy_status:
+            return None
+        fantasy_rank = INJURY_SEVERITY.get(fantasy_status.upper())
+        if fantasy_rank is None:
+            return None
+        label, report_rank = cls._report_status(details, report_item)
+        if label is None or report_rank is None or abs(report_rank - fantasy_rank) < 2:
+            return None
+        return (
+            f"ESPN fantasy lists this player as {fantasy_status} but ESPN's NBA injury report "
+            f"says {label}. The two are updated separately; projections use the fantasy status. "
+            "Check the status before tip-off."
+        )
 
     @classmethod
     def _injury_details(
@@ -1557,9 +1760,12 @@ class ESPNFantasyBasketballClient:
                     slot_mapping.get(slot_id, f"SLOT_{slot_id}") for slot_id in eligible_slots
                 ]
 
-            injury_details, injury_return = self._injury_details(
-                player_info,
-                self._injury_for(injury_report, player_info.get("id"), player_info.get("fullName")),
+            report_item = self._injury_for(
+                injury_report, player_info.get("id"), player_info.get("fullName")
+            )
+            injury_details, injury_return = self._injury_details(player_info, report_item)
+            injury_note = self._injury_status_note(
+                player_info.get("injuryStatus"), injury_details, report_item
             )
 
             player = Player(
@@ -1579,6 +1785,7 @@ class ESPNFantasyBasketballClient:
                 injuryStatus=player_info.get("injuryStatus"),
                 injuryDetails=injury_details,
                 injuryReturnDate=injury_return,
+                injuryStatusNote=injury_note,
                 availabilityStatus=avail_status,
                 waiverProcessDateISO=waiver_iso,
                 availabilityNote=avail_note,
@@ -1782,6 +1989,11 @@ class ESPNFantasyBasketballClient:
         )
 
         team_id = team_data.get("teamId")
+
+        def count(key: str) -> int | None:
+            value = cumulative_score.get(key)
+            return value if isinstance(value, int) else None
+
         return MatchupTeam(
             teamId=team_id,
             teamName=team_names.get(team_id) if team_id else None,
@@ -1790,6 +2002,9 @@ class ESPNFantasyBasketballClient:
             totalProjectedPoints=team_data.get("totalProjectedPoints"),
             gamesPlayed=team_data.get("gamesPlayed"),
             cumulativeScore=cumulative_score,  # Keep raw data for percentage calculations
+            categoryWins=count("wins"),
+            categoryLosses=count("losses"),
+            categoryTies=count("ties"),
             categoryScores=scoring_categories if scoring_categories else None,
             componentStats=component_stats if component_stats else None,
         )
@@ -2045,29 +2260,28 @@ class ESPNFantasyBasketballClient:
         except Exception as e:
             logger.warning(f"Could not get team name: {e}")
 
-        # Get team record from API (more reliable than calculating from matchups)
-        # This only includes completed matchups, not the current week
-        matchup_wins = None
-        matchup_losses = None
-        matchup_ties = 0  # Start at 0, will count from completed matchups only
-
+        # ESPN's own record (category totals in an Each Category league) and the matchup
+        # record derived from decided schedule items are reported side by side, labelled.
+        espn_record: OverallRecord | None = None
+        espn_record_type = espn_record_description = None
         try:
             teams = await self.get_league_teams()
             team = next((t for t in teams if t.id == team_id), None)
             if team and team.record and team.record.overall:
-                matchup_wins = team.record.overall.wins
-                matchup_losses = team.record.overall.losses
+                espn_record = team.record.overall
+                espn_record_type = team.recordType
+                espn_record_description = team.recordDescription
         except Exception as e:
             logger.warning(f"Could not get team record from API: {e}")
 
-        # Track records for all teams to calculate games back
-        team_records: dict[int, dict[str, int]] = {}  # team_id -> {wins, losses, ties}
+        schedule = data.get("schedule", [])
+        matchup_records = self._matchup_records_from_schedule(schedule, current_matchup_period)
+        mine = matchup_records.get(team_id, MatchupRecord())
 
-        # Aggregate stats across all matchups
+        # Aggregate stats across the team's matchups
         # Track component stats separately for percentage calculations
         aggregated_category_scores: dict[str, float] = {}
         aggregated_component_stats: dict[str, float] = {}
-        total_games_played = 0
 
         # Track totals for percentage calculations
         field_goals_made = 0.0
@@ -2075,7 +2289,7 @@ class ESPNFantasyBasketballClient:
         free_throws_made = 0.0
         free_throws_attempted = 0.0
 
-        for schedule_item in data.get("schedule", []):
+        for schedule_item in schedule:
             home_data = schedule_item.get("home") or {}
             away_data = schedule_item.get("away") or {}
 
@@ -2123,87 +2337,6 @@ class ESPNFantasyBasketballClient:
                                     aggregated_component_stats[category_name] = 0.0
                                 aggregated_component_stats[category_name] += score_value
 
-            # Aggregate games played - TODO: this is not returning the right data, it looks like the API is just returning 0 for all matchups
-            games_played = team_data.get("gamesPlayed", 0)
-            if games_played:
-                total_games_played += games_played
-
-            # Track records for all teams to calculate games back
-            winner = schedule_item.get("winner")
-
-            # Initialize team records if not present
-            if home_team_id and home_team_id not in team_records:
-                team_records[home_team_id] = {"wins": 0, "losses": 0, "ties": 0}
-            if away_team_id and away_team_id not in team_records:
-                team_records[away_team_id] = {"wins": 0, "losses": 0, "ties": 0}
-
-            # Get cumulativeScore data for both teams
-            home_cumulative = home_data.get("cumulativeScore") or {}
-            away_cumulative = away_data.get("cumulativeScore") or {}
-
-            # Only count ties from completed matchups (exclude current matchup period)
-            # This matches the timeline used for wins/losses from team.record.overall
-            matchup_period_id = schedule_item.get("matchupPeriodId")
-            is_completed_matchup = (
-                matchup_period_id is not None and matchup_period_id < current_matchup_period
-            )
-
-            if is_completed_matchup:
-                # Sum up cumulativeScore.ties for the requested team from completed matchups only
-                # cumulativeScore.ties indicates matchup-level ties (not category ties)
-                if home_team_id == team_id:
-                    home_matchup_ties = home_cumulative.get("ties", 0)
-                    if home_matchup_ties > 0:
-                        matchup_ties += home_matchup_ties
-                elif away_team_id == team_id:
-                    away_matchup_ties = away_cumulative.get("ties", 0)
-                    if away_matchup_ties > 0:
-                        matchup_ties += away_matchup_ties
-
-            # Also track for games back calculation
-            home_category_wins = home_cumulative.get("wins", 0)
-            away_category_wins = away_cumulative.get("wins", 0)
-
-            # Determine winner and update records for games back calculation
-            if winner == "HOME":
-                if home_team_id:
-                    team_records[home_team_id]["wins"] += 1
-                if away_team_id:
-                    team_records[away_team_id]["losses"] += 1
-            elif winner == "AWAY":
-                if away_team_id:
-                    team_records[away_team_id]["wins"] += 1
-                if home_team_id:
-                    team_records[home_team_id]["losses"] += 1
-            elif home_category_wins == away_category_wins and home_category_wins > 0:
-                # Matchup tie: both teams won the same number of categories
-                if home_team_id:
-                    team_records[home_team_id]["ties"] += 1
-                if away_team_id:
-                    team_records[away_team_id]["ties"] += 1
-            else:
-                # Incomplete matchup or no winner determined
-                # Fallback: check if we can determine winner from total points (points leagues)
-                home_total = home_data.get("totalPoints")
-                away_total = away_data.get("totalPoints")
-                if home_total is not None and away_total is not None:
-                    if home_total == away_total and home_total > 0:
-                        # Actual tie based on points
-                        if home_team_id:
-                            team_records[home_team_id]["ties"] += 1
-                        if away_team_id:
-                            team_records[away_team_id]["ties"] += 1
-                    elif home_total > away_total:
-                        if home_team_id:
-                            team_records[home_team_id]["wins"] += 1
-                        if away_team_id:
-                            team_records[away_team_id]["losses"] += 1
-                    elif away_total > home_total:
-                        if away_team_id:
-                            team_records[away_team_id]["wins"] += 1
-                        if home_team_id:
-                            team_records[home_team_id]["losses"] += 1
-
         # Calculate percentages from season totals
         if field_goals_attempted > 0:
             field_goal_percentage = field_goals_made / field_goals_attempted
@@ -2222,56 +2355,39 @@ class ESPNFantasyBasketballClient:
             points_value = aggregated_component_stats.pop("points")
             aggregated_category_scores["points"] = points_value
 
-        # Calculate win percentage (excludes ties: W/(W+L))
+        # Win percentage on the matchup record (excludes ties: W/(W+L))
         win_percentage = None
-        if matchup_wins is not None and matchup_losses is not None:
-            total_decided_matchups = matchup_wins + matchup_losses
-            if total_decided_matchups > 0:
-                win_percentage = matchup_wins / total_decided_matchups
+        decided = mine.wins + mine.losses
+        if decided > 0:
+            win_percentage = mine.wins / decided
 
-        # Calculate games back using team records from API
+        # Games back on the matchup record: leader = most wins, then fewest losses
         games_back = None
-        if matchup_wins is not None and matchup_losses is not None:
-            try:
-                teams = await self.get_league_teams()
-
-                # Find leader: most wins, then fewest losses
-                leader_wins = -1
-                leader_losses = float("inf")
-
-                for team in teams:
-                    if team.record and team.record.overall:
-                        wins = team.record.overall.wins
-                        losses = team.record.overall.losses
-                        # Leader is team with most wins, or if tied, fewest losses
-                        if wins > leader_wins or (wins == leader_wins and losses < leader_losses):
-                            leader_wins = wins
-                            leader_losses = losses
-
-                # Calculate games back for the requested team
-                if leader_wins >= 0:
-                    if matchup_wins == leader_wins and matchup_losses == leader_losses:
-                        # This team is tied for the lead
-                        games_back = 0.0
-                    else:
-                        # Games back = ((Leader's wins - Team's wins) + (Team's losses - Leader's losses)) / 2
-                        games_back = (
-                            (leader_wins - matchup_wins) + (matchup_losses - leader_losses)
-                        ) / 2.0
-            except Exception as e:
-                logger.warning(f"Could not calculate games back: {e}")
+        games_back_description = None
+        if matchup_records:
+            leader = max(matchup_records.values(), key=lambda r: (r.wins, -r.losses))
+            games_back = ((leader.wins - mine.wins) + (mine.losses - leader.losses)) / 2.0
+            games_back_description = (
+                f"Behind the matchup-record leader ({leader.wins}-{leader.losses}"
+                f"-{leader.ties}) over {mine.completedMatchupPeriods} completed matchup "
+                "period(s); on the matchup record, not ESPN's category record."
+            )
 
         return TeamSeasonStats(
             teamId=team_id,
             teamName=team_name,
             categoryScores=aggregated_category_scores,
             componentStats=aggregated_component_stats if aggregated_component_stats else None,
-            totalGamesPlayed=total_games_played if total_games_played > 0 else None,
-            matchupWins=matchup_wins,
-            matchupLosses=matchup_losses,
-            matchupTies=matchup_ties if matchup_ties > 0 else None,
+            matchupWins=mine.wins,
+            matchupLosses=mine.losses,
+            matchupTies=mine.ties,
+            completedMatchupPeriods=mine.completedMatchupPeriods,
             winPercentage=win_percentage,
+            espnRecord=espn_record,
+            espnRecordType=espn_record_type,
+            espnRecordDescription=espn_record_description,
             gamesBack=games_back,
+            gamesBackDescription=games_back_description,
         )
 
     async def get_nba_schedule(self, date: str | None = None) -> list[NBAGame]:
@@ -2913,7 +3029,13 @@ class ESPNFantasyBasketballClient:
         }
         target_prefix = prefix_map.get(timeframe, "00")
 
-        for stat_set in stats_list:
+        # ESPN can send the same split for more than one season (e.g. 102026 and 102027);
+        # prefer the requested season's set, then fall back to any set with the prefix.
+        ordered = sorted(
+            stats_list,
+            key=lambda st: 0 if str(st.get("id", "")) == f"{target_prefix}{self.year}" else 1,
+        )
+        for stat_set in ordered:
             stat_id = str(stat_set.get("id", ""))
 
             if stat_id.startswith(target_prefix):

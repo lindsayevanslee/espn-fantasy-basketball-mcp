@@ -125,11 +125,15 @@ settings = {
 }
 
 # ----------------------------------------------------------------------------- teams
+# ESPN's record in an H2H Each Category league counts categories over *completed* matchup
+# periods. One period (9 categories) is complete here, so each record sums to 9 and matches the
+# period-1 cumulativeScore in the schedule below (8 beat 3 six categories to three; 5 beat 12
+# five to four).
 TEAMS = {
-    8: ("SA", "Statistical Anomalies", 11, 6, 1),
-    3: ("RR", "Rim Runners", 9, 8, 1),
-    12: ("WW", "Waiver Wire Warriors", 7, 10, 1),
-    5: ("FT", "Fifth Team", 8, 9, 1),
+    8: ("SA", "Statistical Anomalies", 6, 3, 0),
+    3: ("RR", "Rim Runners", 3, 6, 0),
+    12: ("WW", "Waiver Wire Warriors", 4, 5, 0),
+    5: ("FT", "Fifth Team", 5, 4, 0),
 }
 # waiver order (1 = first claim) and ESPN's transaction counter per team
 WAIVER_RANK = {8: 12, 3: 1, 12: 5, 5: 7}

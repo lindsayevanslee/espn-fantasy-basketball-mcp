@@ -106,8 +106,9 @@ Suppose you ask Claude: "How is my matchup going?" Here is what happens, step by
 2. **Claude calls it with (probably) no arguments.** Every tool parameter is optional except
    where a value cannot be inferred (a `player_id`, a `query`). Claude usually sends `{}`.
 
-3. **The tool resolves configuration.** `_get_espn_credentials()` fills in league ID, season,
-   and the two cookies from environment variables. `_get_team_id()` fills in your team from
+3. **The tool resolves configuration.** `_get_espn_credentials()` fills in league ID and season
+   from the arguments or environment variables, and the two cookies from environment variables
+   only (they are never tool parameters). `_get_team_id()` fills in your team from
    `ESPN_TEAM_ID`. If the team is missing, the tool raises a `ValueError` with a message telling
    you how to fix it; FastMCP turns that into a tool error Claude can read and relay.
 
@@ -126,8 +127,11 @@ Suppose you ask Claude: "How is my matchup going?" Here is what happens, step by
    model declares which fields exist, and the client fills them with named categories, slot
    names, timezone-converted times, and so on.
 
-7. **The model becomes a dict.** The tool returns `matchup.model_dump()`. FastMCP serialises it
-   to JSON and sends it back over stdout.
+7. **The model becomes a dict.** The tool returns `_dump(matchup, ...)`, which is
+   `model_dump(exclude_none=True)` plus the exclusion of the raw `cumulativeScore` stat-ID block:
+   fields ESPN did not populate are left out rather than sent as `null` on every player, which
+   roughly halves the response. FastMCP serialises the dict to JSON and sends it back over
+   stdout.
 
 8. **Claude reads the JSON** and writes you a sentence about it.
 
@@ -143,16 +147,14 @@ docstrings. Each tool follows the same five-line shape:
 async def get_league_teams(
     league_id: int | None = None,
     year: int | None = None,
-    espn_s2: str | None = None,
-    swid: str | None = None,
 ) -> list[dict]:
     """Get all teams in an ESPN Fantasy Basketball league.
     ... (docstring describing each arg and the return shape) ...
     """
-    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     teams = await client.get_league_teams()
-    return [team.model_dump() for team in teams]
+    return [_dump(team) for team in teams]
 ```
 
 Why the docstrings are so long: **they are the user interface.** FastMCP sends the docstring to
@@ -174,9 +176,13 @@ Everything else is delegation.
 
 ### 4.2 Credentials and the season default
 
-`_get_espn_credentials()` applies a simple rule: **an explicit argument wins; otherwise read the
-environment.** The environment variables are `ESPN_LEAGUE_ID`, `ESPN_YEAR`, `ESPN_S2`, and
-`ESPN_SWID`. `_get_team_id()` does the same for `ESPN_TEAM_ID`.
+`_get_espn_credentials()` applies a simple rule for the league and season: **an explicit
+argument wins; otherwise read the environment** (`ESPN_LEAGUE_ID`, `ESPN_YEAR`).
+`_get_team_id()` does the same for `ESPN_TEAM_ID`. The two cookies are different: they come from
+`ESPN_S2` and `ESPN_SWID` **only**, and no tool has an `espn_s2` or `swid` parameter. A tool
+argument is written into the conversation transcript by the MCP client, and the cookies grant
+full access to the owner's ESPN account, so they must never travel that way.
+`tests/test_feedback_regressions.py` fails if any tool schema ever exposes them.
 
 The season default deserves a note because it trips people up. ESPN labels a season by the
 calendar year it **ends** in: the 2026-27 season is `2027`. `_default_season()` encodes that:
@@ -538,7 +544,7 @@ Let us trace `search_players(query="jokic")`, which is simple but touches most l
 5. **Model.** Five `PlayerSearchResult` objects are built with `playerId`, `fullName`,
    `matchScore`, position, NBA team, injury status and detail, waiver state, and the league
    fields.
-6. **Return.** The tool returns `[r.model_dump() for r in results]`. Claude sees a list and can
+6. **Return.** The tool returns `[_dump(r) for r in results]`. Claude sees a list and can
    now call `get_player_stats` with the right ID.
 
 Four ESPN requests at most (the injury report is the fourth), two of which are almost always
@@ -567,7 +573,7 @@ Now `analyze_matchup()` with no arguments, for a 13-player roster on each side.
 5. **Stats.** Two batched `kona_player_info` requests for all 26 players: one for projections
    (`10YYYY`), one for last 7 days (`01YYYY`).
 6. **Analysis.** The seven steps in section 4.9 run on this data and build a `MatchupAnalysis`.
-7. **Return.** `analysis.model_dump()`.
+7. **Return.** `_dump(analysis)`.
 
 Roughly 35 ESPN requests the first time, most of which are served from cache on any follow-up
 question within the same minute. That is the burst the 15-second live lifetime exists to
@@ -651,8 +657,6 @@ async def get_team_activity(
     team_id: int | None = None,
     league_id: int | None = None,
     year: int | None = None,
-    espn_s2: str | None = None,
-    swid: str | None = None,
 ) -> dict:
     """Count a team's adds, drops, and trades so far this season.
 
@@ -660,20 +664,18 @@ async def get_team_activity(
         team_id: Team ID (optional, uses ESPN_TEAM_ID env var)
         league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
         year: ESPN season ID, the year the season ends in (optional, defaults to current season)
-        espn_s2: ESPN authentication cookie for private leagues (optional, uses ESPN_S2 env var)
-        swid: ESPN SWID cookie for private leagues (optional, uses ESPN_SWID env var)
 
     Returns:
         Dictionary with teamId, teamName, acquisitions, drops, trades
     """
-    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year, espn_s2, swid)
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     team_id = _get_team_id(team_id)
     if team_id is None:
         raise ValueError(
             "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
         )
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    return (await client.get_team_activity(team_id)).model_dump()
+    return _dump(await client.get_team_activity(team_id))
 ```
 
 **4. Add tests.** Three kinds, mirroring the existing suite:

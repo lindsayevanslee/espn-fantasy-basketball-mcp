@@ -18,10 +18,10 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 ### Available Tools
 
 #### League & Roster Tools
-1. **get_league_teams** - All teams with records (labelled as category or matchup wins), waiver rank, and acquisitions used vs. the limit this matchup
+1. **get_league_teams** - All teams in standings order (`standingsRank`, ESPN's `playoffSeed`), with `isMyTeam`, ESPN's record labelled as category or matchup wins, the matchup-level W-L-T derived from the schedule (`matchupRecord`), waiver rank, and acquisitions used vs. the limit this matchup
 2. **get_league_settings** - Scoring categories, roster slots, matchup period calendar dates, waiver rules (order reset, process time) and acquisition limits in plain English, including the per-matchup allowance when the limit is per day
-3. **get_team_roster** - Roster for a team with per-game stats (incl. FGM/FGA/FTM/FTA), injury status with ESPN's reason and expected return, today's game, which scoring period (day) the roster is for and which starting slots are locked for it; players ESPN still lists but who were dropped are removed and named in `staleEntriesRemoved`
-4. **get_team_season_stats** - Season category totals, record, win percentage, and games back for a team
+3. **get_team_roster** - Roster for a team with per-game stats (incl. FGM/FGA/FTM/FTA), injury status with ESPN's reason and expected return (and an `injuryStatusNote` when the two disagree, e.g. OUT vs. "probable"), today's game, which scoring period (day) the roster is for and which starting slots are locked for it; players ESPN still lists but who were dropped are removed and named in `staleEntriesRemoved`
+4. **get_team_season_stats** - Season category totals for a team, its matchup W-L-T over completed periods (never category tallies) next to ESPN's own labelled record, win percentage, and games back on the matchup record
 5. **get_free_agents** - Free agents/waiver wire players with ownership percentages, injury detail, and whether each is addable now or on waivers until a given time (pass `verbose=true` for stats)
 6. **get_nba_schedule** - Get NBA game schedule for a date
 7. **get_transactions** - Recent adds, drops, waiver claims and trades with player and team names, newest first (answers "why is this player on waivers")
@@ -29,7 +29,7 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 #### Matchup Tools
 8. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
 9. **get_my_current_matchup** - Your current matchup, both rosters with per-game averages, and category scores in one call (`verbose=true` adds season totals)
-10. **analyze_matchup** - Category-by-category projections, close categories, start/sit priorities, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
+10. **analyze_matchup** - Category-by-category projections with a stated method, close categories judged on each category's own scale (made-shot equivalents for percentages), start/sit priorities driven by the close categories with the per-game numbers behind each claim, the opponent's roster as the projection sees it, an itemised gap between games remaining and expected games, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
 11. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping; pass `player_ids` to compare streaming candidates alongside
 12. **get_player_schedule** - Games this matchup period and next for any ESPN player IDs (free agents, trade targets), with the date windows counted
 
@@ -47,7 +47,9 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 21. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
 22. **get_available_players** - Get top available players for the draft with auction values
 
-Tools that take a `player_id` expect ESPN's numeric ID; use `search_players` to find it from a name. Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID`, `ESPN_YEAR`, `ESPN_S2`, and `ESPN_SWID` from the environment, so you rarely need to pass them. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
+Tools that take a `player_id` expect ESPN's numeric ID; use `search_players` to find it from a name. Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID` and `ESPN_YEAR` from the environment, so you rarely need to pass them. The ESPN cookies (`ESPN_S2`, `ESPN_SWID`) are read from the environment **only**: no tool accepts them as a parameter, because a parameter value would be written into the conversation transcript. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
+
+Tool responses leave out fields ESPN did not populate (no `null` padding) and the raw stat-ID blocks; everything is available under a named field. The one exception is a player's `stats` dict, where `fg_pct` / `ft_pct` are null exactly when the player has zero attempts (the attempt counts sit alongside).
 
 ## Installation
 
@@ -490,9 +492,15 @@ This MCP server uses the following ESPN API endpoints:
 
 The server covers everything ESPN exposes for a league: settings, rosters, free agents, matchups
 and box scores, player stats and projections, draft state, and NBA schedules. It does not have
-player news or injury details beyond ESPN's status codes, advanced metrics, play-by-play, or
-daily-fantasy data. Ask Claude for those from its own knowledge or another source, and it should
-say which is which.
+player news beyond ESPN's status codes and public injury report, advanced metrics, play-by-play,
+or daily-fantasy data. Ask Claude for those from its own knowledge or another source, and it
+should say which is which.
+
+Two things ESPN's API does not say and the server therefore cannot: what the lineup lock code
+`INDIVIDUAL_FIRSTGAME_WEEKLY` means (only `INDIVIDUAL_GAME` and `FIRSTGAME_WEEKLY` have been
+seen live; `lineupLocktimeDescription` says when a code is not recognised, and the per-slot
+`lineupLocked` flags are authoritative), and why `matchupAcquisitionTotals` can carry an entry
+for a matchup period that has not started (reported as sent, with a note).
 
 ### ESPN ID Reference
 

@@ -146,3 +146,76 @@ SHOOTING_THRESHOLDS: dict[str, tuple[float, float]] = {
     "fieldGoalPercentage": (48.0, 43.0),
     "freeThrowPercentage": (80.0, 70.0),
 }
+
+
+# Per-game production at which a player is said to help a counting category, and the share
+# of that value below which he hurts it (hurts_below = helps_at * HURTS_RATIO). These are
+# rough "better than an average fantasy starter" bands, not league data; analyze_matchup puts
+# the player's actual per-game number next to every claim so the reader can judge.
+CATEGORY_HELP_THRESHOLDS: dict[str, float] = {
+    "points": 18.0,
+    "rebounds": 7.0,
+    "assists": 5.0,
+    "steals": 1.2,
+    "blocks": 1.0,
+    "threePointMade": 2.0,
+}
+HURTS_RATIO = 0.6
+# Turnovers are reversed: a low-turnover player helps, a high-turnover one hurts.
+TURNOVER_HELPS_BELOW = 2.0
+TURNOVER_HURTS_ABOVE = 3.5
+
+
+# How close a category must be, as a projected margin, to be flagged isClose. For counting
+# categories this is roughly what two strong player-games swing, so a start/sit decision can
+# still change the result. Anything not listed falls back to 5% of the total (minimum 2).
+CLOSE_MARGINS: dict[str, float] = {
+    "points": 20.0,
+    "rebounds": 8.0,
+    "assists": 6.0,
+    "steals": 2.0,
+    "blocks": 2.0,
+    "threePointMade": 3.0,
+    "turnovers": 3.0,
+}
+# A percentage category is close when the lead is worth no more than this many made shots over
+# the week's projected attempts (margin * attempts <= makes). With ~350 FGA a week, 4 makes is
+# a 0.011 lead; the old flat 0.002 flagged almost nothing as close.
+CLOSE_PERCENTAGE_MAKES = 4.0
+# Fallback when attempts are unknown.
+CLOSE_PERCENTAGE_FALLBACK: dict[str, float] = {
+    "fieldGoalPercentage": 0.010,
+    "freeThrowPercentage": 0.015,
+}
+
+
+# ESPN rosterSettings.lineupLocktimeType codes in plain English. Only the first two have been
+# seen in a live league; a code not listed here is reported as not recognised, and the per-slot
+# lineupLocked flags on get_team_roster remain authoritative for what is actually editable.
+LINEUP_LOCK_DESCRIPTIONS: dict[str, str] = {
+    "INDIVIDUAL_GAME": (
+        "Daily lineups: each player's slot locks at that player's game time and the lineup can "
+        "be changed every day for players who have not yet played."
+    ),
+    "FIRSTGAME_WEEKLY": (
+        "Weekly lineups: every slot locks at the first NBA game of the matchup period and "
+        "stays locked for the week."
+    ),
+}
+
+
+# Ordering of injury statuses from most to least available, used to spot a fantasy status that
+# disagrees with ESPN's NBA injury report (e.g. OUT vs "probable").
+INJURY_SEVERITY: dict[str, int] = {
+    "ACTIVE": 0,
+    "NORMAL": 0,
+    "PROBABLE": 0,
+    "DAY_TO_DAY": 1,
+    "DTD": 1,
+    "QUESTIONABLE": 1,
+    "DOUBTFUL": 2,
+    "OUT": 3,
+    "SUSPENSION": 3,
+    "SUSPENDED": 3,
+    "IR": 3,
+}
