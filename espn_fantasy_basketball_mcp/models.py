@@ -35,11 +35,17 @@ class PlayerStats(BaseModel):
 class PlayerComparison(BaseModel):
     """Comparison between multiple players."""
 
-    players: list[PlayerStats]
+    players: list[PlayerStats]  # on `basis`
+    basis: str = "season"  # timeframe `players` and `winner_by_category` are on
     categories: list[str]
-    winner_by_category: dict[str, int]  # category -> player_id
+    winner_by_category: dict[str, int]  # category -> player_id, on `basis`
     overall_recommendation: str
     analysis: str
+    # The same players on every basis, side by side, so actuals and projections are never
+    # compared across players by accident: {"season": [...], "projections": [...], ...}
+    bases: dict[str, list[PlayerStats]] = {}
+    winners_by_basis: dict[str, dict[str, int]] = {}  # basis -> category -> player_id
+    note: str | None = None
 
 
 class TradeAnalysis(BaseModel):
@@ -175,6 +181,10 @@ class CategoryProjection(BaseModel):
     projectedResult: str | None = None  # "win", "loss", "tie", or "close"
     margin: float | None = None  # Projected margin (absolute value)
     isClose: bool = False  # margin <= closeThreshold
+    # "close" (margin <= closeThreshold), "near" (<= nearThreshold, 1.5x close: effectively
+    # in play, e.g. steals at 2.2 against a threshold of 2.0) or "clear"
+    closeness: str | None = None
+    nearThreshold: float | None = None
     # The closeness threshold used for this category and how it was chosen. Counting
     # categories use a per-category margin (roughly what two good player-games swing);
     # percentages use the lead expressed in made shots over the projected attempts.
@@ -204,6 +214,12 @@ class PlayerRecommendation(BaseModel):
     injuryStatus: str | None = None
     injuryDetails: str | None = None
     todaysGame: TodaysGame | None = None
+    # Per-game lines side by side (scoring categories only): the basis the projection used,
+    # this season's actuals, and ESPN's projections. Compare players on one of these.
+    basisPerGame: dict[str, float] | None = None
+    seasonPerGame: dict[str, float] | None = None
+    projectedPerGame: dict[str, float] | None = None
+    seasonGamesPlayed: int | None = None
 
 
 class OpponentPlayerSummary(BaseModel):
@@ -218,6 +234,8 @@ class OpponentPlayerSummary(BaseModel):
     injuryStatus: str | None = None
     injuryDetails: str | None = None
     projectedPerGame: dict[str, float] | None = None  # scoring categories only
+    basisPerGame: dict[str, float] | None = None  # the line the projection actually used
+    seasonPerGame: dict[str, float] | None = None
 
 
 class MatchupAnalysis(BaseModel):
@@ -231,6 +249,15 @@ class MatchupAnalysis(BaseModel):
     opponentTeamName: str | None = None
     yourTeamAbbrev: str | None = None
     opponentTeamAbbrev: str | None = None
+    matchupPeriod: int | None = None
+
+    # Which per-game numbers built the projection, for BOTH teams: projections (default),
+    # season, last_7, last_15, last_30 or blend. basisNotes lists players who had no line on
+    # that basis and fell back to projections. rosterSource says where the rosters came from.
+    basis: str = "projections"
+    basisDescription: str | None = None
+    basisNotes: list[str] = []
+    rosterSource: str | None = None
 
     # Category analysis
     categoryProjections: list[CategoryProjection]  # Projections for each category
@@ -238,6 +265,7 @@ class MatchupAnalysis(BaseModel):
     categoriesLosing: list[str]  # Categories you're projected to lose
     categoriesTied: list[str]  # Categories projected to tie
     closeCategories: list[str]  # Categories that are close (within threshold)
+    nearCategories: list[str] = []  # Just outside the threshold but still in play
 
     # Player recommendations
     playerRecommendations: list[PlayerRecommendation]  # Prioritized player recommendations
@@ -266,6 +294,63 @@ class MatchupAnalysis(BaseModel):
     # Strategy recommendations
     strategyNotes: list[str]  # Strategic notes and recommendations
     lineupWarnings: list[str] = []  # Starters who cannot play (OUT, suspended, unsigned, on IR)
+
+
+class CategoryDelta(BaseModel):
+    """One category before and after a simulated roster move."""
+
+    category: str
+    before: float | None = None  # your projected total before the move
+    after: float | None = None
+    delta: float | None = None  # after - before (percentages as fractions)
+    opponentProjected: float | None = None
+    resultBefore: str | None = None  # win / loss / tie
+    resultAfter: str | None = None
+    closenessBefore: str | None = None  # close / near / clear
+    closenessAfter: str | None = None
+    changed: bool = False  # result or closeness changed
+
+
+class RosterLegality(BaseModel):
+    """Whether a roster move is allowed under the league's roster rules."""
+
+    teamId: int
+    canMake: bool
+    reasons: list[str] = []  # why not (empty when canMake)
+    warnings: list[str] = []  # allowed, but worth knowing
+    rosterSizeNow: int  # non-IR players
+    rosterSizeAfter: int
+    rosterLimit: int | None = None  # non-IR roster spots from league settings
+    positionLimits: dict[str, int] = {}  # position -> max (-1 = no limit)
+    positionCountsAfterByDefaultPosition: dict[str, int] = {}
+    positionCountsAfterByEligibility: dict[str, int] = {}
+    positionLimitBasis: str | None = None  # which count the verdict used, and why
+    acquisitionsRemainingThisMatchup: int | None = None
+    addedPlayerStatus: dict[str, str] = {}  # "Name (id)" -> FREEAGENT / WAIVERS ... / ONTEAM ...
+
+
+class RosterMoveSimulation(BaseModel):
+    """analyze_matchup run twice, before and after hypothetical drops/adds, on one basis."""
+
+    teamId: int
+    matchupPeriod: int
+    basis: str
+    dropped: list[str]  # "Name (id)"
+    added: list[str]
+    unknownDropIds: list[int] = []
+    unknownAddIds: list[int] = []
+    gamesRemainingBefore: int | None = None
+    gamesRemainingAfter: int | None = None
+    expectedGamesBefore: float | None = None
+    expectedGamesAfter: float | None = None
+    projectedRecordBefore: str  # "W-L-T"
+    projectedRecordAfter: str
+    categoryDeltas: list[CategoryDelta]
+    categoriesFlipped: list[str] = []  # "rebounds: loss -> win"
+    addedPlayers: list[PlayerRecommendation] = []  # how the added players project
+    legality: RosterLegality | None = None
+    summary: list[str]
+    projectionMethod: str | None = None
 
 
 class PlayerSearchResult(BaseModel):
@@ -314,6 +399,11 @@ class Player(BaseModel):
     # "Knee - Sprain (left); expected return 2026-11-10. Williams (knee) is out Tuesday."
     injuryDetails: str | None = None
     injuryReturnDate: str | None = None  # YYYY-MM-DD when ESPN lists an expected return
+    # "reported": ESPN's note gives a timeline (weeks, re-evaluation, surgery, season).
+    # "placeholder": ESPN lists the team's next game for a day-to-day player, which says
+    # nothing about how long he is actually out. None when there is no return date.
+    injuryReturnDateType: str | None = None
+    injuryReturnDateNote: str | None = None
     # Set when injuryStatus (ESPN fantasy's code) and injuryDetails (ESPN's NBA injury report)
     # disagree, e.g. fantasy says OUT while the report says probable. Says which is which.
     injuryStatusNote: str | None = None
@@ -322,7 +412,8 @@ class Player(BaseModel):
     availabilityStatus: str | None = None
     waiverProcessDateISO: str | None = None
     availabilityNote: str | None = None
-    stats: dict[str, Any] | None = None
+    stats: dict[str, Any] | None = None  # this season's per-game actuals (+ totals)
+    projections: dict[str, Any] | None = None  # ESPN's rest-of-season per-game projections
     ownership: PlayerOwnership | None = None
     active: bool | None = None
     droppable: bool | None = None
@@ -415,6 +506,7 @@ class CurrentMatchup(BaseModel):
 
     matchupId: int
     scoringPeriod: int
+    rosterNote: str | None = None  # Where the rosters came from (today's, planned, historical)
     yourTeam: MatchupTeam
     opponentTeam: MatchupTeam
     yourRoster: Roster
@@ -665,6 +757,12 @@ class LeagueStatus(BaseModel):
     transactionScoringPeriod: int | None = None
     currentMatchupPeriodDates: list[str] | None = None  # [first_day, last_day]
     latestScoringPeriodDate: str | None = None  # Calendar day latestScoringPeriod refers to
+    # The scoring period a transaction made now is charged to, its date, the matchup period
+    # that contains it, and a sentence saying so ("Adds made now count against matchup
+    # period 3 (2026-11-02 to 2026-11-08)").
+    transactionScoringPeriodDate: str | None = None
+    transactionMatchupPeriod: int | None = None
+    transactionNote: str | None = None
 
 
 class LeagueSettings(BaseModel):
