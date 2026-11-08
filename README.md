@@ -29,23 +29,25 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 #### Matchup Tools
 8. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
 9. **get_my_current_matchup** - Your current matchup, both rosters with per-game averages, and category scores in one call (`verbose=true` adds season totals)
-10. **analyze_matchup** - Category-by-category projections with a stated method, close categories judged on each category's own scale (made-shot equivalents for percentages), start/sit priorities driven by the close categories with the per-game numbers behind each claim, the opponent's roster as the projection sees it, an itemised gap between games remaining and expected games, and lineup warnings for starters who cannot play (OUT, suspended, unsigned, on IR)
-11. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping; pass `player_ids` to compare streaming candidates alongside
-12. **get_player_schedule** - Games this matchup period and next for any ESPN player IDs (free agents, trade targets), with the date windows counted
+10. **analyze_matchup** - Category-by-category projections on a chosen basis (ESPN projections, season actuals, last 7/15/30 days, or a blend) applied to both teams, close and near categories, start/sit priorities with season and projected lines side by side, and lineup warnings
+11. **simulate_roster_move** - What if I drop X and add Y? Re-runs the projection before and after on one basis and returns per-category deltas, categories that flip, the added players' lines, and whether the move is legal
+12. **can_add_player** - Roster-legality check for an add (and optional drops): roster size, position limits by primary position and by eligibility, acquisitions left, and whether each player is a free agent, on waivers, or owned
+13. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping; pass `player_ids` to compare streaming candidates alongside
+14. **get_player_schedule** - Games this matchup period and next for any ESPN player IDs (free agents, trade targets), with the date windows counted
 
 #### Player Analysis Tools
-13. **search_players** - Find ESPN player IDs by name (last name, partial, accented, or misspelled) and see whether each match is a free agent in your league or who owns them
-14. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
-15. **compare_players** - Compare players across categories
-16. **analyze_trade_proposal** - Value and category impact of a proposed trade
-17. **get_trending_players** - Players trending up or down in ownership
+15. **search_players** - Find ESPN player IDs by name (last name, partial, accented, or misspelled) and see whether each match is a free agent in your league or who owns them
+16. **get_player_stats** - Stats for one or many players by ESPN player ID (`season`, `projections`, `last_7`, `last_15`, `last_30`)
+17. **compare_players** - Compare players across categories
+18. **analyze_trade_proposal** - Value and category impact of a proposed trade
+19. **get_trending_players** - Players trending up or down in ownership
 
 #### Live Draft Assistant Tools
-18. **get_draft_status** - Get current draft status including all picks and progress
-19. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
-20. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
-21. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
-22. **get_available_players** - Get top available players for the draft with auction values
+20. **get_draft_status** - Get current draft status including all picks and progress
+21. **should_i_bid** - Get recommendation on whether to bid for the current player being nominated
+22. **who_should_i_target_next** - Get recommendation on which player to target/nominate next
+23. **analyze_my_draft_strategy** - Analyze your current draft strategy and spending patterns
+24. **get_available_players** - Get top available players for the draft with auction values
 
 Every tool returns a single JSON object. Tools that list several items wrap them as `{"count": N, "<items>": [...]}` with the list under `teams`, `players`, `matchups`, `games`, `transactions`, or `matches`, because FastMCP would otherwise deliver a bare list as one message per element. Tools that take a `player_id` expect ESPN's numeric ID; use `search_players` to find it from a name. Most tools read `ESPN_LEAGUE_ID`, `ESPN_TEAM_ID` and `ESPN_YEAR` from the environment, so you rarely need to pass them. The ESPN cookies (`ESPN_S2`, `ESPN_SWID`) are read from the environment **only**: no tool accepts them as a parameter, because a parameter value would be written into the conversation transcript. Tools that act on *your* team require a team ID, either as a parameter or via `ESPN_TEAM_ID`, and return a clear error if neither is set.
 

@@ -93,7 +93,7 @@ async def _tool_schemas() -> dict[str, dict]:
 @pytest.mark.asyncio
 async def test_no_tool_accepts_espn_cookies():
     schemas = await _tool_schemas()
-    assert len(schemas) == 22
+    assert len(schemas) == 24
     leaking = {
         name: sorted(set(schema.get("properties", {})) & {"espn_s2", "swid", "SWID"})
         for name, schema in schemas.items()

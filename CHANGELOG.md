@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Added
+- `simulate_roster_move` tool: re-runs the matchup projection before and after hypothetical
+  drops and adds, on one basis for both teams, and returns per-category deltas, which
+  categories flip, the change in expected games, how the added players project, and a
+  roster-legality check. No more mixing bases by hand.
+- `can_add_player` tool and `check_roster_move`: roster size against the league limit,
+  position counts against the position limits (by primary position for the verdict, by slot
+  eligibility as a warning, since ESPN does not document which it enforces), acquisitions
+  left this matchup, and each player's availability (free agent, on waivers, owned).
+- `analyze_matchup` takes `basis` (projections, season, last_7, last_15, last_30, blend) and
+  applies it to both teams; the response states the basis, lists players who fell back to
+  projections, and gives every player's basis, season and projected per-game lines side by
+  side. Every non-IR rostered player is listed in `playerRecommendations` (those who cannot
+  play at priority 1), so the list matches `get_team_roster`.
+- Closeness has a "near" band: `closeness` is close, near (within 1.5x the close threshold)
+  or clear, with `nearThreshold`; `nearCategories` is returned and the strategy notes name the
+  close and near categories to prioritise and the far-behind ones not worth chasing.
+- `get_free_agents(verbose=true)` returns `projections` beside `stats`; `compare_players`
+  takes `timeframe` and returns `bases` with the same players on season, projections and the
+  requested timeframe, plus `winners_by_basis`.
+- Injury context: `injuryReturnDateType` says whether ESPN's return date is a reported timeline
+  or its next-game placeholder for day-to-day players; roster and free-agent stats carry
+  `teamGamesPlayed` and `gamesMissed` so "2 of 10" is visible.
+- `status.transactionMatchupPeriod`, `transactionScoringPeriodDate` and `transactionNote`
+  say which matchup period an add made now counts against.
+
+### Fixed
+- `analyze_matchup` for a future week read the roster ESPN stores for that week's first day,
+  which can lag an add made today. Players now come from today's roster (the same source as
+  `get_team_roster`); only lineup slots come from the planned lineup. `rosterSource` says so.
+- `strategyNotes` told you to prioritise the categories you were losing by most; they now
+  follow the closeness classification.
+
 ### Changed
 - Tools that return several items (`get_league_teams`, `get_free_agents`, `get_matchups`,
   `get_nba_schedule`, `get_transactions`, `get_available_players`, `get_trending_players`,

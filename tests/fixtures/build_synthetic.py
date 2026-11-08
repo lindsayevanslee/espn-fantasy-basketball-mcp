@@ -587,7 +587,9 @@ def kona_entry(pid: int, on_team: int) -> dict:
     }
 
 
-ON_TEAM = {pid: t for t, entries in ROSTERS.items() for pid, _, on, _ in entries}
+# kona_player_info reports the player's CURRENT team: a dropped player (onTeamId 0 in the
+# roster entry) is a free agent there, whatever roster list still carries him
+ON_TEAM = {pid: on for entries in ROSTERS.values() for pid, _, on, _ in entries}
 free_agents_response = {
     "id": LEAGUE_ID,
     "seasonId": SEASON,
@@ -1003,7 +1005,7 @@ injuries_response = {
                     "Ankle",
                     "Sprain",
                     "Right",
-                    "",
+                    "2026-11-03",  # NYK's next game: ESPN's day-to-day placeholder
                     athlete_shape="link",
                 ),
             ],
@@ -1020,7 +1022,7 @@ injuries_response = {
                     "Back",
                     "",
                     "Not Specified",
-                    "",
+                    "2026-11-03",  # LAC's next game: placeholder, not a timeline
                     athlete_shape="name",
                 ),
             ],

@@ -613,8 +613,13 @@ async def compare_players(
     league_id: int | None = None,
     year: int | None = None,
     categories: list[str] | None = None,
+    timeframe: str = "season",
 ) -> dict:
-    """Compare multiple players across statistical categories.
+    """Compare multiple players across statistical categories, on one basis at a time.
+
+    `players` and `winner_by_category` use `timeframe` (season actuals by default). `bases`
+    carries the same players on season, projections and the requested timeframe side by side,
+    so never compare one player's actuals with another's projection.
 
     Args:
         player_ids: List of ESPN player IDs to compare
@@ -627,7 +632,7 @@ async def compare_players(
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    comparison = await client.compare_players(player_ids, categories)
+    comparison = await client.compare_players(player_ids, categories, timeframe)
     return _dump(comparison)
 
 
@@ -807,10 +812,18 @@ async def get_player_schedule(
 async def analyze_matchup(
     team_id: int | None = None,
     matchup_period: int | None = None,
+    basis: str = "projections",
     league_id: int | None = None,
     year: int | None = None,
 ) -> dict:
     """Analyze a matchup and provide strategic recommendations.
+
+    `basis` chooses the per-game numbers used for BOTH teams: "projections" (ESPN's
+    rest-of-season projections, default), "season" (this season's actuals), "last_7",
+    "last_15", "last_30", or "blend" (mean of projections and season). The response says which
+    basis it used, lists players who fell back to projections, and gives every player's season,
+    projected and basis per-game lines side by side. Rosters are today's players (the same
+    get_team_roster returns), so an add or drop made today is reflected.
 
     By default, analyzes your next matchup (current week + 1). Can also analyze
     any other matchup period by specifying matchup_period.
@@ -864,8 +877,100 @@ async def analyze_matchup(
         matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
 
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    analysis = await client.analyze_matchup(team_id, matchup_period)
+    analysis = await client.analyze_matchup(team_id, matchup_period, basis)
     return _dump(analysis)
+
+
+@mcp.tool()
+async def simulate_roster_move(
+    drop_ids: list[int] | None = None,
+    add_ids: list[int] | None = None,
+    team_id: int | None = None,
+    matchup_period: int | None = None,
+    basis: str = "projections",
+    league_id: int | None = None,
+    year: int | None = None,
+) -> dict:
+    """What if I drop X and add Y? Re-run the matchup projection and return the deltas.
+
+    Runs analyze_matchup twice, before and after the hypothetical move, on ONE basis for both
+    teams, and reports per-category deltas, which categories flip (loss -> win etc.), the
+    change in expected games, how the added players project, and whether the move is legal
+    (roster size, position limits, acquisitions left, waiver status). Use this instead of
+    adding and subtracting per-game numbers by hand.
+
+    Args:
+        drop_ids: ESPN player IDs to drop from your roster (optional)
+        add_ids: ESPN player IDs to add (free agents or waiver players; use search_players)
+        team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
+        matchup_period: Matchup period to project (optional, defaults to the next one, like
+            analyze_matchup; pass the current period for this week)
+        basis: projections (default), season, last_7, last_15, last_30 or blend
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: ESPN season ID, the year the season ends in (optional)
+
+    Returns:
+        Dictionary with dropped/added names, projectedRecordBefore/After, categoryDeltas
+        (before, after, delta, result and closeness before/after), categoriesFlipped,
+        addedPlayers (their projection lines and games), legality, and a summary.
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
+    team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
+    drops = _coerce_player_ids(drop_ids) if drop_ids else []
+    adds = _coerce_player_ids(add_ids) if add_ids else []
+    if matchup_period is not None:
+        matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    result = await client.simulate_roster_move(team_id, drops, adds, matchup_period, basis)
+    return _dump(result)
+
+
+@mcp.tool()
+async def can_add_player(
+    add_ids: list[int],
+    drop_ids: list[int] | None = None,
+    team_id: int | None = None,
+    league_id: int | None = None,
+    year: int | None = None,
+) -> dict:
+    """Is this add (with optional drops) allowed under the league's roster rules?
+
+    Checks roster size against the league's non-IR roster limit, each position's count
+    against the position limits (e.g. "max 4 centers"), acquisitions left this matchup
+    period, and whether each player is a free agent, on waivers, or owned. Position counts
+    are given both by primary position (used for the verdict) and by slot eligibility, with
+    a warning when only the eligibility count would break a limit, because ESPN does not
+    document which one it enforces.
+
+    Args:
+        add_ids: ESPN player IDs to add (use search_players to find them)
+        drop_ids: ESPN player IDs to drop at the same time (optional)
+        team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: ESPN season ID, the year the season ends in (optional)
+
+    Returns:
+        Dictionary with canMake, reasons (why not), warnings, roster sizes, position counts
+        after the move by primary position and by eligibility, the position limits,
+        acquisitions remaining, and each added player's availability.
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
+    team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
+    if not add_ids:
+        raise ValueError("add_ids is required (one or more ESPN player IDs)")
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    result = await client.check_roster_move(
+        team_id, _coerce_player_ids(add_ids), _coerce_player_ids(drop_ids) if drop_ids else []
+    )
+    return _dump(result)
 
 
 @mcp.tool()

@@ -1116,8 +1116,8 @@
   },
   {
    "id": 3001,
-   "onTeamId": 12,
-   "status": "ONTEAM",
+   "onTeamId": 0,
+   "status": "FREEAGENT",
    "keeperValue": 0,
    "keeperValueFuture": 0,
    "lineupLocked": false,
@@ -1473,7 +1473,7 @@
   },
   {
    "id": 3003,
-   "onTeamId": 12,
+   "onTeamId": 5,
    "status": "ONTEAM",
    "keeperValue": 0,
    "keeperValueFuture": 0,

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import time
+from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import Any, overload
 from zoneinfo import ZoneInfo
@@ -14,6 +15,7 @@ import httpx
 
 from .analysis import analyze_matchup as analyze_matchup_impl
 from .analysis import player_availability
+from .analysis import simulate_roster_move as simulate_roster_move_impl
 from .constants import (
     ABBREV_ALIASES,
     AVAILABILITY_FACTORS,
@@ -61,6 +63,8 @@ from .models import (
     PlayerStats,
     Roster,
     RosterEntry,
+    RosterLegality,
+    RosterMoveSimulation,
     RosterScheduleSummary,
     RosterSettings,
     ScheduleSettings,
@@ -80,6 +84,13 @@ from .models import (
 from .search import SEARCH_MIN_SCORE, name_match_score, normalize_name
 
 logger = logging.getLogger(__name__)
+
+
+def _plus_days(day: str, days: int) -> str:
+    try:
+        return (date.fromisoformat(day) + timedelta(days=days)).isoformat()
+    except ValueError:
+        return day
 
 
 class ESPNFantasyBasketballClient:
@@ -825,6 +836,20 @@ class ESPNFantasyBasketballClient:
             status.latestScoringPeriodDate = date_for_scoring_period(
                 status.latestScoringPeriod, anchor_period, anchor_date
             ).isoformat()
+            if status.transactionScoringPeriod:
+                tx_day = date_for_scoring_period(
+                    status.transactionScoringPeriod, anchor_period, anchor_date
+                ).isoformat()
+                status.transactionScoringPeriodDate = tx_day
+                for key, (first, last) in period_dates.items():
+                    if first <= tx_day <= last:
+                        status.transactionMatchupPeriod = int(key)
+                        status.transactionNote = (
+                            f"Adds made now count against matchup period {key} ({first} to "
+                            f"{last}); ESPN charges them to scoring period "
+                            f"{status.transactionScoringPeriod} ({tx_day})"
+                        )
+                        break
 
             # Per-day acquisition limits scale with each period's length
             per_matchup = acquisition_data.get("matchupAcquisitionLimit")
@@ -1020,6 +1045,7 @@ class ESPNFantasyBasketballClient:
                         injury_report, player_data.get("id"), player_data.get("fullName")
                     )
                     injury_details, injury_return = self._injury_details(player_data, report_item)
+                    return_type, return_note = self._return_date_type(report_item, injury_return)
                     injury_note = self._injury_status_note(
                         injury_status, injury_details, report_item
                     )
@@ -1069,6 +1095,8 @@ class ESPNFantasyBasketballClient:
                         injuryStatus=injury_status,
                         injuryDetails=injury_details,
                         injuryReturnDate=injury_return,
+                        injuryReturnDateType=return_type,
+                        injuryReturnDateNote=return_note,
                         injuryStatusNote=injury_note,
                         active=player_data.get("active"),
                         droppable=player_data.get("droppable"),
@@ -1129,6 +1157,22 @@ class ESPNFantasyBasketballClient:
 
                     roster_entries.append(roster_entry)
 
+                # How many games each player's NBA team has played, so "2 of 10" is visible
+                team_gp = await self._team_games_played(
+                    {
+                        built.playerPoolEntry.player.proTeamId
+                        for built in roster_entries
+                        if built.playerPoolEntry.player.proTeamId
+                    }
+                )
+                for built in roster_entries:
+                    stats = built.playerPoolEntry.player.stats
+                    total = team_gp.get(built.playerPoolEntry.player.proTeamId or 0)
+                    if stats is not None and total is not None:
+                        stats["teamGamesPlayed"] = total
+                        if isinstance(stats.get("gamesPlayed"), int):
+                            stats["gamesMissed"] = max(0, total - stats["gamesPlayed"])
+
                 starters = [
                     e
                     for e in roster_entries
@@ -1169,6 +1213,41 @@ class ESPNFantasyBasketballClient:
         # Log the detailed error but return generic message
         logger.warning(f"Team with ID {team_id} not found in league {self.league_id}")
         raise ValueError("Team not found in this league")
+
+    @staticmethod
+    def _with_planned_lineup(today: Roster, planned: Roster) -> Roster:
+        """Today's players carrying the lineup slots ESPN has set for a future day.
+
+        A player on today's roster but absent from the planned one (added today) keeps today's
+        slot; a player only in the planned roster (dropped today) is not included.
+        """
+        planned_by_id = {e.playerId: e for e in planned.entries}
+        entries = []
+        for entry in today.entries:
+            future = planned_by_id.get(entry.playerId)
+            if future is None:
+                entries.append(entry)
+                continue
+            entries.append(
+                entry.model_copy(
+                    update={
+                        "lineupSlotId": future.lineupSlotId,
+                        "lineupSlotName": future.lineupSlotName,
+                        "lineupLocked": future.lineupLocked,
+                    }
+                )
+            )
+        return today.model_copy(
+            update={
+                "entries": entries,
+                "scoringPeriodId": planned.scoringPeriodId or today.scoringPeriodId,
+                "scoringPeriodDate": planned.scoringPeriodDate or today.scoringPeriodDate,
+                "lineupLocked": planned.lineupLocked,
+                "lockedSlots": planned.lockedSlots,
+                "unlockedSlots": planned.unlockedSlots,
+                "note": None,
+            }
+        )
 
     def _make_roster_slim(self, roster: Roster) -> Roster:
         """Create a compact copy of a roster for get_my_current_matchup(verbose=False).
@@ -1412,6 +1491,62 @@ class ESPNFantasyBasketballClient:
             return report.get(normalize_name(full_name))
         return None
 
+    async def _team_games_played(self, pro_team_ids: set[int]) -> dict[int, int]:
+        """Games each NBA team has already played this season (schedule events before now).
+
+        One cached (6 h) request per team; failures leave the team out of the result.
+        """
+        if not pro_team_ids:
+            return {}
+        now = datetime.now(ZoneInfo("UTC"))
+
+        async def count(team_id: int) -> tuple[int, int | None]:
+            try:
+                data = await self._make_request(
+                    f"{self.NBA_BASE_URL}/teams/{team_id}/schedule", {"season": self.year}
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"Could not fetch schedule for team {team_id}: {e}")
+                return team_id, None
+            played = 0
+            for event in data.get("events") or []:
+                raw = event.get("date") or ""
+                try:
+                    tip = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if tip.tzinfo is None:
+                    tip = tip.replace(tzinfo=ZoneInfo("UTC"))
+                if tip < now:
+                    played += 1
+            return team_id, played
+
+        results = await asyncio.gather(*(count(t) for t in sorted(pro_team_ids)))
+        return {team: n for team, n in results if n is not None}
+
+    @staticmethod
+    def _per_game_line(stat_set: dict[str, Any]) -> dict[str, Any]:
+        """Compact per-game line (free-agent shape) from one ESPN stat set."""
+        averages = stat_set.get("averageStats") or stat_set.get("averages") or {}
+        totals = stat_set.get("stats") or {}
+        source = averages if averages else totals
+        games_played = ESPNFantasyBasketballClient._games_played(stat_set)
+        line = {
+            "points": round(source.get("0", 0), 1),
+            "blocks": round(source.get("1", 0), 1),
+            "steals": round(source.get("2", 0), 1),
+            "assists": round(source.get("3", 0), 1),
+            "rebounds": round(source.get("6", 0), 1),
+            "threes": round(source.get("17", 0), 1),
+            "turnovers": round(source.get("11", 0), 1),
+            "minutes": round(source.get("40", 0), 1),
+            "games_played": games_played,
+            **ESPNFantasyBasketballClient._shooting_splits(averages, totals, games_played),
+        }
+        if "appliedAverage" in stat_set:
+            line["fantasy_avg"] = round(stat_set["appliedAverage"], 1)
+        return line
+
     @staticmethod
     def _no_stats_yet() -> dict[str, Any]:
         """Stats block for a player ESPN sends no season stat line for (no games played)."""
@@ -1511,6 +1646,50 @@ class ESPNFantasyBasketballClient:
             if text or return_date:
                 return text, return_date
         return None, None
+
+    @staticmethod
+    def _return_date_type(
+        report_item: dict[str, Any] | None, return_date: str | None
+    ) -> tuple[str | None, str | None]:
+        """Is ESPN's expected return date a reported timeline or its next-game placeholder?
+
+        For day-to-day players ESPN's injury report lists the team's next game as the return
+        date, which says nothing about how long the player is out. A note that mentions a
+        timeline (weeks, months, re-evaluation, surgery, the season) marks a real estimate.
+        """
+        if not return_date:
+            return None, None
+        item = report_item or {}
+        text = " ".join(
+            str(item.get(k) or "") for k in ("shortComment", "longComment", "status")
+        ).lower()
+        timeline_words = (
+            "week",
+            "month",
+            "re-evaluat",
+            "reevaluat",
+            "season",
+            "surgery",
+            "indefinite",
+            "sidelined",
+            "at least",
+            "out until",
+        )
+        if any(w in text for w in timeline_words):
+            return "reported", "ESPN's note gives a timeline; the return date reflects it"
+        status = str(item.get("status") or "").lower()
+        if status in ("day-to-day", "questionable", "probable", "doubtful", "game time decision"):
+            return "placeholder", (
+                "Day-to-day: ESPN lists the team's next game as the return date; it is not an "
+                "estimate of how long the player is out"
+            )
+        report_day = str(item.get("date") or "")[:10]
+        if len(report_day) == 10 and report_day <= return_date <= _plus_days(report_day, 3):
+            return "placeholder", (
+                "Return date is within three days of the report with no stated timeline; "
+                "treat it as the next game, not an estimate"
+            )
+        return "reported", "No timeline stated, but the date is well past the report"
 
     @staticmethod
     def _format_injury(item: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -1697,8 +1876,9 @@ class ESPNFantasyBasketballClient:
             percent_started = ownership_data.get("percentStarted")
             avail_status, waiver_iso, avail_note = self._availability_of(player_data)
 
-            # Parse stats only if verbose mode
+            # Parse stats only if verbose mode: season actuals and ESPN's projections side by side
             stats_data = None
+            projections_data = None
             if verbose:
                 player_stats_list = player_info.get("stats", [])
 
@@ -1707,8 +1887,12 @@ class ESPNFantasyBasketballClient:
                     for stat_set in player_stats_list:
                         stat_id = str(stat_set.get("id", ""))
 
-                        # "00YYYY" = season actuals, "10YYYY" = projections
-                        if stat_id.startswith("00"):
+                        # "10YYYY" = ESPN's rest-of-season projections, kept beside actuals
+                        if stat_id.startswith("10") and projections_data is None:
+                            projections_data = self._per_game_line(stat_set)
+                            continue
+                        # "00YYYY" = season actuals
+                        if stat_id.startswith("00") and stats_data is None:
                             # Get averages if available, otherwise use totals
                             averages = (
                                 stat_set.get("averageStats") or stat_set.get("averages") or {}
@@ -1738,7 +1922,7 @@ class ESPNFantasyBasketballClient:
                             if "appliedAverage" in stat_set:
                                 stats_data["fantasy_avg"] = round(stat_set["appliedAverage"], 1)
 
-                            break  # Found season stats, stop looking
+                            continue  # keep looking for the projections set
 
             # Use consistent fallback logic for team abbreviation
             pro_team_id = player_info.get("proTeamId")
@@ -1764,6 +1948,7 @@ class ESPNFantasyBasketballClient:
                 injury_report, player_info.get("id"), player_info.get("fullName")
             )
             injury_details, injury_return = self._injury_details(player_info, report_item)
+            return_type, return_note = self._return_date_type(report_item, injury_return)
             injury_note = self._injury_status_note(
                 player_info.get("injuryStatus"), injury_details, report_item
             )
@@ -1785,6 +1970,8 @@ class ESPNFantasyBasketballClient:
                 injuryStatus=player_info.get("injuryStatus"),
                 injuryDetails=injury_details,
                 injuryReturnDate=injury_return,
+                injuryReturnDateType=return_type,
+                injuryReturnDateNote=return_note,
                 injuryStatusNote=injury_note,
                 availabilityStatus=avail_status,
                 waiverProcessDateISO=waiver_iso,
@@ -1795,8 +1982,18 @@ class ESPNFantasyBasketballClient:
                     percentStarted=percent_started,
                 ),
                 stats=stats_data,
+                projections=projections_data,
             )
             players.append(player)
+
+        if verbose and players:
+            team_gp = await self._team_games_played({p.proTeamId for p in players if p.proTeamId})
+            for p in players:
+                total = team_gp.get(p.proTeamId or 0)
+                if p.stats is not None and total is not None:
+                    p.stats["teamGamesPlayed"] = total
+                    if isinstance(p.stats.get("games_played"), int):
+                        p.stats["gamesMissed"] = max(0, total - p.stats["games_played"])
 
         return players
 
@@ -2109,13 +2306,14 @@ class ESPNFantasyBasketballClient:
         if opponent_team_id is None:
             return None
 
-        # Which day's rosters to show: today's (ESPN's default, no scoringPeriodId) for the
-        # current week, the first day's for a future week (ESPN returns the lineup as set for
-        # that day), the final day's for a past week. get_team_roster drops players who no
-        # longer belong to the team for today's and future rosters and keeps past ones whole.
+        # Which rosters to show. Current week: today's (ESPN's default, the same roster
+        # get_team_roster returns). Past week: the final day's, as stored. Future week: the
+        # PLAYERS are today's roster (a future-day roster can lag an add made today) and the
+        # lineup SLOTS come from the lineup set for the week's first day where ESPN has one.
         status = league_settings.status
         scoring_period = status.latestScoringPeriod
         requested_period: int | None = None
+        roster_note = "Rosters: today's, the same players get_team_roster returns"
         if matchup_period != status.currentMatchupPeriod:
             window = await self.get_matchup_period_dates(matchup_period, league_settings)
             anchor = await self._scoring_period_anchor(league_settings)
@@ -2125,11 +2323,27 @@ class ESPNFantasyBasketballClient:
                 scoring_period = anchor_period + (day - anchor_date).days
                 requested_period = scoring_period
 
-        # Get rosters for both teams concurrently
-        your_roster, opponent_roster = await asyncio.gather(
-            self.get_team_roster(team_id, scoring_period=requested_period),
-            self.get_team_roster(opponent_team_id, scoring_period=requested_period),
-        )
+        if requested_period is not None and matchup_period > status.currentMatchupPeriod:
+            today_yours, today_theirs, planned_yours, planned_theirs = await asyncio.gather(
+                self.get_team_roster(team_id),
+                self.get_team_roster(opponent_team_id),
+                self.get_team_roster(team_id, scoring_period=requested_period),
+                self.get_team_roster(opponent_team_id, scoring_period=requested_period),
+            )
+            your_roster = self._with_planned_lineup(today_yours, planned_yours)
+            opponent_roster = self._with_planned_lineup(today_theirs, planned_theirs)
+            roster_note = (
+                "Rosters: today's players (the same get_team_roster returns), with lineup "
+                f"slots from the lineup set for scoring period {requested_period} where ESPN "
+                "has one"
+            )
+        else:
+            your_roster, opponent_roster = await asyncio.gather(
+                self.get_team_roster(team_id, scoring_period=requested_period),
+                self.get_team_roster(opponent_team_id, scoring_period=requested_period),
+            )
+            if requested_period is not None:
+                roster_note = f"Rosters: as stored for scoring period {requested_period}"
 
         # Apply slim roster if not verbose
         if not verbose:
@@ -2139,6 +2353,7 @@ class ESPNFantasyBasketballClient:
         return CurrentMatchup(
             matchupId=matchup.id,
             scoringPeriod=scoring_period,
+            rosterNote=roster_note,
             yourTeam=your_team_data,
             opponentTeam=opponent_team_data,
             yourRoster=your_roster,
@@ -2213,11 +2428,228 @@ class ESPNFantasyBasketballClient:
         return week_boundaries(date_str, week_start_day)
 
     async def analyze_matchup(
-        self, team_id: int, matchup_period: int | None = None
+        self, team_id: int, matchup_period: int | None = None, basis: str = "projections"
     ) -> MatchupAnalysis:
         """Analyze a matchup: category projections, close categories, start/sit priorities and
-        lineup warnings. See analysis.analyze_matchup for the full description."""
-        return await analyze_matchup_impl(self, team_id, matchup_period)
+        lineup warnings. `basis` picks the per-game numbers for both teams (projections,
+        season, last_7, last_15, last_30, blend). See analysis.analyze_matchup."""
+        return await analyze_matchup_impl(self, team_id, matchup_period, basis)
+
+    async def simulate_roster_move(
+        self,
+        team_id: int,
+        drop_ids: list[int],
+        add_ids: list[int],
+        matchup_period: int | None = None,
+        basis: str = "projections",
+    ) -> RosterMoveSimulation:
+        """Re-run the matchup projection with hypothetical drops/adds and return the deltas.
+        See analysis.simulate_roster_move."""
+        self._validate_positive_int(team_id, "team_id")
+        for pid in list(drop_ids) + list(add_ids):
+            self._validate_positive_int(pid, "player_id")
+        if not drop_ids and not add_ids:
+            raise ValueError("Give at least one player to drop or add")
+        return await simulate_roster_move_impl(
+            self, team_id, list(drop_ids), list(add_ids), matchup_period, basis
+        )
+
+    async def roster_entries_for_players(self, player_ids: list[int]) -> list[RosterEntry]:
+        """Build roster entries (bench slot) for arbitrary players, e.g. free agents to add.
+
+        Uses the league's kona_player_info view so the player object carries the same injury,
+        availability and ownership fields free agents do. Unknown IDs are left out.
+        """
+        if not player_ids:
+            return []
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        headers = {
+            "x-fantasy-filter": json.dumps({"players": {"filterIds": {"value": player_ids}}})
+        }
+        data, injury_report = await asyncio.gather(
+            self._make_request(url, {"view": "kona_player_info"}, headers), self._injury_report()
+        )
+        by_id: dict[int, RosterEntry] = {}
+        for entry in data.get("players") or []:
+            info = entry.get("player") or {}
+            pid = info.get("id")
+            if not isinstance(pid, int) or pid not in player_ids:
+                continue
+            player = self._player_from_kona(entry, info, injury_report)
+            by_id[pid] = RosterEntry(
+                playerId=pid,
+                playerPoolEntry=PlayerPoolEntry(
+                    id=pid, player=player, onTeamId=entry.get("onTeamId")
+                ),
+                lineupSlotId=self._SLOT_BENCH,
+                lineupSlotName=LINEUP_SLOT_NAMES.get(self._SLOT_BENCH),
+                injuryStatus=player.injuryStatus,
+            )
+        return [by_id[pid] for pid in player_ids if pid in by_id]
+
+    def _player_from_kona(
+        self, entry: dict[str, Any], info: dict[str, Any], injury_report: dict[Any, Any]
+    ) -> Player:
+        """Player model from one kona_player_info entry (no stats)."""
+        position_mapping = self._get_position_id_mapping()
+        slot_mapping = self._get_lineup_slot_id_mapping()
+        eligible_slots = info.get("eligibleSlots")
+        report_item = self._injury_for(injury_report, info.get("id"), info.get("fullName"))
+        details, return_date = self._injury_details(info, report_item)
+        return_type, return_note = self._return_date_type(report_item, return_date)
+        avail_status, waiver_iso, avail_note = self._availability_of(entry)
+        ownership = self._ownership_data(entry)
+        pro_team_id = info.get("proTeamId")
+        return Player(
+            id=info["id"],
+            fullName=info.get("fullName", ""),
+            firstName=info.get("firstName"),
+            lastName=info.get("lastName"),
+            proTeamId=pro_team_id,
+            proTeamAbbrev=self._resolve_pro_team_abbrev(pro_team_id, info.get("proTeamAbbrev")),
+            defaultPositionId=info.get("defaultPositionId", 0),
+            defaultPosition=position_mapping.get(info.get("defaultPositionId", -1)),
+            eligibleSlots=eligible_slots,
+            eligibleSlotNames=[slot_mapping.get(x, f"SLOT_{x}") for x in eligible_slots]
+            if eligible_slots
+            else None,
+            injured=info.get("injured", False),
+            injuryStatus=info.get("injuryStatus"),
+            injuryDetails=details,
+            injuryReturnDate=return_date,
+            injuryReturnDateType=return_type,
+            injuryReturnDateNote=return_note,
+            injuryStatusNote=self._injury_status_note(
+                info.get("injuryStatus"), details, report_item
+            ),
+            availabilityStatus=avail_status,
+            waiverProcessDateISO=waiver_iso,
+            availabilityNote=avail_note,
+            ownership=PlayerOwnership(
+                percentOwned=ownership.get("percentOwned"),
+                percentChange=ownership.get("percentChange"),
+                percentStarted=ownership.get("percentStarted"),
+            )
+            if ownership
+            else None,
+        )
+
+    async def check_roster_move(
+        self, team_id: int, add_ids: list[int], drop_ids: list[int] | None = None
+    ) -> RosterLegality:
+        """Would adding (and dropping) these players be allowed under the league's roster rules?
+
+        Checks the non-IR roster size against rosterSettings.rosterSize, each position's count
+        against rosterSettings.positionLimits, the acquisitions left this matchup period, and
+        whether each added player is actually available (free agent, on waivers, or owned).
+        Position counts are given two ways because ESPN does not document which it enforces:
+        by each player's default (primary) position, which the verdict uses, and by slot
+        eligibility, which is shown as a warning when it alone would break a limit.
+        """
+        self._validate_positive_int(team_id, "team_id")
+        drop_ids = list(drop_ids or [])
+        settings, roster, teams, adds = await asyncio.gather(
+            self.get_league_settings(),
+            self.get_team_roster(team_id),
+            self.get_league_teams(),
+            self.roster_entries_for_players(list(dict.fromkeys(add_ids))),
+        )
+        drop_set = set(drop_ids)
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        kept = [e for e in roster.entries if e.lineupSlotId != self._SLOT_IR]
+        now_count = len(kept)
+        kept = [e for e in kept if e.playerId not in drop_set]
+        missing_drops = sorted(drop_set - {e.playerId for e in roster.entries})
+        if missing_drops:
+            reasons.append(f"Players {missing_drops} are not on your roster, so cannot be dropped")
+        unknown_adds = sorted(set(add_ids) - {e.playerId for e in adds})
+        if unknown_adds:
+            reasons.append(f"Unknown player IDs: {unknown_adds}")
+
+        added_status: dict[str, str] = {}
+        for e in adds:
+            player = e.playerPoolEntry.player
+            label = f"{player.fullName} ({player.id})"
+            on_team = e.playerPoolEntry.onTeamId
+            if on_team and on_team != 0:
+                owner = next((t.name for t in teams if t.id == on_team), f"team {on_team}")
+                added_status[label] = f"ONTEAM: owned by {owner}"
+                if on_team == team_id:
+                    reasons.append(f"{label} is already on your roster")
+                else:
+                    reasons.append(f"{label} is owned by {owner}; a trade, not an add")
+            elif player.availabilityStatus == "WAIVERS":
+                added_status[label] = (
+                    f"WAIVERS: claim processes {player.waiverProcessDateISO or 'at the next run'}"
+                )
+                warnings.append(f"{label} is on waivers; the add is a claim, not immediate")
+            else:
+                added_status[label] = "FREEAGENT: can be added now"
+
+        after = [e.playerPoolEntry.player for e in kept] + [
+            e.playerPoolEntry.player for e in adds if not e.playerPoolEntry.onTeamId
+        ]
+        after_count = len(after)
+        roster_limit = settings.rosterSettings.rosterSize
+        if roster_limit is not None and after_count > roster_limit:
+            reasons.append(
+                f"Roster would have {after_count} non-IR players; the limit is {roster_limit}. "
+                f"Drop {after_count - roster_limit} more"
+            )
+
+        limits = settings.rosterSettings.positionLimitNames or {}
+        by_default: Counter[str] = Counter(p.defaultPosition for p in after if p.defaultPosition)
+        slot_for = {"PG": 0, "SG": 1, "SF": 2, "PF": 3, "C": 4}
+        by_eligibility = {
+            pos: sum(1 for p in after if p.eligibleSlots and slot in p.eligibleSlots)
+            for pos, slot in slot_for.items()
+        }
+        for pos, limit in limits.items():
+            if limit is None or limit < 0 or pos not in slot_for:
+                continue
+            if by_default.get(pos, 0) > limit:
+                reasons.append(
+                    f"{by_default[pos]} players whose primary position is {pos}; the limit is {limit}"
+                )
+            elif by_eligibility.get(pos, 0) > limit:
+                warnings.append(
+                    f"{by_eligibility[pos]} players are eligible at {pos} against a limit of "
+                    f"{limit}; allowed if ESPN counts primary positions (as assumed), not if it "
+                    "counts eligibility"
+                )
+
+        mine = next((t for t in teams if t.id == team_id), None)
+        remaining = mine.acquisitionsRemainingThisMatchup if mine else None
+        real_adds = sum(1 for e in adds if not e.playerPoolEntry.onTeamId)
+        if remaining is not None and real_adds > remaining:
+            reasons.append(
+                f"{real_adds} add(s) requested but only {remaining} acquisition(s) left this "
+                "matchup period"
+            )
+
+        return RosterLegality(
+            teamId=team_id,
+            canMake=not reasons,
+            reasons=reasons,
+            warnings=warnings,
+            rosterSizeNow=now_count,
+            rosterSizeAfter=after_count,
+            rosterLimit=roster_limit,
+            positionLimits={k: v for k, v in limits.items() if k in slot_for},
+            positionCountsAfterByDefaultPosition=dict(by_default),
+            positionCountsAfterByEligibility=by_eligibility,
+            positionLimitBasis=(
+                "Verdict counts each player once, at his default (primary) position. ESPN does "
+                "not document whether its position limit counts primary positions or every "
+                "eligible slot; eligibility counts are reported alongside and a warning is "
+                "raised when only they exceed a limit. If ESPN ever rejects a move this tool "
+                "allowed, eligibility is the real rule."
+            ),
+            acquisitionsRemainingThisMatchup=remaining,
+            addedPlayerStatus=added_status,
+        )
 
     async def get_team_season_stats(self, team_id: int) -> TeamSeasonStats:
         """Get team statistics aggregated across the entire season.
@@ -3348,9 +3780,17 @@ class ESPNFantasyBasketballClient:
         return parsed_stats
 
     async def compare_players(
-        self, player_ids: list[int], categories: list[str] | None = None
+        self,
+        player_ids: list[int],
+        categories: list[str] | None = None,
+        timeframe: str = "season",
     ) -> PlayerComparison:
-        """Compare multiple players across specified statistical categories."""
+        """Compare players on one basis, with season actuals and projections both attached.
+
+        `players` and `winner_by_category` are on `timeframe` (season by default); `bases`
+        carries the same players on season, projections and the requested timeframe so a
+        reader never compares one player's actuals with another's projection by accident.
+        """
         if categories is None:
             categories = [
                 "points",
@@ -3364,39 +3804,27 @@ class ESPNFantasyBasketballClient:
                 "turnovers",
             ]
 
-        # Get stats for all players in a single API call
-        try:
-            players_stats = await self.get_player_stats(player_ids)
-            # Ensure we got a list (should always be the case when passing a list)
-            if not isinstance(players_stats, list):
-                players_stats = [players_stats]
-        except ValueError:
-            players_stats = []
+        timeframes = list(dict.fromkeys([timeframe, "season", "projections"]))
 
+        async def fetch(frame: str) -> list[PlayerStats]:
+            try:
+                result = await self.get_player_stats(player_ids, frame)
+                return result if isinstance(result, list) else [result]
+            except ValueError:
+                return []
+
+        fetched = await asyncio.gather(*(fetch(f) for f in timeframes))
+        bases = dict(zip(timeframes, fetched, strict=True))
+        players_stats = bases[timeframe]
         if len(players_stats) < 2:
             raise ValueError("Need at least 2 valid players to compare")
+        winners_by_basis = {
+            frame: self._category_winners(stats, categories)
+            for frame, stats in bases.items()
+            if len(stats) >= 2
+        }
 
-        # Determine winner in each category
-        winner_by_category = {}
-        for category in categories:
-            best_value = None
-            best_player_id = None
-
-            # For percentage stats, higher is better. For turnovers, lower is better
-            reverse_categories = ["turnovers"]
-            reverse = category in reverse_categories
-
-            for player_stats in players_stats:
-                value = getattr(player_stats, category, None)
-                if value is not None:
-                    if best_value is None or (
-                        (value > best_value and not reverse) or (value < best_value and reverse)
-                    ):
-                        best_value = value
-                        best_player_id = player_stats.playerId
-
-            if best_player_id:
-                winner_by_category[category] = best_player_id
+        winner_by_category = winners_by_basis.get(timeframe, {})
 
         # Generate overall recommendation
         category_wins = {}
@@ -3420,11 +3848,39 @@ class ESPNFantasyBasketballClient:
 
         return PlayerComparison(
             players=players_stats,
+            basis=timeframe,
             categories=categories,
             winner_by_category=winner_by_category,
             overall_recommendation=overall_recommendation,
             analysis=analysis,
+            bases=bases,
+            winners_by_basis=winners_by_basis,
+            note=(
+                f"players and winner_by_category are on '{timeframe}'. bases holds the same "
+                "players on every basis; compare within one basis only."
+            ),
         )
+
+    @staticmethod
+    def _category_winners(
+        players_stats: list[PlayerStats], categories: list[str]
+    ) -> dict[str, int]:
+        """Best player per category (lower is better for turnovers)."""
+        winners: dict[str, int] = {}
+        for category in categories:
+            reverse = category == "turnovers"
+            best_value: float | None = None
+            best_player_id: int | None = None
+            for player_stats in players_stats:
+                value = getattr(player_stats, category, None)
+                if value is None:
+                    continue
+                if best_value is None or (value < best_value if reverse else value > best_value):
+                    best_value = value
+                    best_player_id = player_stats.playerId
+            if best_player_id:
+                winners[category] = best_player_id
+        return winners
 
     async def analyze_trade_proposal(
         self, your_player_ids: list[int], their_player_ids: list[int]

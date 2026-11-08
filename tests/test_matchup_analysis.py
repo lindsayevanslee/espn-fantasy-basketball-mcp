@@ -332,9 +332,14 @@ async def test_unavailable_players_do_not_project_and_starters_are_flagged(monke
     assert analysis.opponentExpectedGames == pytest.approx(2.0)
 
     rec_ids = [r.playerId for r in analysis.playerRecommendations]
-    assert 101 in rec_ids and 103 in rec_ids
-    assert not {102, 104, 105, 106} & set(rec_ids), "OUT, FA, and IR players are never recommended"
+    # Every non-IR player is listed (so the list matches get_team_roster); those who cannot
+    # play carry priority 1 and zero expected games and sort below everyone who can.
+    assert set(rec_ids) == {101, 102, 103, 104, 105}, "IR player 106 is the only one left out"
     by_id = {r.playerId: r for r in analysis.playerRecommendations}
+    for pid in (102, 104, 105):
+        assert by_id[pid].priority == 1 and by_id[pid].expectedGames == 0
+    assert rec_ids.index(101) < rec_ids.index(102) and rec_ids.index(103) < rec_ids.index(104)
+    assert "contributes no expected games" in by_id[102].reasoning
     assert by_id[103].availability == "DAY_TO_DAY"
     assert by_id[103].expectedGames == pytest.approx(2.0)
     assert by_id[103].priority < by_id[101].priority, "uncertain status lowers priority"

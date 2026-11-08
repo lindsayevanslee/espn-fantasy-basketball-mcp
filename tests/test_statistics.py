@@ -164,7 +164,13 @@ class TestStatisticalAnalysisClient:
             )
 
             # One batched request for all players, not one per player
-            mock_stats.assert_awaited_once_with([12345, 54321])
+            # one request per basis: the requested timeframe (season) and projections
+            assert [c.args for c in mock_stats.await_args_list] == [
+                ([12345, 54321], "season"),
+                ([12345, 54321], "projections"),
+            ]
+            assert set(comparison.bases) == {"season", "projections"}
+            assert comparison.basis == "season"
 
             assert len(comparison.players) == 2
             assert comparison.categories == ["points", "rebounds", "assists"]
@@ -178,7 +184,7 @@ class TestStatisticalAnalysisClient:
     async def test_compare_players_insufficient_players(self, client):
         """Test player comparison with insufficient players."""
         with patch.object(client, "get_player_stats", new_callable=AsyncMock) as mock_stats:
-            mock_stats.side_effect = [ValueError("Player not found")]
+            mock_stats.side_effect = ValueError("Player not found")
 
             with pytest.raises(ValueError, match="Need at least 2 valid players"):
                 await client.compare_players([12345])

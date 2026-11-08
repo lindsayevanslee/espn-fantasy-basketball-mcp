@@ -24,6 +24,9 @@ from espn_fantasy_basketball import (
     analyze_matchup as analyze_matchup_tool,
 )
 from espn_fantasy_basketball import (
+    can_add_player as can_add_player_tool,
+)
+from espn_fantasy_basketball import (
     get_free_agents as get_free_agents_tool,
 )
 from espn_fantasy_basketball import (
@@ -40,6 +43,9 @@ from espn_fantasy_basketball import (
 )
 from espn_fantasy_basketball import (
     get_transactions as get_transactions_tool,
+)
+from espn_fantasy_basketball import (
+    simulate_roster_move as simulate_roster_move_tool,
 )
 from espn_fantasy_basketball_mcp.client import ESPNFantasyBasketballClient
 from tests.fixture_espn import use_fixtures
@@ -308,7 +314,9 @@ async def test_future_week_requests_its_first_day(client, espn):
     sent = {
         params.get("scoringPeriodId") for _, params, _ in espn.requests_for("league_mRoster.json")
     }
-    assert sent == {"14"}
+    # players come from today's roster (no scoringPeriodId), slots from the planned day (14)
+    assert sent == {None, "14"}
+    assert "today's players" in matchup.rosterNote and "scoring period 14" in matchup.rosterNote
     # a future day is still "current": dropped players are filtered out of it
     assert matchup.opponentRoster.staleEntriesRemoved == [
         "Stale Center (onTeamId=0)",
@@ -574,19 +582,34 @@ async def test_injury_details_surface_everywhere(client):
         "Collins (knee) is out through at least Nov. 10."
     )
     assert collins.injuryReturnDate == "2026-11-10"
+    assert collins.injuryReturnDateType == "reported", "'at least Nov. 10' is a timeline"
+    # 5. games missed are visible against the team's games played
+    assert collins.stats["teamGamesPlayed"] == 0 and collins.stats["gamesMissed"] == 0
+    guard = roster.entries[0].playerPoolEntry.player
+    assert (guard.stats["gamesPlayed"], guard.stats["teamGamesPlayed"]) == (8, 1), (
+        "BOS played Oct 30 before the frozen clock; Nov 1 tips after it"
+    )
     healthy = roster.entries[0].playerPoolEntry.player
     assert healthy.injuryDetails is None and healthy.injuryReturnDate is None
 
     # Dee Wing's report entry has no athlete.id, only a player-card link carrying the ID
     opponent = await client.get_team_roster(3)
     wing = opponent.entries[1].playerPoolEntry.player
-    assert wing.injuryDetails == "Ankle - Sprain (right). Wing (ankle) is questionable for Monday."
+    assert wing.injuryDetails == (
+        "Ankle - Sprain (right); expected return 2026-11-03. "
+        "Wing (ankle) is questionable for Monday."
+    )
+    # ESPN lists the next game as a day-to-day player's return date: flagged as a placeholder
+    assert wing.injuryReturnDate == "2026-11-03" and wing.injuryReturnDateType == "placeholder"
+    assert "next game" in wing.injuryReturnDateNote
 
     # Kris Big's entry has neither an ID nor a link: matched by name, and no detail key
     free_agents = await client.get_free_agents()
     big = next(p for p in free_agents if p.fullName == "Kris Big")
-    assert big.injuryDetails == "Back (not specified). Big (back) is probable for Tuesday."
-    assert big.injuryReturnDate is None
+    assert big.injuryDetails == (
+        "Back (not specified); expected return 2026-11-03. Big (back) is probable for Tuesday."
+    )
+    assert big.injuryReturnDateType == "placeholder"
 
     analysis = await client.analyze_matchup(MY_TEAM, matchup_period=3)
     assert any(
@@ -701,3 +724,233 @@ def test_parse_player_stats_reads_average_stats_without_games_played():
 def test_ft_pct_is_null_exactly_when_no_attempts(averages, totals, expected_ft):
     splits = ESPNFantasyBasketballClient._shooting_splits(averages, totals, 7)
     assert splits["ft_pct"] == expected_ft
+
+
+# --------------------------------------------------------------------------- basis, near band, notes
+@pytest.mark.asyncio
+async def test_basis_applies_to_both_teams(client):
+    proj = await client.analyze_matchup(MY_TEAM, 3)
+    season = await client.analyze_matchup(MY_TEAM, 3, basis="season")
+    blend = await client.analyze_matchup(MY_TEAM, 3, basis="blend")
+    assert (proj.basis, season.basis, blend.basis) == ("projections", "season", "blend")
+    assert "same basis" in proj.projectionMethod and "basis='season'" in season.projectionMethod
+    by = lambda a: {c.category: c for c in a.categoryProjections}  # noqa: E731
+    # season actuals are a touch higher than projections in the fixture, on BOTH sides
+    assert by(season)["points"].yourProjected > by(proj)["points"].yourProjected
+    assert by(season)["points"].opponentProjected > by(proj)["points"].opponentProjected
+    assert (
+        by(proj)["points"].yourProjected
+        < by(blend)["points"].yourProjected
+        < by(season)["points"].yourProjected
+    )
+    assert season.basisNotes == [], "every player with games has a season line in the fixture"
+    with pytest.raises(ValueError, match="Invalid basis"):
+        await client.analyze_matchup(MY_TEAM, 3, basis="vibes")
+
+
+@pytest.mark.asyncio
+async def test_recommendations_cover_the_roster_with_side_by_side_lines(client):
+    analysis = await client.analyze_matchup(MY_TEAM, 3)
+    roster = await client.get_team_roster(MY_TEAM)
+    rec_ids = {r.playerId for r in analysis.playerRecommendations}
+    active_eligible = {e.playerId for e in roster.entries if e.lineupSlotName != "IR"}
+    assert rec_ids == active_eligible, "every non-IR rostered player is listed"
+    guard = next(r for r in analysis.playerRecommendations if r.playerName == "Ava Guard")
+    assert guard.seasonPerGame["points"] == 22.0 and guard.projectedPerGame["points"] == 21.6
+    assert guard.basisPerGame == guard.projectedPerGame and guard.seasonGamesPlayed == 8
+    collins = next(r for r in analysis.playerRecommendations if r.playerName == "Jon Collins")
+    assert collins.priority == 1 and collins.expectedGames == 0
+    assert collins.reasoning.startswith("OUT (")
+    assert "today's players" in analysis.rosterSource
+
+
+@pytest.mark.asyncio
+async def test_near_band_and_consistent_strategy_notes(client):
+    analysis = await client.analyze_matchup(MY_TEAM, 3)
+    by = {c.category: c for c in analysis.categoryProjections}
+    # points: margin 24.5 against a close threshold of 20 -> not close, but near (<= 30)
+    assert not by["points"].isClose and by["points"].closeness == "near"
+    assert by["points"].nearThreshold == pytest.approx(30.0)
+    assert by["blocks"].closeness == "close" and by["steals"].closeness == "clear"
+    assert analysis.nearCategories == ["points", "threePointMade"]
+    notes = "\n".join(analysis.strategyNotes)
+    assert "Within reach" in notes
+    prioritize = next(n for n in analysis.strategyNotes if n.startswith("Prioritize"))
+    assert "close and near categories" in prioritize
+    for cat in analysis.closeCategories + analysis.nearCategories:
+        assert cat in prioritize
+    assert "steals" not in prioritize, "a category safely won is not a priority"
+
+
+# --------------------------------------------------------------------------- simulation and legality
+@pytest.mark.asyncio
+async def test_simulate_roster_move_reports_deltas_on_one_basis(client):
+    sim = await client.simulate_roster_move(
+        MY_TEAM, drop_ids=[1004], add_ids=[9001], matchup_period=3
+    )
+    assert sim.dropped == ["Benched Guy (1004)"] and sim.added == ["Streamer One (9001)"]
+    assert (sim.expectedGamesBefore, sim.expectedGamesAfter) == (8.0, 12.0), "DEN has 4 games"
+    assert (sim.projectedRecordBefore, sim.projectedRecordAfter) == ("6-3-0", "8-1-0")
+    assert sim.categoriesFlipped == ["blocks: loss -> win", "rebounds: loss -> win"]
+    points = next(d for d in sim.categoryDeltas if d.category == "points")
+    assert points.delta == pytest.approx(12.9 * 4, abs=0.01), "added player's per-game x games"
+    assert points.closenessBefore == "near" and points.closenessAfter == "clear"
+    [added] = sim.addedPlayers
+    assert added.playerName == "Streamer One" and added.gamesRemaining == 4
+    assert sim.legality is not None and sim.legality.canMake
+    assert sim.summary[0] == "Projected record 6-3-0 -> 8-1-0 on basis 'projections'"
+    assert sim.basis == "projections" and sim.matchupPeriod == 3
+
+    season = await client.simulate_roster_move(MY_TEAM, [1004], [9001], 3, basis="season")
+    assert season.basis == "season" and season.projectedRecordBefore == "6-3-0"
+
+    with pytest.raises(ValueError, match="at least one player"):
+        await client.simulate_roster_move(MY_TEAM, [], [], 3)
+
+
+@pytest.mark.asyncio
+async def test_simulation_ignores_unknown_ids_and_says_so(client):
+    sim = await client.simulate_roster_move(
+        MY_TEAM, drop_ids=[424242], add_ids=[9001, 4242], matchup_period=3
+    )
+    assert sim.unknownDropIds == [424242] and sim.unknownAddIds == [4242]
+    assert sim.added == ["Streamer One (9001)"]
+    assert any("Unknown player IDs" in line for line in sim.summary)
+
+
+@pytest.mark.asyncio
+async def test_can_add_player_checks_size_positions_waivers_and_budget(client, monkeypatch):
+    ok = await client.check_roster_move(MY_TEAM, [7001])
+    assert ok.canMake and ok.rosterSizeNow == 4 and ok.rosterSizeAfter == 5 and ok.rosterLimit == 13
+    assert ok.positionLimits == {"PG": -1, "SG": -1, "SF": -1, "PF": -1, "C": 4}
+    assert ok.acquisitionsRemainingThisMatchup == 6
+    assert ok.addedPlayerStatus == {"Drew Wing (7001)": "FREEAGENT: can be added now"}
+    assert "default (primary) position" in ok.positionLimitBasis
+
+    # a player on waivers is a claim, not an add; an owned player is not addable at all
+    waivers = await client.check_roster_move(MY_TEAM, [7003, 2001])
+    assert not waivers.canMake
+    assert any("owned by Rim Runners" in r for r in waivers.reasons)
+    assert any("on waivers" in w for w in waivers.warnings)
+    assert waivers.addedPlayerStatus["Zed Streamer (7003)"].startswith(
+        "WAIVERS: claim processes 2026-11-03"
+    )
+
+    # position limit: pretend the league allows 2 centers; Benched Guy + Kris Big + Stale Center = 3
+    real = client.get_league_settings
+
+    async def two_centers():
+        settings = await real()
+        settings.rosterSettings.positionLimitNames["C"] = 2
+        return settings
+
+    monkeypatch.setattr(client, "get_league_settings", two_centers)
+    too_many = await client.check_roster_move(MY_TEAM, [7002, 3001])
+    assert not too_many.canMake
+    assert any("primary position is C; the limit is 2" in r for r in too_many.reasons)
+    assert too_many.positionCountsAfterByDefaultPosition["C"] == 3
+    allowed_with_drop = await client.check_roster_move(MY_TEAM, [7002, 3001], drop_ids=[1004])
+    assert (
+        allowed_with_drop.canMake
+        and allowed_with_drop.positionCountsAfterByDefaultPosition["C"] == 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_new_tools_end_to_end(espn):
+    sim = await simulate_roster_move_tool(drop_ids=["1004"], add_ids=["9001"], matchup_period=3)
+    assert sim["projectedRecordAfter"] == "8-1-0" and sim["legality"]["canMake"] is True
+    check = await can_add_player_tool(add_ids=[7001])
+    assert check["canMake"] is True and check["rosterSizeAfter"] == 5
+    with pytest.raises(ValueError, match="add_ids is required"):
+        await can_add_player_tool(add_ids=[])
+
+
+# --------------------------------------------------------------------------- transactions period, bases
+@pytest.mark.asyncio
+async def test_settings_say_which_matchup_period_an_add_counts_against(client):
+    settings = await client.get_league_settings()
+    status = settings.status
+    assert (status.transactionScoringPeriod, status.transactionScoringPeriodDate) == (
+        14,
+        "2026-11-02",
+    )
+    assert status.transactionMatchupPeriod == 3
+    assert status.transactionNote.startswith(
+        "Adds made now count against matchup period 3 (2026-11-02 to 2026-11-08)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_free_agents_carry_actuals_and_projections_side_by_side(client):
+    [wing, big, zed] = await client.get_free_agents(size=10, verbose=True)
+    assert wing.stats["points"] == 14.5 and wing.projections["points"] == 14.4
+    assert wing.projections["games_played"] == 82 and wing.stats["games_played"] == 8
+    assert wing.stats["teamGamesPlayed"] == 0, "GSW's first fixture game is Nov 2"
+    assert zed.projections is not None and big.projections is not None
+    slim = await client.get_free_agents(size=10)
+    assert slim[0].stats is None and slim[0].projections is None
+
+
+@pytest.mark.asyncio
+async def test_compare_players_keeps_every_basis_apart(client):
+    cmp = await client.compare_players(
+        [1001, 7001], ["points", "rebounds"], timeframe="projections"
+    )
+    assert cmp.basis == "projections" and set(cmp.bases) == {"projections", "season"}
+    assert [p.timeframe for p in cmp.players] == ["projections", "projections"]
+    assert cmp.winners_by_basis["season"]["points"] == 1001
+    assert "compare within one basis only" in cmp.note
+    default = await client.compare_players([1001, 7001])
+    assert default.basis == "season"
+
+
+def test_return_date_classification():
+    f = ESPNFantasyBasketballClient._return_date_type
+    assert f(None, None) == (None, None)
+    assert (
+        f({"status": "Out", "shortComment": "out at least two weeks"}, "2026-11-20")[0]
+        == "reported"
+    )
+    assert (
+        f({"status": "Day-To-Day", "shortComment": "questionable Monday"}, "2026-11-03")[0]
+        == "placeholder"
+    )
+    assert (
+        f(
+            {"status": "Out", "date": "2026-11-01T17:35Z", "shortComment": "out Monday"},
+            "2026-11-03",
+        )[0]
+        == "placeholder"
+    )
+    assert (
+        f({"status": "Out", "date": "2026-11-01T17:35Z", "shortComment": "out"}, "2026-11-20")[0]
+        == "reported"
+    )
+
+
+def test_blend_averages_lines_and_recomputes_percentages():
+    from espn_fantasy_basketball_mcp.analysis import _blend
+    from espn_fantasy_basketball_mcp.models import PlayerStats
+
+    a = PlayerStats(
+        playerId=1,
+        playerName="A",
+        timeframe="projections",
+        points=20.0,
+        freeThrowsMade=4.0,
+        freeThrowsAttempted=5.0,
+        gamesPlayed=82,
+    )
+    b = PlayerStats(
+        playerId=1,
+        playerName="A",
+        timeframe="season",
+        points=10.0,
+        freeThrowsMade=2.0,
+        freeThrowsAttempted=4.0,
+        gamesPlayed=8,
+    )
+    blended = _blend(a, b)
+    assert blended.timeframe == "blend" and blended.points == 15.0
+    assert blended.freeThrowsAttempted == 4.5 and blended.freeThrowPercentage == pytest.approx(66.7)

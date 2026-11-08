@@ -100,7 +100,7 @@ class TestStatisticalAnalysisMCPTools:
 
             # Verify client method was called correctly
             mock_client_instance.compare_players.assert_called_once_with(
-                [12345, 54321], ["points", "rebounds"]
+                [12345, 54321], ["points", "rebounds"], "season"
             )
 
     @pytest.mark.asyncio
@@ -242,7 +242,7 @@ class TestStatisticalAnalysisMCPTools:
             mock_client_instance.get_player_stats.assert_called_with(12345, "season")
 
             await compare_players(league_id=12345, year=2025, player_ids=[12345, 54321])
-            mock_client_instance.compare_players.assert_called_with([12345, 54321], None)
+            mock_client_instance.compare_players.assert_called_with([12345, 54321], None, "season")
 
             await analyze_trade_proposal(
                 league_id=12345, year=2025, your_player_ids=[12345], their_player_ids=[54321]
