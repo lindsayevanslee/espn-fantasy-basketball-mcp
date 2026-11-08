@@ -57,9 +57,9 @@ class TestMCPServerTools:
 
             result = await get_league_teams(league_id=12345, year=2025)
 
-            assert len(result) == 1
-            assert result[0]["id"] == 1
-            assert result[0]["name"] == "Test Team"
+            assert result["count"] == 1 and len(result["teams"]) == 1
+            assert result["teams"][0]["id"] == 1
+            assert result["teams"][0]["name"] == "Test Team"
 
             # Verify client was initialized correctly
             MockClient.assert_called_once_with(12345, 2025, "test_s2", "test_swid")
@@ -116,8 +116,8 @@ class TestMCPServerTools:
 
             result = await get_free_agents(league_id=12345, year=2025, size=10, position_id=1)
 
-            assert len(result) == 1
-            assert result[0]["fullName"] == "Free Agent"
+            assert result["count"] == 1
+            assert result["players"][0]["fullName"] == "Free Agent"
 
             # Verify client method was called correctly
             mock_client_instance.get_free_agents.assert_called_once_with(10, 1, False)
@@ -145,9 +145,9 @@ class TestMCPServerTools:
 
             result = await get_matchups(league_id=12345, year=2025, matchup_period=1)
 
-            assert len(result) == 1
-            assert result[0]["id"] == 1
-            assert result[0]["winner"] == "HOME"
+            assert result["count"] == 1
+            assert result["matchups"][0]["id"] == 1
+            assert result["matchups"][0]["winner"] == "HOME"
 
             # Verify client method was called correctly
             mock_client_instance.get_matchups.assert_called_once_with(1, None)
@@ -177,9 +177,9 @@ class TestMCPServerTools:
 
             result = await get_nba_schedule(date="2025-01-15")
 
-            assert len(result) == 1
-            assert result[0]["id"] == "12345"
-            assert result[0]["date"] == "2025-01-15T20:00:00Z"
+            assert result["count"] == 1
+            assert result["games"][0]["id"] == "12345"
+            assert result["games"][0]["date"] == "2025-01-15T20:00:00Z"
 
             # Verify client method was called correctly
             mock_client_instance.get_nba_schedule.assert_called_once_with("2025-01-15")
@@ -321,3 +321,25 @@ class TestSeasonDefault:
         monkeypatch.setenv("ESPN_YEAR", "")
         _, year, _, _ = _get_espn_credentials(league_id=1)
         assert year == _default_season()
+
+
+class TestEveryToolReturnsOneObject:
+    """FastMCP splits a returned list into one content block per element, so a tool that
+    returns a bare list arrives as N separate JSON objects. Every tool must return a dict."""
+
+    def test_no_tool_is_annotated_to_return_a_list(self):
+        import inspect
+
+        from espn_fantasy_basketball import mcp
+
+        offenders = []
+        for tool in mcp._tool_manager.list_tools():
+            annotation = inspect.signature(tool.fn).return_annotation
+            text = (
+                annotation
+                if isinstance(annotation, str)
+                else getattr(annotation, "__name__", str(annotation))
+            )
+            if text.startswith("list"):
+                offenders.append(tool.name)
+        assert not offenders, f"tools returning bare lists: {offenders}"

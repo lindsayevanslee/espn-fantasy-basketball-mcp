@@ -41,6 +41,16 @@ def _dump(model: BaseModel, exclude: dict[str, Any] | None = None) -> dict[str, 
     return model.model_dump(exclude_none=True, exclude=exclude)
 
 
+def _listing(key: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """Wrap a list result in one object: {"count": n, key: [...]}.
+
+    FastMCP turns a tool that returns a Python list into one content block per element, so
+    Claude saw N separate JSON objects instead of one list. Every tool that returns several
+    items goes through here, so every tool response is a single JSON object.
+    """
+    return {"count": len(items), key: items}
+
+
 def _default_season(today: date | None = None) -> int:
     """Return the ESPN season ID for the NBA season in progress (or next up).
 
@@ -102,7 +112,7 @@ def _get_team_id(team_id: int | None = None) -> int | None:
 async def get_league_teams(
     league_id: int | None = None,
     year: int | None = None,
-) -> list[dict]:
+) -> dict:
     """Get all teams in an ESPN Fantasy Basketball league.
 
     Args:
@@ -110,6 +120,7 @@ async def get_league_teams(
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
 
     Returns:
+        One object: {"count": N, "teams": [...]}, never a bare list.
         List of team dictionaries in standings order (standingsRank 1 = first; ESPN's own
         playoffSeed is alongside). isMyTeam is true for the team ESPN_TEAM_ID points at.
         `record` is ESPN's record: recordType / recordDescription say whether it counts
@@ -124,7 +135,7 @@ async def get_league_teams(
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     teams = await client.get_league_teams(my_team_id=_get_team_id())
-    return [_dump(team) for team in teams]
+    return _listing("teams", [_dump(team) for team in teams])
 
 
 @mcp.tool()
@@ -249,7 +260,7 @@ async def get_free_agents(
     size: int = 50,
     position_id: int | None = None,
     verbose: bool = False,
-) -> list[dict]:
+) -> dict:
     """Get free agents/waiver wire players from an ESPN Fantasy Basketball league.
 
     Args:
@@ -261,6 +272,7 @@ async def get_free_agents(
                  If False, return only essential fields (id, name, position, ownership) (default False).
 
     Returns:
+        One object: {"count": N, "players": [...]}, never a bare list.
         List of available free agent player dictionaries. availabilityStatus is FREEAGENT (can
         be added now) or WAIVERS (claims process at waiverProcessDateISO; ESPN's "WA" flag),
         with a plain-English availabilityNote. When verbose=False, stats is None.
@@ -268,7 +280,7 @@ async def get_free_agents(
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     players = await client.get_free_agents(size, position_id, verbose)
-    return [_dump(player) for player in players]
+    return _listing("players", [_dump(player) for player in players])
 
 
 @mcp.tool()
@@ -279,7 +291,7 @@ async def get_transactions(
     include_lineup_changes: bool = False,
     league_id: int | None = None,
     year: int | None = None,
-) -> list[dict]:
+) -> dict:
     """Recent league transactions: adds, drops, waiver claims and trades, newest first.
 
     Use it to answer "why is this player on waivers" (who dropped him and when), "what did my
@@ -296,6 +308,7 @@ async def get_transactions(
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
 
     Returns:
+        One object: {"count": N, "transactions": [...]}, never a bare list.
         List of transactions with type, status (EXECUTED / PENDING / ...), team, dates, the
         players moved (ADD / DROP with names) and a one-line summary.
     """
@@ -304,7 +317,7 @@ async def get_transactions(
     transactions = await client.get_transactions(
         int(limit), scoring_period, team_id, include_lineup_changes
     )
-    return [_dump(t) for t in transactions]
+    return _listing("transactions", [_dump(t) for t in transactions])
 
 
 @mcp.tool()
@@ -313,7 +326,7 @@ async def get_matchups(
     year: int | None = None,
     matchup_period: int | None = None,
     team_id: int | None = None,
-) -> list[dict]:
+) -> dict:
     """Get matchups/schedule for an ESPN Fantasy Basketball league.
 
     Defaults to the current matchup period and your team (from ESPN_TEAM_ID env var) if not specified.
@@ -326,6 +339,7 @@ async def get_matchups(
         team_id: Filter to only return matchups for this team (optional, defaults to ESPN_TEAM_ID env var)
 
     Returns:
+        One object: {"count": N, "matchups": [...]}, never a bare list.
         List of matchup dictionaries with home/away teams and scores.
         Category scores are provided in both numeric stat IDs (cumulativeScore) and
         human-readable names (categoryScores) for easier interpretation.
@@ -340,7 +354,7 @@ async def get_matchups(
         matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
 
     matchups = await client.get_matchups(matchup_period, team_id)
-    return [_dump(matchup, _MATCHUP_EXCLUDE) for matchup in matchups]
+    return _listing("matchups", [_dump(matchup, _MATCHUP_EXCLUDE) for matchup in matchups])
 
 
 @mcp.tool()
@@ -401,20 +415,21 @@ async def get_my_current_matchup(
 
 
 @mcp.tool()
-async def get_nba_schedule(date: str | None = None) -> list[dict]:
+async def get_nba_schedule(date: str | None = None) -> dict:
     """Get NBA schedule for a specific date.
 
     Args:
         date: Date in YYYY-MM-DD format (optional, defaults to today)
 
     Returns:
+        One object: {"count": N, "games": [...]}, never a bare list.
         List of NBA game dictionaries with teams, times, and details
     """
     # Create a temporary client just for NBA API access
     # Dummy league ID; the NBA schedule endpoint does not use league or season
     client = ESPNFantasyBasketballClient(1, _default_season())
     games = await client.get_nba_schedule(date)
-    return [_dump(game) for game in games]
+    return _listing("games", [_dump(game) for game in games])
 
 
 @mcp.tool()
@@ -539,7 +554,7 @@ async def get_available_players(
     league_id: int | None = None,
     year: int | None = None,
     limit: int = 50,
-) -> list[dict]:
+) -> dict:
     """Get top available players for the draft with auction values.
 
     Args:
@@ -548,12 +563,13 @@ async def get_available_players(
         limit: Number of players to return (default 50)
 
     Returns:
+        One object: {"count": N, "players": [...]}, never a bare list.
         List of available player dictionaries with auction values and rankings
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     players = await client.get_available_players(limit)
-    return [_dump(player) for player in players]
+    return _listing("players", [_dump(player) for player in players])
 
 
 @mcp.tool()
@@ -562,7 +578,7 @@ async def get_player_stats(
     league_id: int | None = None,
     year: int | None = None,
     timeframe: str = "season",
-) -> dict | list[dict]:
+) -> dict:
     """Get comprehensive player statistics for one or more players.
 
     Can be called with a single player ID (returns dict) or a list of player IDs
@@ -576,6 +592,7 @@ async def get_player_stats(
         timeframe: Time period - "season", "projections", "last_7", "last_30"
 
     Returns:
+        One stats object for a single ID; {"count": N, "players": [...]} for a list of IDs.
         Dictionary with player statistics if single ID provided,
         list of dictionaries if list provided
     """
@@ -587,7 +604,7 @@ async def get_player_stats(
         stats = await client.get_player_stats(player_id, timeframe)
         return _dump(stats)
     stats_list = await client.get_player_stats(player_id, timeframe)
-    return [_dump(s) for s in stats_list]
+    return _listing("players", [_dump(s) for s in stats_list])
 
 
 @mcp.tool()
@@ -644,7 +661,7 @@ async def get_trending_players(
     year: int | None = None,
     direction: str = "up",
     limit: int = 20,
-) -> list[dict]:
+) -> dict:
     """Get players trending up or down in adds/drops for waiver wire intelligence.
 
     Args:
@@ -654,12 +671,13 @@ async def get_trending_players(
         limit: Number of players to return (default 20)
 
     Returns:
+        One object: {"count": N, "players": [...]}, never a bare list.
         List of trending player dictionaries with add/drop percentages and reasons
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     trending = await client.get_trending_players(direction, limit)
-    return [_dump(player) for player in trending]
+    return _listing("players", [_dump(player) for player in trending])
 
 
 @mcp.tool()
@@ -857,7 +875,7 @@ async def search_players(
     include_league_status: bool = True,
     league_id: int | None = None,
     year: int | None = None,
-) -> list[dict]:
+) -> dict:
     """Find ESPN player IDs by name. Use this before any tool that needs a player_id.
 
     Matching is forgiving: last name only ("Jokic"), partial first names ("steph curry"),
@@ -872,6 +890,7 @@ async def search_players(
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
 
     Returns:
+        One object: {"count": N, "matches": [...]}, never a bare list.
         List of matches with playerId, fullName, matchScore (1.0 = exact), defaultPosition,
         proTeamAbbrev ("FA" if unsigned), injuryStatus, and when include_league_status is set:
         isFreeAgent, fantasyTeamId, fantasyTeamName, percentOwned.
@@ -879,7 +898,7 @@ async def search_players(
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     results = await client.search_players(query, limit, include_league_status)
-    return [_dump(r) for r in results]
+    return _listing("matches", [_dump(r) for r in results])
 
 
 if __name__ == "__main__":

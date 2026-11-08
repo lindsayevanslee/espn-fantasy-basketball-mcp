@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- Tools that return several items (`get_league_teams`, `get_free_agents`, `get_matchups`,
+  `get_nba_schedule`, `get_transactions`, `get_available_players`, `get_trending_players`,
+  `search_players`, and `get_player_stats` with a list of IDs) now return one object,
+  `{"count": N, "<items>": [...]}`, instead of a bare list. FastMCP turns a returned list into
+  one content block per element, so Claude was receiving each free agent as a separate
+  top-level object. A test asserts no tool is annotated to return a list.
+
 ### Security
 - The ESPN cookies (`espn_s2`, `swid`) are no longer tool parameters on any of the 22 tools.
   They are read from `ESPN_S2` / `ESPN_SWID` only. A cookie passed as a tool argument would have

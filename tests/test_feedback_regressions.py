@@ -200,7 +200,9 @@ def test_matchup_records_skip_undecided_and_count_ties():
 # ------------------------------------------------------------------ 5. standings and my team
 @pytest.mark.asyncio
 async def test_league_teams_are_ranked_and_mark_my_team(espn):
-    teams = await get_league_teams_tool()
+    listing = await get_league_teams_tool()
+    assert listing["count"] == 4, "one object, not one message per team"
+    teams = listing["teams"]
     assert [t["id"] for t in teams] == [8, 5, 12, 3], "sorted by ESPN's record"
     assert [t["standingsRank"] for t in teams] == [1, 2, 3, 4]
     assert [t["isMyTeam"] for t in teams] == [True, False, False, False]
@@ -534,7 +536,7 @@ async def test_tool_output_has_no_nulls_and_no_raw_stat_blocks(espn):
     assert "cumulativeScore" not in matchup["yourTeam"]
     assert (matchup["yourTeam"]["categoryWins"], matchup["yourTeam"]["categoryLosses"]) == (5, 4)
     for side in ("home", "away"):
-        assert "cumulativeScore" not in outputs[4][0][side]
+        assert "cumulativeScore" not in outputs[4]["matchups"][0][side]
     player = matchup["yourRoster"]["entries"][0]["playerPoolEntry"]["player"]
     assert "eligibleSlots" not in player and "eligibleSlotNames" in player
     assert "jersey" not in player and "keeperValue" not in matchup["yourRoster"]["entries"][0]

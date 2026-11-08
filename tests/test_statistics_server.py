@@ -193,12 +193,13 @@ class TestStatisticalAnalysisMCPTools:
                 limit=20,
             )
 
-            assert len(result) == 2
-            assert result[0]["playerId"] == 12345
-            assert result[0]["trend_direction"] == "up"
-            assert result[0]["add_percentage"] == 8.5
-            assert result[1]["playerId"] == 54321
-            assert result[1]["add_percentage"] == 12.2
+            assert result["count"] == 2
+            players = result["players"]
+            assert players[0]["playerId"] == 12345
+            assert players[0]["trend_direction"] == "up"
+            assert players[0]["add_percentage"] == 8.5
+            assert players[1]["playerId"] == 54321
+            assert players[1]["add_percentage"] == 12.2
 
             # Verify client method was called correctly
             mock_client_instance.get_trending_players.assert_called_once_with("up", 20)

@@ -213,11 +213,12 @@ class TestDraftMCPTools:
 
             result = await get_available_players(league_id=12345, year=2025, limit=25)
 
-            assert len(result) == 2
-            assert result[0]["playerId"] == 12345
-            assert result[0]["player"]["fullName"] == "Available Player 1"
-            assert result[1]["playerId"] == 54321
-            assert result[1]["auctionValue"] == 25
+            assert result["count"] == 2
+            players = result["players"]
+            assert players[0]["playerId"] == 12345
+            assert players[0]["player"]["fullName"] == "Available Player 1"
+            assert players[1]["playerId"] == 54321
+            assert players[1]["auctionValue"] == 25
 
             # Verify client method was called with correct limit
             mock_client_instance.get_available_players.assert_called_once_with(25)

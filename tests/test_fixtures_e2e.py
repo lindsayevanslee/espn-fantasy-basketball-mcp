@@ -24,7 +24,13 @@ from espn_fantasy_basketball import (
     analyze_matchup as analyze_matchup_tool,
 )
 from espn_fantasy_basketball import (
+    get_free_agents as get_free_agents_tool,
+)
+from espn_fantasy_basketball import (
     get_player_schedule as get_player_schedule_tool,
+)
+from espn_fantasy_basketball import (
+    get_player_stats as get_player_stats_tool,
 )
 from espn_fantasy_basketball import (
     get_roster_schedule as get_roster_schedule_tool,
@@ -175,6 +181,22 @@ async def test_free_agents_have_ownership_percentages(client):
     # verbose stats: games derived when ESPN omits stat 42; shooting splits present
     wing = free_agents[0].stats
     assert wing["games_played"] == 8 and wing["fta"] == 2.2 and wing["ft_pct"] == 81.8
+
+
+@pytest.mark.asyncio
+async def test_free_agents_tool_returns_one_object(espn):
+    """A bare list would reach Claude as one JSON object per player."""
+    result = await get_free_agents_tool(size=10)
+    assert isinstance(result, dict)
+    assert result["count"] == 3 and [p["fullName"] for p in result["players"]] == [
+        "Drew Wing",
+        "Kris Big",
+        "Zed Streamer",
+    ]
+    many = await get_player_stats_tool(player_id=[1001, 1003], timeframe="season")
+    assert many["count"] == 2 and {p["playerId"] for p in many["players"]} == {1001, 1003}
+    one = await get_player_stats_tool(player_id=1001, timeframe="season")
+    assert one["playerId"] == 1001 and "count" not in one
 
 
 @pytest.mark.asyncio
@@ -533,7 +555,8 @@ async def test_transactions_explain_waiver_state(client):
 @pytest.mark.asyncio
 async def test_transactions_tool_end_to_end(espn):
     result = await get_transactions_tool(limit=2)
-    assert len(result) == 2 and result[0]["items"][0]["playerName"] == "Zed Streamer"
+    assert result["count"] == 2
+    assert result["transactions"][0]["items"][0]["playerName"] == "Zed Streamer"
     sent = [params for _, params, _ in espn.requests_for("league_mTransactions.json")]
     assert sent and all(p["view"] == "mTransactions2" for p in sent)
     with pytest.raises(ValueError, match="Invalid limit"):
