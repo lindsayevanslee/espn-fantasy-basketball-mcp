@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Added
+- Rosters carry `requestedScoringPeriod` and `espnScoringPeriodId` (what ESPN echoed), and the
+  note flags a mismatch, so "did I get the day I asked for" is answerable from the response.
+  Each scoring period is its own ESPN request and cache entry (the cache key includes the
+  query parameters); a test pins that.
+- Lineup-lock awareness. Rosters and `analyze_matchup` report the league's `lineupLockRule`
+  and description, and every lineup message is written for the rule in force: with daily
+  locks (INDIVIDUAL_GAME) the roster note points at tomorrow's scoring period and warnings say
+  "move to bench"; with weekly locks (FIRSTGAME_WEEKLY) the note says the lineup is locked
+  until the next matchup period and when that starts, warnings for the week in progress say
+  nothing can change, warnings for next week say to act before the first game, and
+  `simulate_roster_move` notes that an added player cannot start until next period.
+
+### Added
 - `simulate_roster_move` tool: re-runs the matchup projection before and after hypothetical
   drops and adds, on one basis for both teams, and returns per-category deltas, which
   categories flip, the change in expected games, how the added players project, and a

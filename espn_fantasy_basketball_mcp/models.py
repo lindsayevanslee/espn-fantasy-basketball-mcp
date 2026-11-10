@@ -258,6 +258,9 @@ class MatchupAnalysis(BaseModel):
     basisDescription: str | None = None
     basisNotes: list[str] = []
     rosterSource: str | None = None
+    # The league's lineup lock rule, which the lineup warnings are written for
+    lineupLockRule: str | None = None
+    lineupLockDescription: str | None = None
 
     # Category analysis
     categoryProjections: list[CategoryProjection]  # Projections for each category
@@ -458,10 +461,17 @@ class Roster(BaseModel):
     teamId: int
     entries: list[RosterEntry]
     # Which day this roster is for. ESPN's scoring periods are days (1 = opening night); the
-    # default is today's, whose lineup may already be locked. Pass scoring_period = this + 1 for
-    # tomorrow's (editable) lineup.
+    # default is today's. requestedScoringPeriod is what the caller asked for (None = today),
+    # espnScoringPeriodId is what ESPN echoed back, so a mismatch is visible.
     scoringPeriodId: int | None = None
     scoringPeriodDate: str | None = None  # YYYY-MM-DD when it can be determined
+    requestedScoringPeriod: int | None = None
+    espnScoringPeriodId: int | None = None
+    # The league's lineup lock rule: INDIVIDUAL_GAME (daily changes; a locked slot frees up the
+    # next day) or FIRSTGAME_WEEKLY (every slot locks at the week's first game and stays locked).
+    # `note` is written for the rule in force.
+    lineupLockRule: str | None = None
+    lineupLockDescription: str | None = None
     lineupLocked: bool | None = None  # True if every non-bench, non-IR slot is locked
     lockedSlots: list[str] | None = None  # "SLOT: player" for starting slots already locked
     unlockedSlots: list[str] | None = None  # "SLOT: player" for starting slots still editable

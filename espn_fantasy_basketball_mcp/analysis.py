@@ -601,6 +601,24 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
     recommendations: list[PlayerRecommendation] = []
     lineup_warnings: list[str] = []
     close_set = set(close)
+
+    # What a starter's owner can actually do about a dead slot depends on the lock rule
+    lock_rule = inputs.settings.rosterSettings.lineupLocktimeType
+    weekly_lock = lock_rule == "FIRSTGAME_WEEKLY"
+    week_in_progress = inputs.target_period <= inputs.settings.status.currentMatchupPeriod
+    next_period = inputs.target_period + 1
+    if weekly_lock and week_in_progress:
+        fix_now = (
+            f"the slot is locked for the week (weekly lock), so nothing can change until "
+            f"matchup period {next_period}"
+        )
+        check_now = "the slot is locked for the week (weekly lock); nothing to change"
+    elif weekly_lock:
+        fix_now = "bench or replace him before the week's first game locks every slot"
+        check_now = "decide before the week's first game locks every slot"
+    else:
+        fix_now = "move to bench and start a healthy player"
+        check_now = "check status before tip-off"
     in_play = set(close) | set(near)
     season_map = inputs.stats.get("season", {})
     proj_map = inputs.stats.get("projections", {})
@@ -620,12 +638,12 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             if availability == "FA":
                 lineup_warnings.append(
                     f"{player.fullName} ({slot_name}) is not on an NBA roster and cannot "
-                    "score; replace or move to bench"
+                    f"score; {fix_now}"
                 )
             elif games_remaining > 0:
                 lineup_warnings.append(
                     f"{player.fullName} ({slot_name}) is {availability}{detail} with "
-                    f"{games_remaining} game(s) left; move to bench and start a healthy player"
+                    f"{games_remaining} game(s) left; {fix_now}"
                 )
         elif (
             is_starter
@@ -633,8 +651,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             and availability not in ("ACTIVE", "NORMAL", "PROBABLE")
         ):
             lineup_warnings.append(
-                f"{player.fullName} ({slot_name}) is {availability}{detail}; "
-                "check status before tip-off"
+                f"{player.fullName} ({slot_name}) is {availability}{detail}; {check_now}"
             )
 
         if entry.lineupSlotId == SLOT_IR:
@@ -851,6 +868,8 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
         basisDescription=BASIS_DESCRIPTIONS.get(inputs.basis, inputs.basis),
         basisNotes=basis_notes,
         rosterSource=inputs.roster_source,
+        lineupLockRule=lock_rule,
+        lineupLockDescription=inputs.settings.rosterSettings.lineupLocktimeDescription,
         categoryProjections=category_projections,
         categoriesWinning=winning,
         categoriesLosing=losing,
@@ -1006,6 +1025,16 @@ async def simulate_roster_move(
         f"Projected record {_record(before)} -> {_record(after)} on basis '{basis}'",
         f"Expected games {before.yourExpectedGames} -> {after.yourExpectedGames}",
     ]
+    if (
+        added_entries
+        and inputs.settings.rosterSettings.lineupLocktimeType == "FIRSTGAME_WEEKLY"
+        and inputs.target_period <= inputs.settings.status.currentMatchupPeriod
+    ):
+        summary.append(
+            "Weekly lineup lock: an added player cannot enter a starting slot until matchup "
+            f"period {inputs.target_period + 1}, so his games this period may not count; the "
+            "deltas above assume he plays"
+        )
     if flipped:
         summary.append("Categories that flip: " + "; ".join(flipped))
     else:

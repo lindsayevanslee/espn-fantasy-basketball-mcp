@@ -976,9 +976,20 @@ class ESPNFantasyBasketballClient:
         )
         period_date: str | None = None
         latest_period: int | None = None
+        lock_rule: str | None = None
+        lock_description: str | None = None
+        current_matchup: int | None = None
+        next_period_start: str | None = None
         try:
             settings = await self.get_league_settings()
             latest_period = settings.status.latestScoringPeriod
+            lock_rule = settings.rosterSettings.lineupLocktimeType
+            lock_description = settings.rosterSettings.lineupLocktimeDescription
+            current_matchup = settings.status.currentMatchupPeriod
+            next_window = (settings.scheduleSettings.matchupPeriodDates or {}).get(
+                str(current_matchup + 1)
+            )
+            next_period_start = next_window[0] if next_window else None
             if period_id is not None:
                 anchor = await self._scoring_period_anchor(settings)
                 if anchor is not None:
@@ -1191,18 +1202,37 @@ class ESPNFantasyBasketballClient:
                     locked_slots = [t for t, f in zip(label, lock_flags, strict=True) if f]
                     unlocked_slots = [t for t, f in zip(label, lock_flags, strict=True) if not f]
                 note = None
+                when = f" ({period_date})" if period_date else ""
                 if lineup_locked and period_id is not None:
-                    note = (
-                        f"Lineup for scoring period {period_id}"
-                        f"{' (' + period_date + ')' if period_date else ''} is locked; call "
-                        f"get_team_roster with scoring_period={period_id + 1} to see or plan "
-                        "the next day's lineup"
+                    if lock_rule == "FIRSTGAME_WEEKLY":
+                        starting = f" starting {next_period_start}" if next_period_start else ""
+                        note = (
+                            f"Lineup is locked for the rest of matchup period {current_matchup} "
+                            "(weekly lock: every slot locked at the week's first game); lineup "
+                            f"changes apply from matchup period "
+                            f"{(current_matchup or 0) + 1}{starting}"
+                        )
+                    else:
+                        note = (
+                            f"Lineup for scoring period {period_id}{when} is locked (daily "
+                            f"lock); call get_team_roster with scoring_period={period_id + 1} "
+                            "to see or plan the next day's lineup"
+                        )
+                echoed = response_period if isinstance(response_period, int) else None
+                if scoring_period is not None and echoed is not None and echoed != scoring_period:
+                    mismatch = (
+                        f"ESPN echoed scoringPeriodId {echoed} for a request of {scoring_period}"
                     )
+                    note = f"{note}; {mismatch}" if note else mismatch
                 return Roster(
                     teamId=team_id,
                     entries=roster_entries,
                     scoringPeriodId=period_id,
                     scoringPeriodDate=period_date,
+                    requestedScoringPeriod=scoring_period,
+                    espnScoringPeriodId=echoed,
+                    lineupLockRule=lock_rule,
+                    lineupLockDescription=lock_description,
                     lineupLocked=lineup_locked,
                     lockedSlots=locked_slots,
                     unlockedSlots=unlocked_slots,
@@ -1324,6 +1354,10 @@ class ESPNFantasyBasketballClient:
             entries=slim_entries,
             scoringPeriodId=roster.scoringPeriodId,
             scoringPeriodDate=roster.scoringPeriodDate,
+            requestedScoringPeriod=roster.requestedScoringPeriod,
+            espnScoringPeriodId=roster.espnScoringPeriodId,
+            lineupLockRule=roster.lineupLockRule,
+            lineupLockDescription=roster.lineupLockDescription,
             lineupLocked=roster.lineupLocked,
             lockedSlots=roster.lockedSlots,
             unlockedSlots=roster.unlockedSlots,
