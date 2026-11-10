@@ -192,8 +192,11 @@ async def get_team_roster(
         year: ESPN season ID, the year the season ends in (e.g., 2027 for 2026-27) (optional, uses ESPN_YEAR env var or defaults to the current season)
         scoring_period: Specific scoring period, i.e. a day index where 1 is opening night
             (optional; omit for today's roster). The response says which period and date it
-            is for (scoringPeriodId / scoringPeriodDate) and whether that lineup is locked;
-            use scoringPeriodId + 1 for tomorrow's editable lineup. When omitted, players ESPN
+            is for (scoringPeriodId / scoringPeriodDate, plus requestedScoringPeriod and the
+            espnScoringPeriodId ESPN echoed), whether that lineup is locked, and the league's
+            lineupLockRule: with INDIVIDUAL_GAME use scoringPeriodId + 1 for tomorrow's editable
+            lineup; with FIRSTGAME_WEEKLY the lineup stays locked until the next matchup period
+            and the note says when that starts. When omitted, players ESPN
             still lists but who were dropped (onTeamId no longer this team) are removed and
             named in staleEntriesRemoved; a historical day is returned exactly as stored.
 
@@ -392,8 +395,10 @@ async def get_my_current_matchup(
         - yourRoster: Your team's roster today, with per-game averages (season totals only if verbose=True)
         - opponentRoster: Opponent's roster today, same shape
         - yourTeam.categoryWins/Losses/Ties: categories led, trailed and tied so far this week
-        - A roster's note says when today's lineup is locked; the next day's lineup is read
-          with get_team_roster(scoring_period=...), which this tool does not take
+        - A roster's note says when the lineup is locked and, per the league's lineupLockRule,
+          whether the next day's lineup (daily lock; read it with
+          get_team_roster(scoring_period=...)) or the next matchup period is the first chance
+          to change it (weekly lock)
         - staleEntriesRemoved (per roster): players ESPN still listed but who were dropped
         - winner: Winner determination (if available)
         - playoff: Whether this is a playoff matchup

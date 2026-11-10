@@ -954,3 +954,79 @@ def test_blend_averages_lines_and_recomputes_percentages():
     blended = _blend(a, b)
     assert blended.timeframe == "blend" and blended.points == 15.0
     assert blended.freeThrowsAttempted == 4.5 and blended.freeThrowPercentage == pytest.approx(66.7)
+
+
+# --------------------------------------------------------------------------- scoring period echo, lock rule
+@pytest.mark.asyncio
+async def test_requested_scoring_period_is_sent_and_echoed(client, espn):
+    today = await client.get_team_roster(MY_TEAM)
+    assert today.requestedScoringPeriod is None and today.espnScoringPeriodId == 13
+    past = await client.get_team_roster(MY_TEAM, scoring_period=10)
+    assert past.requestedScoringPeriod == 10 and past.scoringPeriodId == 10
+    sent = [
+        params.get("scoringPeriodId") for _, params, _ in espn.requests_for("league_mRoster.json")
+    ]
+    assert sent == [None, "10"], "each day is its own ESPN request, not a cached copy"
+    # and its own cache entry: the key includes the query parameters
+    url = f"{client.BASE_URL}/seasons/2027/segments/0/leagues/12345"
+    k10 = client._cache_key(url, {"view": ["mRoster", "mTeam"], "scoringPeriodId": "10"}, None)
+    k11 = client._cache_key(url, {"view": ["mRoster", "mTeam"], "scoringPeriodId": "11"}, None)
+    assert k10 != k11 != client._cache_key(url, {"view": ["mRoster", "mTeam"]}, None)
+    # the fixture echoes 13 whatever is asked, which the note points out
+    assert "ESPN echoed scoringPeriodId 13 for a request of 10" in (past.note or "")
+
+
+@pytest.mark.asyncio
+async def test_daily_lock_note_points_at_tomorrow(client):
+    roster = await client.get_team_roster(12)
+    assert roster.lineupLockRule == "INDIVIDUAL_GAME"
+    assert roster.lineupLockDescription.startswith("Daily lineups")
+    assert "daily lock" in roster.note and "scoring_period=14" in roster.note
+    analysis = await client.analyze_matchup(MY_TEAM, 3)
+    assert analysis.lineupLockRule == "INDIVIDUAL_GAME"
+    assert any(
+        w.endswith("move to bench and start a healthy player") for w in analysis.lineupWarnings
+    )
+
+
+@pytest.fixture
+def weekly_lock(client, monkeypatch):
+    """The same league with FIRSTGAME_WEEKLY lineups."""
+    real = client.get_league_settings
+
+    async def weekly():
+        settings = await real()
+        settings.rosterSettings.lineupLocktimeType = "FIRSTGAME_WEEKLY"
+        settings.rosterSettings.lineupLocktimeDescription = (
+            ESPNFantasyBasketballClient._describe_lock_type("FIRSTGAME_WEEKLY")
+        )
+        return settings
+
+    monkeypatch.setattr(client, "get_league_settings", weekly)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_weekly_lock_changes_every_lineup_message(weekly_lock):
+    client = weekly_lock
+    roster = await client.get_team_roster(12)
+    assert roster.lineupLockRule == "FIRSTGAME_WEEKLY"
+    assert roster.note == (
+        "Lineup is locked for the rest of matchup period 2 (weekly lock: every slot locked at "
+        "the week's first game); lineup changes apply from matchup period 3 starting 2026-11-02"
+    )
+    # the week in progress: nothing can be done about an OUT starter
+    current = await client.analyze_matchup(MY_TEAM, 2)
+    assert current.lineupLockRule == "FIRSTGAME_WEEKLY"
+    collins = next(w for w in current.lineupWarnings if w.startswith("Jon Collins"))
+    assert "locked for the week" in collins and "matchup period 3" in collins
+    assert not any("tip-off" in w or "move to bench" in w for w in current.lineupWarnings)
+    # next week: act before the first game locks every slot
+    upcoming = await client.analyze_matchup(MY_TEAM, 3)
+    collins = next(w for w in upcoming.lineupWarnings if w.startswith("Jon Collins"))
+    assert collins.endswith("bench or replace him before the week's first game locks every slot")
+    # a simulated add this week carries the caveat; next week it does not
+    sim_now = await client.simulate_roster_move(MY_TEAM, [1004], [9001], matchup_period=2)
+    assert any("Weekly lineup lock" in line for line in sim_now.summary)
+    sim_next = await client.simulate_roster_move(MY_TEAM, [1004], [9001], matchup_period=3)
+    assert not any("Weekly lineup lock" in line for line in sim_next.summary)
