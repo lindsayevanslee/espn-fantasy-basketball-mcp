@@ -33,6 +33,7 @@ from .constants import (
     STAT_ID_TO_CATEGORY,
     TURNOVER_HELPS_BELOW,
     TURNOVER_HURTS_ABOVE,
+    WEEKLY_LOCK_RULES,
 )
 from .dates import games_remaining_by_player
 from .models import (
@@ -604,7 +605,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
 
     # What a starter's owner can actually do about a dead slot depends on the lock rule
     lock_rule = inputs.settings.rosterSettings.lineupLocktimeType
-    weekly_lock = lock_rule == "FIRSTGAME_WEEKLY"
+    weekly_lock = lock_rule in WEEKLY_LOCK_RULES
     week_in_progress = inputs.target_period <= inputs.settings.status.currentMatchupPeriod
     next_period = inputs.target_period + 1
     if weekly_lock and week_in_progress:
@@ -1027,7 +1028,7 @@ async def simulate_roster_move(
     ]
     if (
         added_entries
-        and inputs.settings.rosterSettings.lineupLocktimeType == "FIRSTGAME_WEEKLY"
+        and inputs.settings.rosterSettings.lineupLocktimeType in WEEKLY_LOCK_RULES
         and inputs.target_period <= inputs.settings.status.currentMatchupPeriod
     ):
         summary.append(

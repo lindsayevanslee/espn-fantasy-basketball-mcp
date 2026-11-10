@@ -1,0 +1,193 @@
+{
+ "leagues": [
+  {
+   "id": "46",
+   "abbreviation": "NBA"
+  }
+ ],
+ "day": {
+  "date": "2026-11-11"
+ },
+ "events": [
+  {
+   "id": "sb120261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "ATL vs CHA",
+   "competitions": [
+    {
+     "id": "sb120261111",
+     "competitors": [
+      {
+       "id": "1",
+       "homeAway": "home",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL",
+        "displayName": "ATL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb620261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "DAL vs CHA",
+   "competitions": [
+    {
+     "id": "sb620261111",
+     "competitors": [
+      {
+       "id": "6",
+       "homeAway": "away",
+       "team": {
+        "id": "6",
+        "abbreviation": "DAL",
+        "displayName": "DAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb720261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "DEN vs CHA",
+   "competitions": [
+    {
+     "id": "sb720261111",
+     "competitors": [
+      {
+       "id": "7",
+       "homeAway": "away",
+       "team": {
+        "id": "7",
+        "abbreviation": "DEN",
+        "displayName": "DEN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1820261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "sb1820261111",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "home",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK",
+        "displayName": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb2120261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "PHX vs CHA",
+   "competitions": [
+    {
+     "id": "sb2120261111",
+     "competitors": [
+      {
+       "id": "21",
+       "homeAway": "home",
+       "team": {
+        "id": "21",
+        "abbreviation": "PHX",
+        "displayName": "PHX"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb3020261111",
+   "date": "2026-11-12T00:00Z",
+   "name": "CHA vs ATL",
+   "competitions": [
+    {
+     "id": "sb3020261111",
+     "competitors": [
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      },
+      {
+       "id": "1",
+       "homeAway": "home",
+       "team": {
+        "id": "1",
+        "abbreviation": "ATL",
+        "displayName": "ATL"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

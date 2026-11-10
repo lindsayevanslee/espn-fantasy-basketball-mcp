@@ -1,0 +1,193 @@
+{
+ "leagues": [
+  {
+   "id": "46",
+   "abbreviation": "NBA"
+  }
+ ],
+ "day": {
+  "date": "2026-11-06"
+ },
+ "events": [
+  {
+   "id": "sb220261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "sb220261106",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "home",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS",
+        "displayName": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1020261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "HOU vs CHA",
+   "competitions": [
+    {
+     "id": "sb1020261106",
+     "competitors": [
+      {
+       "id": "10",
+       "homeAway": "away",
+       "team": {
+        "id": "10",
+        "abbreviation": "HOU",
+        "displayName": "HOU"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1320261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "LAL vs CHA",
+   "competitions": [
+    {
+     "id": "sb1320261106",
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "away",
+       "team": {
+        "id": "13",
+        "abbreviation": "LAL",
+        "displayName": "LAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1620261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "sb1620261106",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "home",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN",
+        "displayName": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1820261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "sb1820261106",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "home",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK",
+        "displayName": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb2120261106",
+   "date": "2026-11-07T00:00Z",
+   "name": "PHX vs CHA",
+   "competitions": [
+    {
+     "id": "sb2120261106",
+     "competitors": [
+      {
+       "id": "21",
+       "homeAway": "away",
+       "team": {
+        "id": "21",
+        "abbreviation": "PHX",
+        "displayName": "PHX"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,163 @@
+{
+ "leagues": [
+  {
+   "id": "46",
+   "abbreviation": "NBA"
+  }
+ ],
+ "day": {
+  "date": "2026-11-08"
+ },
+ "events": [
+  {
+   "id": "sb220261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "sb220261108",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "away",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS",
+        "displayName": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1220261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "LAC vs CHA",
+   "competitions": [
+    {
+     "id": "sb1220261108",
+     "competitors": [
+      {
+       "id": "12",
+       "homeAway": "home",
+       "team": {
+        "id": "12",
+        "abbreviation": "LAC",
+        "displayName": "LAC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "away",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1620261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "sb1620261108",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "away",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN",
+        "displayName": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1820261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "NYK vs CHA",
+   "competitions": [
+    {
+     "id": "sb1820261108",
+     "competitors": [
+      {
+       "id": "18",
+       "homeAway": "away",
+       "team": {
+        "id": "18",
+        "abbreviation": "NYK",
+        "displayName": "NYK"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb2520261108",
+   "date": "2026-11-09T00:00Z",
+   "name": "OKC vs CHA",
+   "competitions": [
+    {
+     "id": "sb2520261108",
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "away",
+       "team": {
+        "id": "25",
+        "abbreviation": "OKC",
+        "displayName": "OKC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

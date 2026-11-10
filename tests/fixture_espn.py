@@ -36,6 +36,10 @@ def fixture_name(
     if url.endswith("/injuries"):
         return "nba_injuries.json"
     if url.endswith("/scoreboard"):
+        day = (params or {}).get("dates")
+        if day and day != "20261101":
+            # a date with no fixture is a day with no games, never today's slate
+            return f"nba_scoreboard_{day}.json"
         return "nba_scoreboard.json"
     match = _TEAM_SCHEDULE.search(url)
     if match:
@@ -69,6 +73,7 @@ class FixtureESPN:
         self.directory = directory
         self.requests: list[tuple[str, dict[str, Any] | None, dict[str, str] | None]] = []
         self._cache: dict[str, Any] = {}
+        self.echo_scoring_period = True
 
     def load(self, name: str) -> Any:
         if name not in self._cache:
@@ -83,9 +88,16 @@ class FixtureESPN:
     ) -> Any:
         self.requests.append((url, params, headers))
         name = fixture_name(url, params, headers)
+        if name and name.startswith("nba_scoreboard_") and not (self.directory / name).is_file():
+            return {"day": {"date": (params or {}).get("dates")}, "events": []}
         if name is None or not (self.directory / name).is_file():
             raise httpx.HTTPError(f"no fixture for {url} {params} ({name})")
-        return self.load(name)
+        data = self.load(name)
+        # Like ESPN (verified live 2026-11-10), echo the requested scoring period back
+        requested = (params or {}).get("scoringPeriodId")
+        if self.echo_scoring_period and requested and isinstance(data, dict):
+            data["scoringPeriodId"] = int(requested)
+        return data
 
     def requests_for(self, fixture: str) -> list[tuple[str, dict[str, Any] | None, dict | None]]:
         return [r for r in self.requests if fixture_name(*r) == fixture]

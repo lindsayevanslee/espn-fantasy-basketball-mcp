@@ -1,0 +1,133 @@
+{
+ "leagues": [
+  {
+   "id": "46",
+   "abbreviation": "NBA"
+  }
+ ],
+ "day": {
+  "date": "2026-11-12"
+ },
+ "events": [
+  {
+   "id": "sb220261112",
+   "date": "2026-11-13T00:00Z",
+   "name": "BOS vs CHA",
+   "competitions": [
+    {
+     "id": "sb220261112",
+     "competitors": [
+      {
+       "id": "2",
+       "homeAway": "away",
+       "team": {
+        "id": "2",
+        "abbreviation": "BOS",
+        "displayName": "BOS"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1320261112",
+   "date": "2026-11-13T00:00Z",
+   "name": "LAL vs CHA",
+   "competitions": [
+    {
+     "id": "sb1320261112",
+     "competitors": [
+      {
+       "id": "13",
+       "homeAway": "away",
+       "team": {
+        "id": "13",
+        "abbreviation": "LAL",
+        "displayName": "LAL"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb1620261112",
+   "date": "2026-11-13T00:00Z",
+   "name": "MIN vs CHA",
+   "competitions": [
+    {
+     "id": "sb1620261112",
+     "competitors": [
+      {
+       "id": "16",
+       "homeAway": "away",
+       "team": {
+        "id": "16",
+        "abbreviation": "MIN",
+        "displayName": "MIN"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "sb2520261112",
+   "date": "2026-11-13T00:00Z",
+   "name": "OKC vs CHA",
+   "competitions": [
+    {
+     "id": "sb2520261112",
+     "competitors": [
+      {
+       "id": "25",
+       "homeAway": "away",
+       "team": {
+        "id": "25",
+        "abbreviation": "OKC",
+        "displayName": "OKC"
+       }
+      },
+      {
+       "id": "30",
+       "homeAway": "home",
+       "team": {
+        "id": "30",
+        "abbreviation": "CHA",
+        "displayName": "CHA"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

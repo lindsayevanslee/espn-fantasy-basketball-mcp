@@ -1035,6 +1035,53 @@ def write(name: str, data: object) -> None:
     (OUT / name).write_text(json.dumps(data, indent=1, sort_keys=False) + "\n")
 
 
+def scoreboard_for(day: str) -> dict:
+    """Scoreboard for one ET date, built from the same team schedules as the schedule files."""
+    events = []
+    for team_id, days in sorted(GAMES.items()):
+        if day not in days:
+            continue
+        home = days.index(day) % 2 == 0
+        opp_id = 30 if team_id != 30 else 1
+        events.append(
+            {
+                "id": f"sb{team_id}{day.replace('-', '')}",
+                "date": tip(day),
+                "name": f"{PRO_ABBREV[team_id]} vs {PRO_ABBREV[opp_id]}",
+                "competitions": [
+                    {
+                        "id": f"sb{team_id}{day.replace('-', '')}",
+                        "competitors": [
+                            {
+                                "id": str(team_id),
+                                "homeAway": "home" if home else "away",
+                                "team": {
+                                    "id": str(team_id),
+                                    "abbreviation": PRO_ABBREV[team_id],
+                                    "displayName": PRO_ABBREV[team_id],
+                                },
+                            },
+                            {
+                                "id": str(opp_id),
+                                "homeAway": "away" if home else "home",
+                                "team": {
+                                    "id": str(opp_id),
+                                    "abbreviation": PRO_ABBREV[opp_id],
+                                    "displayName": PRO_ABBREV[opp_id],
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+    return {
+        "leagues": [{"id": "46", "abbreviation": "NBA"}],
+        "day": {"date": day},
+        "events": events,
+    }
+
+
 def main() -> None:
     write("league_mSettings.json", settings)
     write("league_mTeam.json", teams_response)
@@ -1044,7 +1091,12 @@ def main() -> None:
     write("league_kona_player_info.json", player_info_response)
     write("league_mTransactions.json", transactions_response)
     write("players_wl.json", players_wl_response)
-    write("nba_scoreboard.json", scoreboard_response)
+    write("nba_scoreboard.json", scoreboard_response)  # today (2026-11-01), served without a date
+    # One scoreboard per date a roster can be requested for; fixture_espn picks by `dates=`
+    for day in sorted({d for days in GAMES.values() for d in days}):
+        if day == "2026-11-01":
+            continue  # keep the hand-written Nov 1 scoreboard (BOS at DAL)
+        write(f"nba_scoreboard_{day.replace('-', '')}.json", scoreboard_for(day))
     write("nba_injuries.json", injuries_response)
     for team_id in GAMES:
         write(f"nba_team_schedule_{team_id}.json", team_schedule(team_id))

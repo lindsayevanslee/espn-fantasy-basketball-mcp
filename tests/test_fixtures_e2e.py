@@ -972,8 +972,47 @@ async def test_requested_scoring_period_is_sent_and_echoed(client, espn):
     k10 = client._cache_key(url, {"view": ["mRoster", "mTeam"], "scoringPeriodId": "10"}, None)
     k11 = client._cache_key(url, {"view": ["mRoster", "mTeam"], "scoringPeriodId": "11"}, None)
     assert k10 != k11 != client._cache_key(url, {"view": ["mRoster", "mTeam"]}, None)
-    # the fixture echoes 13 whatever is asked, which the note points out
-    assert "ESPN echoed scoringPeriodId 13 for a request of 10" in (past.note or "")
+    # ESPN echoes the requested period (verified live); the fixture does the same
+    assert past.espnScoringPeriodId == 10
+
+
+@pytest.mark.asyncio
+async def test_requested_equals_echoed_for_past_current_and_future(client, espn):
+    """One run, three days: the period asked for is the period ESPN reports back."""
+    for requested in (10, None, 14):
+        roster = await client.get_team_roster(MY_TEAM, scoring_period=requested)
+        expected = requested if requested is not None else 13
+        assert roster.requestedScoringPeriod == requested
+        assert roster.espnScoringPeriodId == expected == roster.scoringPeriodId
+        assert "echoed" not in (roster.note or "")
+
+
+@pytest.mark.asyncio
+async def test_mismatched_echo_is_called_out(client, espn):
+    espn.echo_scoring_period = False  # an ESPN that ignored the parameter
+    roster = await client.get_team_roster(MY_TEAM, scoring_period=10)
+    assert roster.requestedScoringPeriod == 10 and roster.espnScoringPeriodId == 13
+    assert "ESPN echoed scoringPeriodId 13 for a request of 10" in roster.note
+
+
+@pytest.mark.asyncio
+async def test_game_annotations_follow_the_requested_day(client, espn):
+    """A roster for Wednesday carries Wednesday's games, not today's (live report 2026-11-10)."""
+    for requested, day in ((10, "2026-10-29"), (None, "2026-11-01"), (14, "2026-11-02")):
+        roster = await client.get_team_roster(MY_TEAM, scoring_period=requested)
+        assert roster.gamesDate == day == roster.scoringPeriodDate
+        for entry in roster.entries:
+            if entry.todaysGame is not None:
+                assert entry.todaysGame.date == day, entry.playerPoolEntry.player.fullName
+    by_name = lambda r: {e.playerPoolEntry.player.fullName: e.todaysGame for e in r.entries}  # noqa: E731
+    monday = by_name(await client.get_team_roster(MY_TEAM, scoring_period=14))
+    assert monday["Ava Guard"].opponent == "CHA" and monday["Ava Guard"].date == "2026-11-02"
+    assert monday["Jon Collins"] is None, "DAL plays Tuesday, not Monday"
+    today = by_name(await client.get_team_roster(MY_TEAM))
+    assert today["Ava Guard"].opponent == "DAL" and today["Jon Collins"].opponent == "BOS"
+    sent = [p.get("dates") for _, p, _ in espn.requests_for("nba_scoreboard.json")]
+    sent += [p.get("dates") for _, p, _ in espn.requests_for("nba_scoreboard_20261102.json")]
+    assert "20261102" in sent and "20261101" in sent, "the scoreboard is asked for by date"
 
 
 @pytest.mark.asyncio
@@ -989,35 +1028,68 @@ async def test_daily_lock_note_points_at_tomorrow(client):
     )
 
 
-@pytest.fixture
-def weekly_lock(client, monkeypatch):
-    """The same league with FIRSTGAME_WEEKLY lineups."""
+def _with_lock_rule(client, monkeypatch, rule: str):
+    """The same league with a different lineupLocktimeType."""
     real = client.get_league_settings
 
-    async def weekly():
+    async def patched():
         settings = await real()
-        settings.rosterSettings.lineupLocktimeType = "FIRSTGAME_WEEKLY"
+        settings.rosterSettings.lineupLocktimeType = rule
         settings.rosterSettings.lineupLocktimeDescription = (
-            ESPNFantasyBasketballClient._describe_lock_type("FIRSTGAME_WEEKLY")
+            ESPNFantasyBasketballClient._describe_lock_type(rule)
         )
         return settings
 
-    monkeypatch.setattr(client, "get_league_settings", weekly)
+    monkeypatch.setattr(client, "get_league_settings", patched)
     return client
+
+
+@pytest.fixture(params=["FIRSTGAME_WEEKLY", "INDIVIDUAL_FIRSTGAME_WEEKLY"])
+def weekly_lock(client, monkeypatch, request):
+    return _with_lock_rule(client, monkeypatch, request.param)
+
+
+def test_every_lock_rule_seen_live_is_described():
+    """Fail loudly here when ESPN sends a code the server has not met; the tool output
+    already says 'not recognised' for one, but the vocabulary should grow, not the notes."""
+    from espn_fantasy_basketball_mcp.constants import LINEUP_LOCK_DESCRIPTIONS, WEEKLY_LOCK_RULES
+
+    seen_live = {"INDIVIDUAL_GAME", "FIRSTGAME_WEEKLY", "INDIVIDUAL_FIRSTGAME_WEEKLY"}
+    assert seen_live <= set(LINEUP_LOCK_DESCRIPTIONS)
+    assert WEEKLY_LOCK_RULES == {"FIRSTGAME_WEEKLY", "INDIVIDUAL_FIRSTGAME_WEEKLY"}
+    assert "his first game" in ESPNFantasyBasketballClient._describe_lock_type(
+        "INDIVIDUAL_FIRSTGAME_WEEKLY"
+    ).replace("that player's", "his")
+    unknown = ESPNFantasyBasketballClient._describe_lock_type("SOMETHING_NEW")
+    assert "not recognised" in unknown and "lineupLocked" in unknown
+
+
+@pytest.mark.asyncio
+async def test_unknown_lock_rule_defers_to_the_slot_flags(client, monkeypatch):
+    _with_lock_rule(client, monkeypatch, "SOMETHING_NEW")
+    roster = await client.get_team_roster(12)
+    assert roster.lineupLockRule == "SOMETHING_NEW"
+    assert "not recognised" in roster.note and "lineupLocked flags" in roster.note
+    assert "scoring_period=" not in roster.note, "no daily-lock advice for an unknown rule"
 
 
 @pytest.mark.asyncio
 async def test_weekly_lock_changes_every_lineup_message(weekly_lock):
     client = weekly_lock
     roster = await client.get_team_roster(12)
-    assert roster.lineupLockRule == "FIRSTGAME_WEEKLY"
+    assert roster.lineupLockRule in ("FIRSTGAME_WEEKLY", "INDIVIDUAL_FIRSTGAME_WEEKLY")
+    how = (
+        "each player's slot locks at his first game of the week"
+        if roster.lineupLockRule == "INDIVIDUAL_FIRSTGAME_WEEKLY"
+        else "every slot locked at the week's first game"
+    )
     assert roster.note == (
-        "Lineup is locked for the rest of matchup period 2 (weekly lock: every slot locked at "
-        "the week's first game); lineup changes apply from matchup period 3 starting 2026-11-02"
+        f"Lineup is locked for the rest of matchup period 2 (weekly lock: {how}); lineup "
+        "changes apply from matchup period 3 starting 2026-11-02"
     )
     # the week in progress: nothing can be done about an OUT starter
     current = await client.analyze_matchup(MY_TEAM, 2)
-    assert current.lineupLockRule == "FIRSTGAME_WEEKLY"
+    assert current.lineupLockRule == roster.lineupLockRule
     collins = next(w for w in current.lineupWarnings if w.startswith("Jon Collins"))
     assert "locked for the week" in collins and "matchup period 3" in collins
     assert not any("tip-off" in w or "move to bench" in w for w in current.lineupWarnings)
