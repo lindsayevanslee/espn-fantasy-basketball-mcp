@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed
+- A roster requested for another scoring period still carried today's games in each entry's
+  `todaysGame`, which made a Wednesday roster look like a frozen Monday payload (live report).
+  The scoreboard is now fetched for the roster's own date; `Roster.gamesDate` and
+  `todaysGame.date` say which day the games are for.
+- ESPN also uses `INDIVIDUAL_FIRSTGAME_WEEKLY` for lineup locks (each player's slot locks at
+  his first game of the week), seen live; it is now described and treated as a weekly lock in
+  every roster note, lineup warning and simulation caveat. An unknown rule gets an explicit
+  "not recognised, trust the per-slot flags" note instead of daily-lock advice.
+
 ### Added
 - Rosters carry `requestedScoringPeriod` and `espnScoringPeriodId` (what ESPN echoed), and the
   note flags a mismatch, so "did I get the day I asked for" is answerable from the response.

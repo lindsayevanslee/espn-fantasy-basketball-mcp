@@ -201,7 +201,15 @@ LINEUP_LOCK_DESCRIPTIONS: dict[str, str] = {
         "Weekly lineups: every slot locks at the first NBA game of the matchup period and "
         "stays locked for the week."
     ),
+    # Recorded live (2026-11-10): the flags showed players locked on a day they did not play.
+    "INDIVIDUAL_FIRSTGAME_WEEKLY": (
+        "Weekly lineups per player: each player's slot locks at that player's first game of "
+        "the matchup period and stays locked through the rest of the week."
+    ),
 }
+
+# Lock rules under which a locked slot stays locked until the next matchup period
+WEEKLY_LOCK_RULES = frozenset({"FIRSTGAME_WEEKLY", "INDIVIDUAL_FIRSTGAME_WEEKLY"})
 
 
 # Ordering of injury statuses from most to least available, used to spot a fantasy status that

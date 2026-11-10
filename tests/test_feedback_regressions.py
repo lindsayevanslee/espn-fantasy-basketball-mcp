@@ -554,7 +554,7 @@ def test_lock_type_descriptions():
     describe = ESPNFantasyBasketballClient._describe_lock_type
     assert describe("INDIVIDUAL_GAME").startswith("Daily lineups")
     assert describe("FIRSTGAME_WEEKLY").startswith("Weekly lineups")
-    unknown = describe("INDIVIDUAL_FIRSTGAME_WEEKLY")
+    unknown = describe("SOME_FUTURE_LOCK_TYPE")
     assert "not recognised" in unknown and "lineupLocked" in unknown
     assert describe(None) is None
 

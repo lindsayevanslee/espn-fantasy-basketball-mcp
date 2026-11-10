@@ -29,6 +29,7 @@ from .constants import (
     SLOT_BENCH,
     SLOT_IR,
     STAT_ID_TO_CATEGORY,
+    WEEKLY_LOCK_RULES,
     normalize_nba_abbrev,
 )
 from .dates import (
@@ -951,20 +952,6 @@ class ESPNFantasyBasketballClient:
 
         data = await self._make_request(url, params, headers)
 
-        # Fetch today's NBA schedule once for all players (optimization)
-        # Don't pass date parameter - API defaults to today's games
-        todays_games_cache: dict[str, TodaysGame] = {}
-        # Maps proTeamId to abbreviation for teams playing today
-        team_id_to_abbrev: dict[int, str] = {}
-        try:
-            url_nba = f"{self.NBA_BASE_URL}/scoreboard"
-            # Don't pass dates parameter - API defaults to today's games in ET timezone
-            params_nba: dict[str, Any] = {}
-            nba_data = await self._make_request(url_nba, params_nba)
-            todays_games_cache, team_id_to_abbrev = self._parse_todays_games(nba_data)
-        except Exception as e:
-            logger.debug(f"Could not fetch today's NBA schedule: {e}")
-
         # ESPN's public injury report gives the reason/timeline behind an injury status
         injury_report = await self._injury_report()
 
@@ -1001,6 +988,22 @@ class ESPNFantasyBasketballClient:
         filter_stale = scoring_period is None or (
             latest_period is not None and scoring_period >= latest_period
         )
+
+        # The NBA scoreboard for the roster's day (today by default), once for all players.
+        # A roster requested for Wednesday must carry Wednesday's games, not today's.
+        todays_games_cache: dict[str, TodaysGame] = {}
+        team_id_to_abbrev: dict[int, str] = {}
+        games_date = period_date
+        try:
+            params_nba: dict[str, Any] = {}
+            if period_date:
+                params_nba["dates"] = period_date.replace("-", "")
+            nba_data = await self._make_request(f"{self.NBA_BASE_URL}/scoreboard", params_nba)
+            todays_games_cache, team_id_to_abbrev = self._parse_todays_games(nba_data)
+            if games_date is None:
+                games_date = next((g.date for g in todays_games_cache.values() if g.date), None)
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Could not fetch the NBA scoreboard for {period_date or 'today'}: {e}")
 
         for team_data in data.get("teams", []):
             if team_data["id"] == team_id:
@@ -1204,19 +1207,29 @@ class ESPNFantasyBasketballClient:
                 note = None
                 when = f" ({period_date})" if period_date else ""
                 if lineup_locked and period_id is not None:
-                    if lock_rule == "FIRSTGAME_WEEKLY":
+                    if lock_rule in WEEKLY_LOCK_RULES:
                         starting = f" starting {next_period_start}" if next_period_start else ""
+                        how = (
+                            "each player's slot locks at his first game of the week"
+                            if lock_rule == "INDIVIDUAL_FIRSTGAME_WEEKLY"
+                            else "every slot locked at the week's first game"
+                        )
                         note = (
                             f"Lineup is locked for the rest of matchup period {current_matchup} "
-                            "(weekly lock: every slot locked at the week's first game); lineup "
-                            f"changes apply from matchup period "
+                            f"(weekly lock: {how}); lineup changes apply from matchup period "
                             f"{(current_matchup or 0) + 1}{starting}"
                         )
-                    else:
+                    elif lock_rule == "INDIVIDUAL_GAME" or lock_rule is None:
                         note = (
                             f"Lineup for scoring period {period_id}{when} is locked (daily "
                             f"lock); call get_team_roster with scoring_period={period_id + 1} "
                             "to see or plan the next day's lineup"
+                        )
+                    else:
+                        note = (
+                            f"Lineup for scoring period {period_id}{when} is locked. Lock rule "
+                            f"{lock_rule} is not recognised by this server, so the per-slot "
+                            "lineupLocked flags are the only guide to what is editable"
                         )
                 echoed = response_period if isinstance(response_period, int) else None
                 if scoring_period is not None and echoed is not None and echoed != scoring_period:
@@ -1231,6 +1244,7 @@ class ESPNFantasyBasketballClient:
                     scoringPeriodDate=period_date,
                     requestedScoringPeriod=scoring_period,
                     espnScoringPeriodId=echoed,
+                    gamesDate=games_date,
                     lineupLockRule=lock_rule,
                     lineupLockDescription=lock_description,
                     lineupLocked=lineup_locked,
@@ -1356,6 +1370,7 @@ class ESPNFantasyBasketballClient:
             scoringPeriodDate=roster.scoringPeriodDate,
             requestedScoringPeriod=roster.requestedScoringPeriod,
             espnScoringPeriodId=roster.espnScoringPeriodId,
+            gamesDate=roster.gamesDate,
             lineupLockRule=roster.lineupLockRule,
             lineupLockDescription=roster.lineupLockDescription,
             lineupLocked=roster.lineupLocked,
@@ -3661,11 +3676,20 @@ class ESPNFantasyBasketballClient:
                         pass
 
                 # Create TodaysGame for both teams (using normalized ESPN Fantasy abbreviations)
+                game_day = game_time_iso[:10] if game_time_iso else None
                 games_map[home_team_abbr] = TodaysGame(
-                    opponent=away_team_abbr, time=game_time, timeISO=game_time_iso, home=True
+                    date=game_day,
+                    opponent=away_team_abbr,
+                    time=game_time,
+                    timeISO=game_time_iso,
+                    home=True,
                 )
                 games_map[away_team_abbr] = TodaysGame(
-                    opponent=home_team_abbr, time=game_time, timeISO=game_time_iso, home=False
+                    date=game_day,
+                    opponent=home_team_abbr,
+                    time=game_time,
+                    timeISO=game_time_iso,
+                    home=False,
                 )
 
                 # Map NBA API team IDs to ESPN proTeamId using abbreviation lookup

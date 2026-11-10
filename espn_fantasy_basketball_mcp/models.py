@@ -432,8 +432,9 @@ class PlayerPoolEntry(BaseModel):
 
 
 class TodaysGame(BaseModel):
-    """Information about a player's game today."""
+    """A player's game on the roster's scoring-period date (today by default)."""
 
+    date: str | None = None  # YYYY-MM-DD of the game, in MY_TIMEZONE
     opponent: str | None = None  # Opponent team abbreviation (e.g., "DET")
     time: str | None = None  # Game time (e.g., "6:00 PM")
     timeISO: str | None = (
@@ -467,6 +468,9 @@ class Roster(BaseModel):
     scoringPeriodDate: str | None = None  # YYYY-MM-DD when it can be determined
     requestedScoringPeriod: int | None = None
     espnScoringPeriodId: int | None = None
+    # The date every entry's todaysGame refers to: the roster's scoring-period date, so a
+    # roster requested for Wednesday carries Wednesday's games, not today's.
+    gamesDate: str | None = None
     # The league's lineup lock rule: INDIVIDUAL_GAME (daily changes; a locked slot frees up the
     # next day) or FIRSTGAME_WEEKLY (every slot locks at the week's first game and stays locked).
     # `note` is written for the rule in force.
