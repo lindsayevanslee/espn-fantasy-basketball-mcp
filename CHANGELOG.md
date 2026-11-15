@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Fixed
+- `optimize_lineup` options reshuffled starters between slots even when the ten starters were
+  unchanged (live report: option 1 had Black at SG and Holiday at G while the lineup as set
+  had the reverse). Every starter who stays a starter now keeps his current slot and only
+  newcomers are placed; a full reshuffle happens only when a newcomer has no eligible slot
+  left. An option with `isCurrent` true now echoes `currentLineup` exactly.
 - The alternate-basis strategy note said the bases "disagree on 3 categories" while showing
   the same record on both, because the only difference was closeness (live report). The note
   now separates a different result ("gives a different result in N categories: ...") from a
