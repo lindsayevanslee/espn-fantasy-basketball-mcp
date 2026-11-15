@@ -200,6 +200,14 @@ class CategoryProjection(BaseModel):
     opponentCurrentAttempted: float | None = None
     opponentProjectedMade: float | None = None
     opponentProjectedAttempted: float | None = None
+    # The same category on the alternate basis (season actuals when the projection used ESPN
+    # projections, and the other way round), so the two can be compared. basesAgree is False
+    # when they give a different result or one calls the category close and the other clear.
+    alternateBasis: str | None = None
+    alternateProjectedLead: float | None = None
+    alternateResult: str | None = None
+    alternateCloseness: str | None = None
+    basesAgree: bool | None = None
 
 
 class PlayerRecommendation(BaseModel):
@@ -314,6 +322,12 @@ class MatchupAnalysis(BaseModel):
     # Weekly-lock leagues only: your bench players with games left that the projection does
     # not count ("Name: 3 playable game(s)"), so a swap can be weighed before the lock.
     benchPlayersNotCounted: list[str] = []
+    # The projection re-run on the alternate basis (projections <-> season) and where the two
+    # disagree, one line per category ("steals: projections say win (close, lead 1.2); season
+    # says loss (clear, lead -3.4)"). An empty list with alternateBasis set means they agree.
+    alternateBasis: str | None = None
+    alternateProjectedRecord: str | None = None  # "W-L-T"
+    basisDisagreements: list[str] = []
     # The opponent's roster as the projection sees it
     opponentPlayers: list[OpponentPlayerSummary] = []
     currentCategoryWins: int | None = None  # Current category wins
@@ -394,6 +408,8 @@ class RosterMoveSimulation(BaseModel):
     benched: list[str] = []
     lineupChanges: list[str] = []
     lineupWarnings: list[str] = []
+    # "What if he does not play": players simulated as missing all or some of their games
+    absences: list[str] = []
     gamesRemainingBefore: int | None = None
     gamesRemainingAfter: int | None = None
     expectedGamesBefore: float | None = None
@@ -405,6 +421,44 @@ class RosterMoveSimulation(BaseModel):
     addedPlayers: list[PlayerRecommendation] = []  # how the added players project
     legality: RosterLegality | None = None
     summary: list[str]
+    projectionMethod: str | None = None
+
+
+class LineupOption(BaseModel):
+    """One candidate lineup from optimize_lineup."""
+
+    rank: int
+    projectedRecord: str  # "W-L-T"
+    projectedCategoryWins: int
+    projectedCategoryLosses: int
+    projectedCategoryTies: int
+    score: float  # wins, then ties, then clipped margins: see LineupOptimization.scoring
+    categoriesWon: list[str] = []
+    categoriesLost: list[str] = []
+    closeCategories: list[str] = []
+    expectedGames: float
+    lineup: dict[str, str] = {}  # "PG" -> "Player name", one key per starting slot (UTIL1..)
+    bench: list[str] = []
+    changes: list[str] = []  # vs the current lineup: "start X (3 games) for Y (1 game)"
+    isCurrent: bool = False
+
+
+class LineupOptimization(BaseModel):
+    """Every valid starting lineup evaluated with the matchup projection, best first."""
+
+    teamId: int
+    matchupPeriod: int
+    basis: str
+    lineupLockRule: str | None = None
+    currentProjectedRecord: str
+    currentLineup: dict[str, str] = {}
+    currentIsBest: bool
+    options: list[LineupOption] = []
+    lineupsEvaluated: int
+    fixedPlayers: list[str] = []  # locked in (or out of) the lineup for this period
+    scoring: str
+    searchNote: str | None = None
+    notes: list[str] = []
     projectionMethod: str | None = None
 
 

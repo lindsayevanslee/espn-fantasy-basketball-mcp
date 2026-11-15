@@ -13,7 +13,9 @@ The work is split in two so the same arithmetic serves `analyze_matchup` and
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
+import math
 from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
@@ -42,6 +44,8 @@ from .models import (
     CategoryProjection,
     CurrentMatchup,
     LeagueSettings,
+    LineupOptimization,
+    LineupOption,
     MatchupAnalysis,
     OpponentPlayerSummary,
     PlayerRecommendation,
@@ -191,11 +195,14 @@ def expected_games_for(
     today: date,
     weekly_lock: bool,
     effective_from: date | None = None,
+    absence: int | None = None,
 ) -> ExpectedGames:
     """Expected games for one roster entry from its remaining game dates.
 
     - A pending add (effective_from) cannot score before the day his add takes effect, so
       earlier games are left out of `scheduled` and noted.
+    - A simulated absence (absence = games missed, from his next game) removes those games
+      from `playable`; `scheduled` keeps the real count so the discount is visible.
     - Availability discounts as in `player_availability` (OUT = 0, DOUBTFUL = 0.5, ...).
     - A player listed OUT whose ESPN return date is a reported timeline (not the next-game
       placeholder ESPN uses for day-to-day players) and falls inside the window keeps the
@@ -215,7 +222,15 @@ def expected_games_for(
             )
         game_dates = eligible_dates
     scheduled = len(game_dates)
-    playable = scheduled * factor
+    if absence is not None and absence > 0 and scheduled:
+        missed = min(absence, scheduled)
+        game_dates = game_dates[missed:]
+        notes.append(
+            "simulated: does not play"
+            if missed == scheduled
+            else f"simulated: misses {missed} of {scheduled} game(s)"
+        )
+    playable = len(game_dates) * factor
     player = entry.playerPoolEntry.player
     return_date = _return_date(entry) if label == "OUT" and scheduled else None
     if return_date is not None:
@@ -347,6 +362,9 @@ class MatchupInputs:
     basis_notes: list[str] = field(default_factory=list)
     # playerId -> first day he can score for this team (pending adds; see Roster.pendingAdds)
     effective_from: dict[int, date] = field(default_factory=dict)
+    # playerId -> games he is simulated to miss (counted from his next game); a number at
+    # least as large as his schedule means he does not play at all. Simulation only.
+    absences: dict[int, int] = field(default_factory=dict)
 
 
 def _blend(a: PlayerStats, b: PlayerStats) -> PlayerStats:
@@ -658,6 +676,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             today,
             weekly_lock,
             effective_from=inputs.effective_from.get(e.playerId),
+            absence=inputs.absences.get(e.playerId),
         )
         for e in inputs.your_entries
     }
@@ -759,7 +778,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             attempts_basis = max(y_pa, o_pa)
             your_projected = y_pm / y_pa if y_pa > 0 else your_current
             opp_projected = o_pm / o_pa if o_pa > 0 else opp_current
-            pct_fields: dict[str, float] = {
+            pct_fields: dict[str, Any] = {
                 "yourCurrentMade": round(y_made, 1),
                 "yourCurrentAttempted": round(y_att, 1),
                 "yourProjectedMade": round(y_pm, 1),
@@ -1187,7 +1206,58 @@ async def analyze_matchup(
     used for BOTH teams: projections (default), season, last_7, last_15, last_30, or blend.
     """
     inputs = await gather_inputs(client, team_id, matchup_period, basis)
-    return compute_analysis(inputs)
+    return with_alternate_basis(compute_analysis(inputs), inputs)
+
+
+def with_alternate_basis(analysis: MatchupAnalysis, inputs: MatchupInputs) -> MatchupAnalysis:
+    """Re-run the projection on the other everyday basis and mark where the two disagree.
+
+    ESPN's projections and this season's actuals are both fetched for every analysis, so the
+    comparison is free. Season actuals are the alternate to any other basis; projections are
+    the alternate to season. A category where the two give a different result, or where one
+    calls it close and the other clear, is listed in basisDisagreements; a reader should
+    treat those calls as uncertain.
+    """
+    alternate = "season" if inputs.basis != "season" else "projections"
+    if not inputs.stats.get(alternate):
+        return analysis
+    other = compute_analysis(replace(inputs, basis=alternate, basis_notes=[]))
+    other_by = {c.category: c for c in other.categoryProjections}
+    disagreements: list[str] = []
+    for c in analysis.categoryProjections:
+        o = other_by.get(c.category)
+        if o is None:
+            continue
+        agree = c.projectedResult == o.projectedResult and {c.closeness, o.closeness} != {
+            "close",
+            "clear",
+        }
+        c.alternateBasis = alternate
+        c.alternateProjectedLead = o.projectedLead
+        c.alternateResult = o.projectedResult
+        c.alternateCloseness = o.closeness
+        c.basesAgree = agree
+        if not agree:
+            disagreements.append(
+                f"{c.category}: {inputs.basis} says {c.projectedResult} ({c.closeness}, lead "
+                f"{(c.projectedLead or 0):+.4g}); {alternate} says {o.projectedResult} "
+                f"({o.closeness}, lead {(o.projectedLead or 0):+.4g})"
+            )
+    analysis.alternateBasis = alternate
+    analysis.alternateProjectedRecord = _record(other)
+    analysis.basisDisagreements = disagreements
+    if disagreements:
+        plural = "y" if len(disagreements) == 1 else "ies"
+        analysis.strategyNotes.append(
+            f"The {alternate} basis disagrees on {len(disagreements)} categor{plural} "
+            f"({_record(other)} on {alternate} vs {_record(analysis)} on {inputs.basis}): see "
+            "basisDisagreements and treat those calls as uncertain"
+        )
+    else:
+        analysis.strategyNotes.append(
+            f"The {alternate} basis agrees with every category result ({_record(other)})"
+        )
+    return analysis
 
 
 # --------------------------------------------------------------------------- what-if
@@ -1344,6 +1414,9 @@ def _apply_lineup_changes(
     return started, benched, changes, warnings, [by_id[e.playerId] for e in entries]
 
 
+ABSENT_ALL = 10**6  # an absence this long means "does not play at all"
+
+
 def _record(analysis: MatchupAnalysis) -> str:
     return f"{analysis.projectedCategoryWins}-{analysis.projectedCategoryLosses}-{len(analysis.categoriesTied)}"
 
@@ -1357,9 +1430,15 @@ async def simulate_roster_move(
     basis: str = "projections",
     start_ids: list[int] | None = None,
     sit_ids: list[int] | None = None,
+    absent_ids: list[int] | None = None,
+    missed_games: dict[int, int] | None = None,
 ) -> RosterMoveSimulation:
-    """Re-run the matchup projection with players dropped, added, started or sat; report the
-    deltas.
+    """Re-run the matchup projection with players dropped, added, started, sat or absent;
+    report the deltas.
+
+    Absences ("what if he does not play"): absent_ids lose every remaining game; missed_games
+    maps a player to the number of games he misses, counted from his next one. His slot is
+    unchanged, so a starter who does not play is a dead slot in the after projection.
 
     Lineup changes: start_ids[i] takes sit_ids[i]'s starting slot when he is eligible for it
     (the sat player goes to the bench); an unpaired start goes into an open starting slot he
@@ -1412,6 +1491,23 @@ async def simulate_roster_move(
     unknown_adds = sorted(set(wanted_adds) - {e.playerId for e in added_entries})
     new_entries = kept + added_entries
 
+    absences: dict[int, int] = dict.fromkeys(absent_ids or [], ABSENT_ALL)
+    for pid, games in (missed_games or {}).items():
+        if games > 0:
+            absences[pid] = max(absences.get(pid, 0), games)
+    by_id_now = {e.playerId: e for e in new_entries}
+    absence_lines: list[str] = []
+    for pid, games in absences.items():
+        entry = by_id_now.get(pid)
+        if entry is None:
+            absence_lines.append(f"Player {pid} is not on the roster; absence ignored")
+            continue
+        who = entry.playerPoolEntry.player.fullName
+        absence_lines.append(
+            f"{who} does not play" if games >= ABSENT_ALL else f"{who} misses {games} game(s)"
+        )
+    absences = {pid: g for pid, g in absences.items() if pid in by_id_now}
+
     started, benched, lineup_changes, lineup_warnings, new_entries = _apply_lineup_changes(
         new_entries,
         list(dict.fromkeys(start_ids or [])),
@@ -1439,9 +1535,10 @@ async def simulate_roster_move(
         your_entries=new_entries,
         your_schedule=new_schedule,
         stats=merged_stats,
+        absences=absences,
         roster_source=inputs.roster_source
         + f"; simulated: dropped {len(dropped_names)}, added {len(added_entries)}, "
-        f"lineup changes {len(lineup_changes)}",
+        f"lineup changes {len(lineup_changes)}, absences {len(absences)}",
     )
     after = compute_analysis(after_inputs)
 
@@ -1486,11 +1583,13 @@ async def simulate_roster_move(
             )
         )
 
+    # Legality is about adds and drops; a lineup-only or absence-only what-if has none to check
     legality: RosterLegality | None = None
-    try:
-        legality = await client.check_roster_move(team_id, wanted_adds, list(drop_set))
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"Could not check roster legality: {e}")
+    if wanted_adds or drop_set:
+        try:
+            legality = await client.check_roster_move(team_id, wanted_adds, list(drop_set))
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not check roster legality: {e}")
 
     added_recs = [r for r in after.playerRecommendations if r.playerId in set(new_ids)]
     summary = [
@@ -1508,6 +1607,8 @@ async def simulate_roster_move(
             )
     if lineup_warnings:
         summary.append("Lineup warnings: " + "; ".join(lineup_warnings))
+    if absence_lines:
+        summary.append("Absences simulated: " + "; ".join(absence_lines))
     benched_adds = [r for r in added_recs if not r.countsInProjection]
     if weekly_lock and benched_adds:
         names = ", ".join(r.playerName for r in benched_adds)
@@ -1549,6 +1650,7 @@ async def simulate_roster_move(
         benched=benched,
         lineupChanges=lineup_changes,
         lineupWarnings=lineup_warnings,
+        absences=absence_lines,
         gamesRemainingBefore=before.yourGamesRemaining,
         gamesRemainingAfter=after.yourGamesRemaining,
         expectedGamesBefore=before.yourExpectedGames,
@@ -1561,4 +1663,272 @@ async def simulate_roster_move(
         legality=legality,
         summary=summary,
         projectionMethod=after.projectionMethod,
+    )
+
+
+# --------------------------------------------------------------------------- optimizer
+OPTIMIZER_MAX_LINEUPS = 5000
+SCORING_RULE = (
+    "Lineups are ranked by projected category wins, then ties, then the sum over categories of "
+    "the projected lead divided by that category's close threshold, each clipped to [-3, 3] so "
+    "a blowout in one category cannot outweigh a close loss in another"
+)
+
+
+def _assign_slots(players: list[RosterEntry], slots: list[int]) -> dict[int, int] | None:
+    """Match players to starting slots by eligibility (one player per slot); None if impossible."""
+    if len(players) > len(slots):
+        return None
+    match: dict[int, int] = {}  # slot index -> player index
+
+    def try_player(i: int, seen: set[int]) -> bool:
+        eligible = players[i].playerPoolEntry.player.eligibleSlots
+        for j, slot in enumerate(slots):
+            if j in seen or (eligible is not None and slot not in eligible):
+                continue
+            seen.add(j)
+            if j not in match or try_player(match[j], seen):
+                match[j] = i
+                return True
+        return False
+
+    for i in range(len(players)):
+        if not try_player(i, set()):
+            return None
+    return {players[i].playerId: slots[j] for j, i in match.items()}
+
+
+def _lineup_score(analysis: MatchupAnalysis) -> float:
+    margins = 0.0
+    for c in analysis.categoryProjections:
+        if c.projectedLead is None or not c.closeThreshold:
+            continue
+        margins += max(-3.0, min(3.0, c.projectedLead / c.closeThreshold))
+    return (
+        (analysis.projectedCategoryWins or 0) * 1000
+        + len(analysis.categoriesTied) * 100
+        + round(margins, 3)
+    )
+
+
+def _lineup_map(entries: list[RosterEntry]) -> tuple[dict[str, str], list[str]]:
+    """{"PG": name, "UTIL1": name, ...} for starters, plus the bench names."""
+    lineup: dict[str, str] = {}
+    bench: list[str] = []
+    seen: Counter[str] = Counter()
+    for e in sorted(entries, key=lambda e: e.lineupSlotId):
+        name = e.playerPoolEntry.player.fullName
+        if e.lineupSlotId == SLOT_IR:
+            continue
+        if e.lineupSlotId == SLOT_BENCH:
+            bench.append(name)
+            continue
+        label = _slot_label(e.lineupSlotId)
+        seen[label] += 1
+        key = f"{label}{seen[label]}" if seen[label] > 1 or label == "UTIL" else label
+        lineup[key] = name
+    return lineup, bench
+
+
+def _starting_ids(entries: list[RosterEntry]) -> set[int]:
+    return {e.playerId for e in entries if e.lineupSlotId not in (SLOT_BENCH, SLOT_IR)}
+
+
+async def optimize_lineup(
+    client: ESPNFantasyBasketballClient,
+    team_id: int,
+    matchup_period: int | None = None,
+    basis: str = "projections",
+    top: int = 3,
+) -> LineupOptimization:
+    """Evaluate every valid starting lineup with the matchup projection and rank them.
+
+    Only matters under a weekly lineup lock, where bench games do not score; in a daily-lock
+    league every non-IR player counts, so the current lineup is returned with a note. Players
+    whose slot ESPN has locked for the period in progress stay where they are. Players with no
+    playable games are never started unless a slot would otherwise be empty, which shrinks
+    the search; if the remaining choice still exceeds OPTIMIZER_MAX_LINEUPS, the players with
+    the fewest playable games are dropped from consideration and the note says so.
+    """
+    inputs = await gather_inputs(client, team_id, matchup_period, basis)
+    current = compute_analysis(inputs)
+    settings = inputs.settings
+    lock_rule = settings.rosterSettings.lineupLocktimeType
+    weekly_lock = lock_rule in WEEKLY_LOCK_RULES
+    week_in_progress = inputs.target_period <= settings.status.currentMatchupPeriod
+    current_lineup, _ = _lineup_map(inputs.your_entries)
+    current_starters = _starting_ids(inputs.your_entries)
+    notes: list[str] = []
+
+    def option(rank: int, analysis: MatchupAnalysis, entries: list[RosterEntry]) -> LineupOption:
+        lineup, bench = _lineup_map(entries)
+        after = _starting_ids(entries)
+        by_id = {e.playerId: e for e in entries}
+        games = {r.playerId: r.expectedGames or 0.0 for r in analysis.playerRecommendations}
+
+        def line(verb: str, pid: int) -> str:
+            return (
+                f"{verb} {by_id[pid].playerPoolEntry.player.fullName} ({games.get(pid, 0):g} games)"
+            )
+
+        changes = [
+            line("start", pid)
+            for pid in sorted(after - current_starters, key=lambda p: -games.get(p, 0))
+        ] + [
+            line("sit", pid)
+            for pid in sorted(current_starters - after, key=lambda p: -games.get(p, 0))
+        ]
+        return LineupOption(
+            rank=rank,
+            projectedRecord=_record(analysis),
+            projectedCategoryWins=analysis.projectedCategoryWins or 0,
+            projectedCategoryLosses=analysis.projectedCategoryLosses or 0,
+            projectedCategoryTies=len(analysis.categoriesTied),
+            score=_lineup_score(analysis),
+            categoriesWon=analysis.categoriesWinning,
+            categoriesLost=analysis.categoriesLosing,
+            closeCategories=analysis.closeCategories,
+            expectedGames=analysis.yourExpectedGames or 0.0,
+            lineup=lineup,
+            bench=bench,
+            changes=changes,
+            isCurrent=after == current_starters,
+        )
+
+    if not weekly_lock:
+        notes.append(
+            "Daily lineup lock: every non-IR player counts in the projection, so which players "
+            "start does not change it; set the lineup day by day with get_team_roster"
+        )
+        return LineupOptimization(
+            teamId=team_id,
+            matchupPeriod=inputs.target_period,
+            basis=basis,
+            lineupLockRule=lock_rule,
+            currentProjectedRecord=_record(current),
+            currentLineup=current_lineup,
+            currentIsBest=True,
+            options=[option(1, current, inputs.your_entries)],
+            lineupsEvaluated=1,
+            scoring=SCORING_RULE,
+            notes=notes,
+            projectionMethod=current.projectionMethod,
+        )
+
+    starting_slots: list[int] = []
+    for raw, count in (settings.rosterSettings.lineupSlotCounts or {}).items():
+        try:
+            slot = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if slot not in (SLOT_BENCH, SLOT_IR) and count > 0:
+            starting_slots.extend([slot] * count)
+    if not starting_slots:
+        starting_slots = [
+            e.lineupSlotId
+            for e in inputs.your_entries
+            if e.lineupSlotId not in (SLOT_BENCH, SLOT_IR)
+        ]
+
+    ir = [e for e in inputs.your_entries if e.lineupSlotId == SLOT_IR]
+    active = [e for e in inputs.your_entries if e.lineupSlotId != SLOT_IR]
+    fixed = [e for e in active if week_in_progress and e.lineupLocked]
+    fixed_ids = {e.playerId for e in fixed}
+    movable = [e for e in active if e.playerId not in fixed_ids]
+    free_slots = list(starting_slots)
+    for e in fixed:
+        if e.lineupSlotId in free_slots:
+            free_slots.remove(e.lineupSlotId)
+    fixed_names = [
+        f"{e.playerPoolEntry.player.fullName} ({_slot_label(e.lineupSlotId)}, locked)"
+        for e in fixed
+    ]
+
+    # Playable games per movable player (slot-independent): the search only needs who plays
+    today = inputs.now.date()
+    dates = remaining_game_dates_by_player(inputs.your_schedule, inputs.now, inputs.matchup_end)
+    playable = {
+        e.playerId: expected_games_for(
+            replace_slot(e, 0),
+            dates.get(e.playerId, []),
+            inputs.matchup_end,
+            today,
+            True,
+            effective_from=inputs.effective_from.get(e.playerId),
+        ).playable
+        for e in movable
+    }
+    candidates = sorted(movable, key=lambda e: -playable[e.playerId])
+    with_games = [e for e in candidates if playable[e.playerId] > 0]
+    fillers = [e for e in candidates if playable[e.playerId] == 0]
+    k = len(free_slots)
+    search_note: str | None = None
+    pool = list(with_games)
+    if len(pool) > k and math.comb(len(pool), k) > OPTIMIZER_MAX_LINEUPS:
+        while len(pool) > k and math.comb(len(pool), k) > OPTIMIZER_MAX_LINEUPS:
+            pool.pop()
+        search_note = (
+            f"Search limited to the {len(pool)} players with the most playable games "
+            f"({math.comb(len(pool), k)} lineups); {len(with_games) - len(pool)} player(s) with "
+            "fewer games were not considered"
+        )
+
+    def build(starters: list[RosterEntry]) -> list[RosterEntry] | None:
+        chosen = list(starters)
+        chosen_ids = {e.playerId for e in chosen}
+        extra = [e for e in fillers if e.playerId not in chosen_ids]
+        while len(chosen) < k and extra:
+            chosen.append(extra.pop(0))
+        assignment = _assign_slots(chosen, free_slots)
+        if assignment is None:
+            return None
+        out = list(fixed) + list(ir)
+        for e in movable:
+            out.append(replace_slot(e, assignment.get(e.playerId, SLOT_BENCH)))
+        return out
+
+    evaluated: list[tuple[float, MatchupAnalysis, list[RosterEntry]]] = []
+    combos = itertools.combinations(pool, min(k, len(pool))) if pool else [()]
+    for combo in combos:
+        entries = build(list(combo))
+        if entries is None:
+            continue
+        analysis = compute_analysis(replace(inputs, your_entries=entries))
+        evaluated.append((_lineup_score(analysis), analysis, entries))
+    if not evaluated:
+        notes.append(
+            "No valid assignment of players to slots was found; the current lineup is returned"
+        )
+        evaluated.append((_lineup_score(current), current, inputs.your_entries))
+    evaluated.sort(key=lambda t: -t[0])
+    current_score = _lineup_score(current)
+    best_score = evaluated[0][0]
+    options = [option(i + 1, a, e) for i, (_, a, e) in enumerate(evaluated[: max(1, top)])]
+    if current_score < best_score:
+        notes.append(
+            f"Current lineup projects {_record(current)} (score {current_score:.3f}); the best "
+            f"found projects {options[0].projectedRecord} (score {best_score:.3f})"
+        )
+    if fixed_names:
+        notes.append("Locked for this period and not moved: " + ", ".join(fixed_names))
+    if fillers:
+        notes.append(
+            "Never started unless a slot would be empty (no playable games): "
+            + ", ".join(e.playerPoolEntry.player.fullName for e in fillers)
+        )
+    return LineupOptimization(
+        teamId=team_id,
+        matchupPeriod=inputs.target_period,
+        basis=basis,
+        lineupLockRule=lock_rule,
+        currentProjectedRecord=_record(current),
+        currentLineup=current_lineup,
+        currentIsBest=current_score >= best_score,
+        options=options,
+        lineupsEvaluated=len(evaluated),
+        fixedPlayers=fixed_names,
+        scoring=SCORING_RULE,
+        searchNote=search_note,
+        notes=notes,
+        projectionMethod=current.projectionMethod,
     )

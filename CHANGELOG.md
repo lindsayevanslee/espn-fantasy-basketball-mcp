@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Added
+- `optimize_lineup` tool: for a weekly-lock league, evaluates every valid assignment of your
+  players to the starting slots with the matchup projection and ranks the lineups by projected
+  category wins, then ties, then margins clipped to three close-thresholds per category. Locked
+  slots stay put mid-week; players with no playable games are never started unless a slot
+  would be empty; the search is capped at 5000 lineups with a note when trimmed. Each option
+  lists the lineup, bench, record, categories won and lost, and the changes from the current
+  lineup. A daily-lock league gets the current lineup back with an explanation.
+- `analyze_matchup` re-runs the projection on the alternate basis (season actuals against
+  ESPN projections, or the reverse) and flags categories where the two give a different result
+  or one calls close and the other clear: `basisDisagreements`, `alternateProjectedRecord`,
+  and per-category `alternateResult` / `alternateCloseness` / `basesAgree`, plus a strategy
+  note. Live feedback: projections called four categories coin flips, season actuals none.
+- `simulate_roster_move` takes `absent_ids` (misses every remaining game) and `missed_games`
+  (misses the next N) for "what if he does not play"; slots are unchanged so an absent starter
+  is a dead slot, and `absences` says what was simulated.
+- Unknown tool arguments are rejected. The SDK's argument model ignored unknown fields, so a
+  misspelt parameter (`bench_ids` for `sit_ids`) ran as if omitted and returned a normal-looking
+  answer. The error now names the accepted arguments and the closest matches.
+
+### Fixed
+- A lineup-only or absence-only simulation ran the add/drop legality check and so carried an
+  "if ESPN rejects this add" warning with nothing added; legality is now checked only when
+  there are adds or drops.
+- `can_add_player` raised the centre-eligibility warning even when its own evidence line said
+  ESPN was not counting eligibility; where the current roster already exceeds a limit by
+  eligibility, the evidence line now covers the after-move count and the warning is dropped.
+  The warning's "if ESPN rejects this add" reads "a move this tool allowed" when nothing is
+  being added.
+
 ### Fixed
 - Pending adds were missing from next week's projection and the legality check. An add made
   after today's games started is applied by ESPN from `status.transactionScoringPeriod` (live,

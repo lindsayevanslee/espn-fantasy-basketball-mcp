@@ -478,7 +478,7 @@ async def test_simulated_lineup_swap_moves_the_weekly_projection(monkeypatch):
         both = await client.simulate_roster_move(
             1, [], [], CURRENT_PERIOD + 1, start_ids=[103], sit_ids=[101, 102]
         )
-        with pytest.raises(ValueError, match="drop, add, start or sit"):
+        with pytest.raises(ValueError, match="drop, add, start, sit, or mark absent"):
             await client.simulate_roster_move(1, [], [], CURRENT_PERIOD + 1)
 
     assert sim.started == ["Player 103 (103)"] and sim.benched == ["Player 101 (101)"]

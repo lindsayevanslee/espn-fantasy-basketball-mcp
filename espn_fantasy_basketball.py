@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """ESPN Fantasy Basketball MCP Server using FastMCP."""
 
+import difflib
 import logging
 import os
+from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ContentBlock
 from pydantic import BaseModel
 
 from espn_fantasy_basketball_mcp.client import ESPNFantasyBasketballClient
@@ -17,8 +20,40 @@ logging.basicConfig(
 )
 logger = logging.getLogger("espn-fantasy-basketball-mcp")
 
+
+class StrictFastMCP(FastMCP):
+    """FastMCP that rejects arguments a tool does not declare.
+
+    The SDK validates arguments with a pydantic model that ignores unknown fields, so a call
+    with a misspelt parameter (bench_ids for sit_ids) ran as if the parameter had been left
+    out and returned a normal-looking answer. An unknown name is now an error that names the
+    accepted arguments and the closest match.
+    """
+
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> Sequence[ContentBlock] | dict[str, Any]:
+        tool = self._tool_manager.get_tool(name)
+        if tool is not None:
+            accepted = sorted((tool.parameters or {}).get("properties", {}))
+            unknown = sorted(set(arguments) - set(accepted))
+            if unknown:
+                hints = []
+                for arg in unknown:
+                    close = difflib.get_close_matches(arg, accepted, n=3, cutoff=0.5)
+                    hint = f"'{arg}'"
+                    if close:
+                        hint += " (did you mean " + " or ".join(f"'{c}'" for c in close) + "?)"
+                    hints.append(hint)
+                raise ValueError(
+                    f"Unknown argument(s) for {name}: {', '.join(hints)}. Accepted arguments: "
+                    f"{', '.join(accepted)}"
+                )
+        return await super().call_tool(name, arguments)
+
+
 # Create the FastMCP server
-mcp = FastMCP("ESPN Fantasy Basketball")
+mcp = StrictFastMCP("ESPN Fantasy Basketball")
 
 # Fields that duplicate named ones and are left out of every tool's output: the raw stat-ID
 # block on a matchup side (categoryScores, componentStats and categoryWins/Losses/Ties carry
@@ -878,6 +913,11 @@ async def analyze_matchup(
           current and projected values, so the FG% / FT% arithmetic can be checked
         - currentCategoryWins/Losses/Ties: Current category record
         - projectedCategoryWins/Losses: Projected category record
+        - alternateBasis / alternateProjectedRecord / basisDisagreements: the projection
+          re-run on the other everyday basis (season actuals vs ESPN projections) and the
+          categories where the two give a different result or one calls close and the other
+          clear; each categoryProjection carries alternateResult / alternateCloseness /
+          basesAgree. Treat a call the bases disagree on as uncertain.
         - strategyNotes: Strategic recommendations
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
@@ -902,14 +942,16 @@ async def simulate_roster_move(
     add_ids: list[int] | None = None,
     start_ids: list[int] | None = None,
     sit_ids: list[int] | None = None,
+    absent_ids: list[int] | None = None,
+    missed_games: dict[str, int] | None = None,
     team_id: int | None = None,
     matchup_period: int | None = None,
     basis: str = "projections",
     league_id: int | None = None,
     year: int | None = None,
 ) -> dict:
-    """What if I drop X and add Y, or start A and sit B? Re-run the matchup projection and
-    return the deltas.
+    """What if I drop X and add Y, start A and sit B, or C does not play? Re-run the matchup
+    projection and return the deltas.
 
     Runs analyze_matchup twice, before and after the hypothetical move, on ONE basis for both
     teams, and reports per-category deltas, which categories flip (loss -> win etc.), the
@@ -931,12 +973,23 @@ async def simulate_roster_move(
     ESPN has locked for the period is simulated but flagged. Pending adds (players ESPN lists
     on the roster for the period an add made now takes effect) are on the roster.
 
+    Absences ("what if he does not play"): absent_ids lose every remaining game in the
+    window; missed_games gives the number of games a player misses, counted from his next
+    one. Slots are unchanged, so an absent starter is a dead slot in the after projection;
+    combine with start_ids / sit_ids to see the replacement.
+
+    Legality (roster size, position limits, acquisitions) is checked only when there are
+    adds or drops; a lineup-only or absence-only what-if carries no legality section.
+
     Args:
         drop_ids: ESPN player IDs to drop from your roster (optional)
         add_ids: ESPN player IDs to add (free agents or waiver players; use search_players)
         start_ids: ESPN player IDs to move into starting slots (optional)
         sit_ids: ESPN player IDs to move to the bench, paired with start_ids by position
             (optional)
+        absent_ids: ESPN player IDs simulated as missing every remaining game (optional)
+        missed_games: {"<player_id>": games_missed} for partial absences, e.g. {"4278104": 2}
+            (optional; keys are player IDs as strings, as JSON requires)
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         matchup_period: Matchup period to project (optional, defaults to the next one, like
             analyze_matchup; pass the current period for this week)
@@ -946,7 +999,8 @@ async def simulate_roster_move(
 
     Returns:
         Dictionary with dropped/added names, placements (which slot each added player was
-        given), started / benched / lineupChanges / lineupWarnings, projectedRecordBefore/After,
+        given), started / benched / lineupChanges / lineupWarnings, absences,
+        projectedRecordBefore/After,
         categoryDeltas (before, after, delta, result and closeness before/after, and your
         projected made/attempted before and after for FG% and FT%), categoriesFlipped,
         addedPlayers (their projection lines, games and projectedTotals), legality (its
@@ -962,12 +1016,82 @@ async def simulate_roster_move(
     adds = _coerce_player_ids(add_ids) if add_ids else []
     starts = _coerce_player_ids(start_ids) if start_ids else []
     sits = _coerce_player_ids(sit_ids) if sit_ids else []
+    absents = _coerce_player_ids(absent_ids) if absent_ids else []
+    missed: dict[int, int] = {}
+    for raw_pid, raw_games in (missed_games or {}).items():
+        [pid] = _coerce_player_ids([raw_pid])
+        try:
+            games = int(raw_games)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"missed_games[{raw_pid!r}] must be an integer, got {raw_games!r}"
+            ) from e
+        missed[pid] = games
     if matchup_period is not None:
         matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
     result = await client.simulate_roster_move(
-        team_id, drops, adds, matchup_period, basis, start_ids=starts, sit_ids=sits
+        team_id,
+        drops,
+        adds,
+        matchup_period,
+        basis,
+        start_ids=starts,
+        sit_ids=sits,
+        absent_ids=absents,
+        missed_games=missed,
     )
+    return _dump(result)
+
+
+@mcp.tool()
+async def optimize_lineup(
+    team_id: int | None = None,
+    matchup_period: int | None = None,
+    basis: str = "projections",
+    top: int = 3,
+    league_id: int | None = None,
+    year: int | None = None,
+) -> dict:
+    """Which starting lineup projects best? Evaluate every valid lineup and rank them.
+
+    For a weekly-lock league (bench games do not score) this tries every assignment of your
+    players to the starting slots that respects position eligibility, runs the matchup
+    projection on each (same arithmetic as analyze_matchup, same basis for both teams), and
+    ranks them by projected category wins, then ties, then clipped margins (`scoring` spells
+    it out). Players whose slot ESPN has locked for the period in progress stay put; players
+    with no playable games (OUT all week, on IR, no games) are never started unless a slot
+    would otherwise be empty. Each option lists the lineup, the bench, the projected record,
+    the categories won and lost, and the changes from the current lineup ("start X (3 games)
+    for Y (1 game)"). In a daily-lock league the lineup does not change the projection and
+    the current lineup is returned with a note.
+
+    Args:
+        team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
+        matchup_period: Matchup period to optimise for (optional, defaults to the next one,
+            like analyze_matchup; pass the current period for this week)
+        basis: projections (default), season, last_7, last_15, last_30 or blend
+        top: How many lineups to return, best first (1-10, default 3)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: ESPN season ID, the year the season ends in (optional)
+
+    Returns:
+        Dictionary with currentProjectedRecord, currentLineup, currentIsBest, options (rank,
+        projectedRecord, score, categoriesWon/Lost, closeCategories, expectedGames, lineup,
+        bench, changes, isCurrent), lineupsEvaluated, fixedPlayers, scoring, searchNote (when
+        the search was limited), notes and projectionMethod.
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
+    team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
+    if matchup_period is not None:
+        matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
+    top = int(top) if isinstance(top, str) else top
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    result = await client.optimize_lineup(team_id, matchup_period, basis, top)
     return _dump(result)
 
 
