@@ -600,11 +600,30 @@ account per month, as of November 2026 (check
 | Artifact Registry | 0.5 GB of storage | One image of about 225 MB uncompressed per deploy; delete old ones |
 | Cloud Build | 2,500 build-minutes | A minute or two per deploy |
 
-Three things keep it there. The server answers `GET /mcp` with `405` instead of holding a
-stream open, because an open connection is billable time. `--max-instances 1` caps the worst
-case: one instance busy every second of a month is roughly $65, and reaching that would take
-continuous traffic. And you should add a budget alert (**Billing > Budgets & alerts**, a $1
-budget with email alerts): alerts do not stop spending, but they tell you the same day.
+Two things in the setup keep it there. The server answers `GET /mcp` with `405` instead of
+holding a stream open, because an open connection is billable time. And `--max-instances 1`
+bounds the worst case: one instance busy every second of a month is roughly $65, and reaching
+that would take continuous traffic.
+
+Add two safeguards of your own under **Billing > Budgets & alerts**. Both are free.
+
+- **A spend cap on Cloud Run** (recommended: $5 a month). A spend cap is a hard stop, which a
+  budget alert is not. Create one for this project and the **Cloud Run** service; the other
+  services offered (Cloud Run functions, Gemini API, Vertex AI) are not used here. If the cap
+  is reached, Cloud Run stops serving in this project and the tools return errors, nothing is
+  deleted, and it resumes by itself on the first day of the next month or when you lift the
+  cap by hand. It lowers the worst case from roughly $65 to roughly the cap, plus a small
+  overage because enforcement lags by a few minutes. Leave some headroom rather than setting
+  $1: Google's pages do not say whether usage covered by the free allowance counts toward
+  the cap.
+- **A budget alert for the whole project** ($1, with email alerts). The cap covers Cloud Run
+  only. An alert does not stop anything, but it watches every service, including image
+  storage and builds, and tells you the same day.
+
+Spend caps became generally available in November 2026; see Google's
+[announcement](https://cloud.google.com/blog/topics/cost-management/google-cloud-spend-caps-now-generally-available)
+and the Cloud Run [billing settings](https://cloud.google.com/run/docs/configuring/billing-settings)
+page for how a capped service behaves.
 
 On Fly.io the equivalent is `fly launch --no-deploy`, `fly secrets set MCP_AUTH_TOKEN=... ESPN_S2=... ESPN_SWID=...`,
 the non-secret variables (including `MCP_AUTH_MODE=oauth` and `MCP_PUBLIC_URL=https://<app>.fly.dev`)

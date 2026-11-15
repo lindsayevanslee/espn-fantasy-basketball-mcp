@@ -82,6 +82,8 @@
   billing, scaling, port, memory, timeout, instance limit, variables, secrets, service
   account) mapped to the flags the Cloud Shell deploy uses. A test keeps the table and the
   command in step.
+- The cost section recommends a Cloud Run spend cap ($5 a month) as a hard stop, alongside
+  the project-wide budget alert, and says what a capped service does and when it resumes.
 - Claude Code cloud sessions (claude.ai/code and the Claude mobile app's Code tab) now install
   the locked dependencies at startup via `.claude/hooks/session-start.sh`, so tests and linters
   work from the first message. `CLAUDE.md` records the project conventions for those sessions.
