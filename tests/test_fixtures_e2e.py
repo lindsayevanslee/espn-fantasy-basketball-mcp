@@ -1097,8 +1097,20 @@ async def test_weekly_lock_changes_every_lineup_message(weekly_lock):
     upcoming = await client.analyze_matchup(MY_TEAM, 3)
     collins = next(w for w in upcoming.lineupWarnings if w.startswith("Jon Collins"))
     assert collins.endswith("bench or replace him before the week's first game locks every slot")
-    # a simulated add this week carries the caveat; next week it does not
+    # Benched Guy was on the bench, so the added player has no starting slot to take and his
+    # games do not count under the weekly lock. This week the caveat says the slot is locked
+    # until next period; next week it says to drop a starter or start him before the lock.
     sim_now = await client.simulate_roster_move(MY_TEAM, [1004], [9001], matchup_period=2)
-    assert any("Weekly lineup lock" in line for line in sim_now.summary)
+    caveat = next(line for line in sim_now.summary if line.startswith("Weekly lineup lock"))
+    assert "until matchup period 3" in caveat and "no games this period" in caveat
+    assert sim_now.placements == ["Streamer One goes to the bench"]
+    assert sim_now.expectedGamesAfter == sim_now.expectedGamesBefore
     sim_next = await client.simulate_roster_move(MY_TEAM, [1004], [9001], matchup_period=3)
-    assert not any("Weekly lineup lock" in line for line in sim_next.summary)
+    caveat = next(line for line in sim_next.summary if line.startswith("Weekly lineup lock"))
+    assert "drop a starter or start him" in caveat and "until matchup period" not in caveat
+    # dropping a starter instead frees his slot for next week, and the add then counts
+    swap = await client.simulate_roster_move(MY_TEAM, [1003], [9001], matchup_period=3)
+    assert swap.placements == ["Streamer One takes Cason Wallace's SG slot"]
+    assert not any("Weekly lineup lock" in line for line in swap.summary)
+    [added] = swap.addedPlayers
+    assert added.countsInProjection and added.gamesInProjection == 4.0

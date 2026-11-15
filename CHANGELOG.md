@@ -3,6 +3,34 @@
 ## [Unreleased]
 
 ### Fixed
+- Projections counted every non-IR player, bench included, in weekly-lock leagues, where a
+  bench player's games never reach the score (live feedback, 2026-11-15). Under
+  `FIRSTGAME_WEEKLY` / `INDIVIDUAL_FIRSTGAME_WEEKLY` only starting slots count now, for both
+  teams. Bench players are still ranked for start/sit on what they would play; each player
+  carries `gamesInProjection` and `countsInProjection` beside `expectedGames`,
+  `benchPlayersNotCounted` lists yours, the breakdown shows the discount, and the reasoning
+  says whether the slot can still be changed (next week, not yet locked, locked for the week).
+  Daily-lock leagues are unchanged and `projectionMethod` states the assumption either way.
+- A player listed OUT contributed nothing even when ESPN's return date fell inside the week.
+  A reported return date now keeps the games on and after it (a stale date, a date after the
+  window, or ESPN's next-game placeholder for day-to-day players still give zero), and the
+  breakdown, warning and `availabilityNote` show the arithmetic ("2 of 3 game(s) on or after
+  it count").
+- `simulate_roster_move` put every added player on the bench and then claimed the deltas
+  assumed he played. An added player now takes a dropped starter's slot when it can still be
+  filled (the week has not started, or ESPN says the slot is unlocked), `placements` says
+  where each went, and under a weekly lock a benched add is reported as contributing nothing
+  with advice to drop a starter instead. Legality warnings are repeated in the summary.
+
+### Added
+- `ESPN_POSITION_LIMIT_BASIS` (`primary`, the default, or `eligibility`) chooses which count
+  the position-limit verdict uses, since ESPN does not document which it enforces for
+  basketball; the eligibility warning now says to set it if ESPN rejects an add. `can_add_player`
+  reports `positionCountsNow*` beside the after-move counts, `positionLimitBasisSetting`, and
+  `positionLimitEvidence`: a roster ESPN already accepted that exceeds a limit by eligibility
+  shows eligibility is not the rule.
+
+### Fixed
 - A roster requested for another scoring period still carried today's games in each entry's
   `todaysGame`, which made a Wednesday roster look like a frozen Monday payload (live report).
   The scoreboard is now fetched for the roster's own date; `Roster.gamesDate` and

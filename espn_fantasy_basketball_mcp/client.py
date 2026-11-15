@@ -2583,6 +2583,16 @@ class ESPNFantasyBasketballClient:
             else None,
         )
 
+    @staticmethod
+    def _position_limit_basis() -> str:
+        """Which count the position-limit verdict uses: "primary" (default) or "eligibility".
+
+        Read from ESPN_POSITION_LIMIT_BASIS. Anything unrecognised falls back to primary, so a
+        typo cannot silently make the check stricter or looser than documented.
+        """
+        value = os.getenv("ESPN_POSITION_LIMIT_BASIS", "primary").strip().lower()
+        return value if value in ("primary", "eligibility") else "primary"
+
     async def check_roster_move(
         self, team_id: int, add_ids: list[int], drop_ids: list[int] | None = None
     ) -> RosterLegality:
@@ -2649,25 +2659,72 @@ class ESPNFantasyBasketballClient:
             )
 
         limits = settings.rosterSettings.positionLimitNames or {}
-        by_default: Counter[str] = Counter(p.defaultPosition for p in after if p.defaultPosition)
         slot_for = {"PG": 0, "SG": 1, "SF": 2, "PF": 3, "C": 4}
+        current = [
+            e.playerPoolEntry.player for e in roster.entries if e.lineupSlotId != self._SLOT_IR
+        ]
+        now_default = Counter(p.defaultPosition for p in current if p.defaultPosition)
+        now_eligibility = {
+            pos: sum(1 for p in current if p.eligibleSlots and slot in p.eligibleSlots)
+            for pos, slot in slot_for.items()
+        }
+        by_default: Counter[str] = Counter(p.defaultPosition for p in after if p.defaultPosition)
         by_eligibility = {
             pos: sum(1 for p in after if p.eligibleSlots and slot in p.eligibleSlots)
             for pos, slot in slot_for.items()
         }
+        basis = self._position_limit_basis()
+        evidence: list[str] = []
         for pos, limit in limits.items():
             if limit is None or limit < 0 or pos not in slot_for:
                 continue
-            if by_default.get(pos, 0) > limit:
+            # The roster ESPN already accepted is the one fact this league offers about the
+            # rule: if it exceeds a limit by eligibility, ESPN is not counting eligibility
+            # (unless a player gained that eligibility after he was rostered).
+            if now_eligibility.get(pos, 0) > limit >= now_default.get(pos, 0):
+                evidence.append(
+                    f"Your current roster has {now_eligibility[pos]} players eligible at {pos} "
+                    f"against a limit of {limit} and ESPN accepted it, so ESPN is not counting "
+                    "eligibility for this limit (unless a player gained that eligibility after "
+                    "he was rostered)"
+                )
+            primary_over = by_default.get(pos, 0) > limit
+            eligibility_over = by_eligibility.get(pos, 0) > limit
+            if basis == "eligibility":
+                if eligibility_over:
+                    reasons.append(
+                        f"{by_eligibility[pos]} players are eligible at {pos}; the limit is "
+                        f"{limit} (ESPN_POSITION_LIMIT_BASIS=eligibility)"
+                    )
+                continue
+            if primary_over:
                 reasons.append(
                     f"{by_default[pos]} players whose primary position is {pos}; the limit is {limit}"
                 )
-            elif by_eligibility.get(pos, 0) > limit:
+            elif eligibility_over:
                 warnings.append(
                     f"{by_eligibility[pos]} players are eligible at {pos} against a limit of "
                     f"{limit}; allowed if ESPN counts primary positions (as assumed), not if it "
-                    "counts eligibility"
+                    "counts eligibility. If ESPN rejects this add, that settles it: set "
+                    "ESPN_POSITION_LIMIT_BASIS=eligibility so this tool counts the same way"
                 )
+        if basis == "eligibility":
+            basis_note = (
+                "Verdict counts every position a player is eligible at "
+                "(ESPN_POSITION_LIMIT_BASIS=eligibility). Primary-position counts are reported "
+                "alongside."
+            )
+        else:
+            basis_note = (
+                "Verdict counts each player once, at his default (primary) position. ESPN does "
+                "not document for basketball whether its position limit counts primary "
+                "positions or every eligible slot; the API keys positionLimits by "
+                "defaultPositionId, and ESPN's help centre says (for fantasy baseball) that a "
+                "multi-position player counts at his first-listed position for roster limits, "
+                "both of which point to primary. Eligibility counts are reported alongside and "
+                "a warning is raised when only they exceed a limit. If ESPN rejects a move this "
+                "tool allowed, set ESPN_POSITION_LIMIT_BASIS=eligibility."
+            )
 
         mine = next((t for t in teams if t.id == team_id), None)
         remaining = mine.acquisitionsRemainingThisMatchup if mine else None
@@ -2687,15 +2744,13 @@ class ESPNFantasyBasketballClient:
             rosterSizeAfter=after_count,
             rosterLimit=roster_limit,
             positionLimits={k: v for k, v in limits.items() if k in slot_for},
+            positionCountsNowByDefaultPosition=dict(now_default),
+            positionCountsNowByEligibility=now_eligibility,
             positionCountsAfterByDefaultPosition=dict(by_default),
             positionCountsAfterByEligibility=by_eligibility,
-            positionLimitBasis=(
-                "Verdict counts each player once, at his default (primary) position. ESPN does "
-                "not document whether its position limit counts primary positions or every "
-                "eligible slot; eligibility counts are reported alongside and a warning is "
-                "raised when only they exceed a limit. If ESPN ever rejects a move this tool "
-                "allowed, eligibility is the real rule."
-            ),
+            positionLimitBasisSetting=basis,
+            positionLimitBasis=basis_note,
+            positionLimitEvidence=evidence,
             acquisitionsRemainingThisMatchup=remaining,
             addedPlayerStatus=added_status,
         )
