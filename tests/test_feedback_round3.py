@@ -38,7 +38,7 @@ async def test_unknown_arguments_are_rejected_with_a_suggestion():
         "Unknown argument(s) for simulate_roster_move: 'bench_ids' (did you mean "
     )
     suggestion = message.split("did you mean ")[1].split("?)")[0]
-    assert "'sit_ids'" in suggestion and "'absent_ids'" in suggestion
+    assert suggestion == "'sit_ids' or 'absent_ids'", "meaning (bench -> sit) outranks spelling"
     assert "Accepted arguments: absent_ids, add_ids, basis, drop_ids" in message
 
 
@@ -100,8 +100,8 @@ async def test_bases_that_disagree_are_flagged(monkeypatch):
         "points: projections says win (close, lead +20); season says loss (near, lead -28)"
     ]
     assert analysis.strategyNotes[-1] == (
-        "The season basis disagrees on 1 category (0-1-0 on season vs 1-0-0 on projections): "
-        "see basisDisagreements and treat those calls as uncertain"
+        "The season basis gives a different result in 1 category (0-1-0 on season vs 1-0-0 "
+        "on projections): points. Treat those calls as uncertain (see basisDisagreements)"
     )
 
     # the other way round: season as the basis compares against projections
@@ -331,3 +331,62 @@ async def test_adds_still_get_a_legality_check(monkeypatch):
     settings, matchup, schedules = _weekly_fixture("FIRSTGAME_WEEKLY", CURRENT_PERIOD + 1)
     sim = await _simulate(client, settings, matchup, schedules, CURRENT_PERIOD + 1, [102], [901])
     assert sim.legality is not None
+
+
+@pytest.mark.asyncio
+async def test_closeness_only_disagreement_is_worded_as_such(monkeypatch):
+    """Live report: 'disagrees on 3 categories (8-0-0 vs 8-0-0)' read as a contradiction when
+    only the closeness differed."""
+    monkeypatch.setenv("MY_TIMEZONE", "UTC")
+    client = ESPNFantasyBasketballClient(league_id=LEAGUE, year=YEAR)
+    settings, matchup, schedules = _weekly_fixture("INDIVIDUAL_GAME", CURRENT_PERIOD)
+    # projections: win by 4 (close); season: win by 40 (clear)
+    stats = {
+        "projections": [_stats(pid, "projections", points=10.0) for pid in (101, 102, 103)]
+        + [_stats(pid, "projections", points=9.0) for pid in (201, 202)],
+        "season": [_stats(pid, "season", points=20.0, gamesPlayed=5) for pid in (101, 102, 103)]
+        + [_stats(pid, "season", points=10.0, gamesPlayed=5) for pid in (201, 202)],
+    }
+    analysis = await _analyze_with(client, settings, matchup, schedules, stats, CURRENT_PERIOD)
+    [points] = analysis.categoryProjections
+    assert points.projectedResult == points.alternateResult == "win"
+    assert (points.closeness, points.alternateCloseness) == ("close", "clear")
+    assert points.basesAgree is False
+    assert analysis.strategyNotes[-1] == (
+        "The season basis agrees with every result (1-0-0) but differs on how close 1 category "
+        "is: points. A category one basis calls close and the other clear is less safe than "
+        "it looks (see basisDisagreements)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_absent_and_missed_for_the_same_player_is_called_out(monkeypatch):
+    monkeypatch.setenv("MY_TIMEZONE", "UTC")
+    client = ESPNFantasyBasketballClient(league_id=LEAGUE, year=YEAR)
+    settings, matchup, schedules = _weekly_fixture("INDIVIDUAL_GAME", CURRENT_PERIOD)
+    sim = await _simulate_more(
+        client, settings, matchup, schedules, absent_ids=[101], missed_games={101: 1}
+    )
+    assert sim.expectedGamesAfter == 2.0, "absent wins"
+    assert sim.absences == [
+        "Player 101 does not play",
+        "Player 101 is in both absent_ids and missed_games; absent_ids wins (he does not "
+        "play). Give one or the other",
+    ]
+
+
+def test_argument_suggestions_understand_meaning_and_spelling():
+    accepted = [
+        "absent_ids",
+        "add_ids",
+        "drop_ids",
+        "missed_games",
+        "sit_ids",
+        "start_ids",
+        "team_id",
+    ]
+    assert server._suggest("bench_ids", accepted) == " (did you mean 'sit_ids' or 'absent_ids'?)"
+    assert server._suggest("playersToBench", accepted) == " (did you mean 'sit_ids'?)"
+    assert server._suggest("out_players", accepted) == " (did you mean 'absent_ids'?)"
+    assert server._suggest("sit_id", accepted) == " (did you mean 'sit_ids' or 'start_ids'?)"
+    assert server._suggest("foo", accepted) == ""

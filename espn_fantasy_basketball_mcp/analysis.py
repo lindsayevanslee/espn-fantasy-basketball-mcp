@@ -779,14 +779,14 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             your_projected = y_pm / y_pa if y_pa > 0 else your_current
             opp_projected = o_pm / o_pa if o_pa > 0 else opp_current
             pct_fields: dict[str, Any] = {
-                "yourCurrentMade": round(y_made, 1),
-                "yourCurrentAttempted": round(y_att, 1),
-                "yourProjectedMade": round(y_pm, 1),
-                "yourProjectedAttempted": round(y_pa, 1),
-                "opponentCurrentMade": round(o_made, 1),
-                "opponentCurrentAttempted": round(o_att, 1),
-                "opponentProjectedMade": round(o_pm, 1),
-                "opponentProjectedAttempted": round(o_pa, 1),
+                "yourCurrentMade": round(y_made, 2),
+                "yourCurrentAttempted": round(y_att, 2),
+                "yourProjectedMade": round(y_pm, 2),
+                "yourProjectedAttempted": round(y_pa, 2),
+                "opponentCurrentMade": round(o_made, 2),
+                "opponentCurrentAttempted": round(o_att, 2),
+                "opponentProjectedMade": round(o_pm, 2),
+                "opponentProjectedAttempted": round(o_pa, 2),
             }
         else:
             pct_fields = {}
@@ -1224,14 +1224,18 @@ def with_alternate_basis(analysis: MatchupAnalysis, inputs: MatchupInputs) -> Ma
     other = compute_analysis(replace(inputs, basis=alternate, basis_notes=[]))
     other_by = {c.category: c for c in other.categoryProjections}
     disagreements: list[str] = []
+    result_flips: list[str] = []
+    closeness_only: list[str] = []
     for c in analysis.categoryProjections:
         o = other_by.get(c.category)
         if o is None:
             continue
-        agree = c.projectedResult == o.projectedResult and {c.closeness, o.closeness} != {
-            "close",
-            "clear",
-        }
+        same_result = c.projectedResult == o.projectedResult
+        agree = same_result and {c.closeness, o.closeness} != {"close", "clear"}
+        if not same_result:
+            result_flips.append(c.category)
+        elif not agree:
+            closeness_only.append(c.category)
         c.alternateBasis = alternate
         c.alternateProjectedLead = o.projectedLead
         c.alternateResult = o.projectedResult
@@ -1246,12 +1250,23 @@ def with_alternate_basis(analysis: MatchupAnalysis, inputs: MatchupInputs) -> Ma
     analysis.alternateBasis = alternate
     analysis.alternateProjectedRecord = _record(other)
     analysis.basisDisagreements = disagreements
-    if disagreements:
-        plural = "y" if len(disagreements) == 1 else "ies"
+    if result_flips:
+        plural = "y" if len(result_flips) == 1 else "ies"
+        note = (
+            f"The {alternate} basis gives a different result in {len(result_flips)} "
+            f"categor{plural} ({_record(other)} on {alternate} vs {_record(analysis)} on "
+            f"{inputs.basis}): {', '.join(result_flips)}. Treat those calls as uncertain"
+        )
+        if closeness_only:
+            note += f"; it also differs on how close {', '.join(closeness_only)} are"
+        analysis.strategyNotes.append(note + " (see basisDisagreements)")
+    elif closeness_only:
+        how_many = "y is" if len(closeness_only) == 1 else "ies are"
         analysis.strategyNotes.append(
-            f"The {alternate} basis disagrees on {len(disagreements)} categor{plural} "
-            f"({_record(other)} on {alternate} vs {_record(analysis)} on {inputs.basis}): see "
-            "basisDisagreements and treat those calls as uncertain"
+            f"The {alternate} basis agrees with every result ({_record(other)}) but differs on "
+            f"how close {len(closeness_only)} categor{how_many}: {', '.join(closeness_only)}. "
+            "A category one basis calls close and the other clear is less safe than it looks "
+            "(see basisDisagreements)"
         )
     else:
         analysis.strategyNotes.append(
@@ -1492,8 +1507,11 @@ async def simulate_roster_move(
     new_entries = kept + added_entries
 
     absences: dict[int, int] = dict.fromkeys(absent_ids or [], ABSENT_ALL)
+    conflicts: list[int] = []
     for pid, games in (missed_games or {}).items():
         if games > 0:
+            if pid in absences:
+                conflicts.append(pid)  # absent_ids is the stronger statement and wins
             absences[pid] = max(absences.get(pid, 0), games)
     by_id_now = {e.playerId: e for e in new_entries}
     absence_lines: list[str] = []
@@ -1506,6 +1524,11 @@ async def simulate_roster_move(
         absence_lines.append(
             f"{who} does not play" if games >= ABSENT_ALL else f"{who} misses {games} game(s)"
         )
+        if pid in conflicts:
+            absence_lines.append(
+                f"{who} is in both absent_ids and missed_games; absent_ids wins (he does not "
+                "play). Give one or the other"
+            )
     absences = {pid: g for pid, g in absences.items() if pid in by_id_now}
 
     started, benched, lineup_changes, lineup_warnings, new_entries = _apply_lineup_changes(
