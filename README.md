@@ -267,40 +267,53 @@ gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
   artifactregistry.googleapis.com secretmanager.googleapis.com
 ```
 
-**b. Secrets.** These go into Secret Manager, never into the deploy command, your shell
-history, or the image. `read -s` keeps what you paste off the screen.
+**b. Secrets and league settings.** The cookies and the sign-in passphrase go into Secret
+Manager, never into the deploy command, your shell history, or the image; `read -s` keeps
+what you paste off the screen. Your league ID and team ID go there too. They are not
+sensitive, but keeping all the league configuration in one place means no later command ever
+needs them typed again. Paste the whole block, parentheses included, and answer the four
+prompts.
 
 ```bash
+(
+set -euo pipefail
 python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")' \
   | gcloud secrets create espn-mcp-token --data-file=-
 
-read -rsp 'Paste ESPN_S2: ' V && printf '%s' "$V" | gcloud secrets create espn-s2 --data-file=-; unset V; echo
-read -rsp 'Paste ESPN_SWID (with the braces): ' V && printf '%s' "$V" | gcloud secrets create espn-swid --data-file=-; unset V; echo
+read -rsp 'Paste ESPN_S2: ' V; echo
+printf '%s' "$V" | gcloud secrets create espn-s2 --data-file=-
+read -rsp 'Paste ESPN_SWID (with the braces): ' V; echo
+printf '%s' "$V" | gcloud secrets create espn-swid --data-file=-
+read -rp 'ESPN league ID (the number after leagueId= in the ESPN URL): ' V
+printf '%s' "$V" | gcloud secrets create espn-league-id --data-file=-
+read -rp 'ESPN team ID (the number after teamId= in the ESPN URL): ' V
+printf '%s' "$V" | gcloud secrets create espn-team-id --data-file=-
+)
 ```
 
-**c. A service account that can read those three secrets and nothing else.** Without this the
+**c. A service account that can read those five secrets and nothing else.** Without this the
 service would run as the project's default account, which usually has far broader rights.
 
 ```bash
 gcloud iam service-accounts create espn-mcp-runner --display-name "ESPN MCP runtime"
 SA="espn-mcp-runner@${PROJECT_ID}.iam.gserviceaccount.com"
-for s in espn-mcp-token espn-s2 espn-swid; do
+for s in espn-mcp-token espn-s2 espn-swid espn-league-id espn-team-id; do
   gcloud secrets add-iam-policy-binding "$s" \
     --member "serviceAccount:${SA}" --role roles/secretmanager.secretAccessor
 done
 ```
 
-**d. Deploy.** Replace the league ID, team ID, and timezone with yours. The first run asks to
-create a container repository; answer yes. `.env` is never uploaded (it is in `.gitignore`,
-which `gcloud` honours, and in `.dockerignore`).
+**d. Deploy.** The timezone is the only value to change. The first run asks to create a
+container repository; answer yes. `.env` is never uploaded (it is in `.gitignore`, which
+`gcloud` honours, and in `.dockerignore`).
 
 ```bash
 gcloud run deploy "$SERVICE" --source . --region "$REGION" \
   --service-account "$SA" \
   --allow-unauthenticated \
   --min-instances 0 --max-instances 1 --timeout 60 --cpu 1 --memory 512Mi \
-  --set-env-vars "MCP_AUTH_MODE=oauth,MCP_PUBLIC_URL=${URL},ESPN_LEAGUE_ID=123456,ESPN_TEAM_ID=1,MY_TIMEZONE=America/Chicago" \
-  --set-secrets "MCP_AUTH_TOKEN=espn-mcp-token:latest,ESPN_S2=espn-s2:latest,ESPN_SWID=espn-swid:latest"
+  --set-env-vars "MCP_AUTH_MODE=oauth,MCP_PUBLIC_URL=${URL},MY_TIMEZONE=America/Chicago" \
+  --set-secrets "MCP_AUTH_TOKEN=espn-mcp-token:latest,ESPN_S2=espn-s2:latest,ESPN_SWID=espn-swid:latest,ESPN_LEAGUE_ID=espn-league-id:latest,ESPN_TEAM_ID=espn-team-id:latest"
 ```
 
 - `--allow-unauthenticated` only removes Google's own sign-in gate, which Claude cannot pass.
@@ -329,11 +342,150 @@ When you reach the sign-in page in step 3, this prints the passphrase to paste:
 gcloud secrets versions access latest --secret espn-mcp-token; echo
 ```
 
-**Later.** To ship new code, pull it and repeat block d (re-run block a first in a fresh
-terminal to set the variables). When `ESPN_S2` expires, add a new version and redeploy:
-`read -rsp 'ESPN_S2: ' V && printf '%s' "$V" | gcloud secrets versions add espn-s2 --data-file=-; unset V`,
-then disable the old version in the console so it stops counting toward the free allowance.
-To revoke every Claude sign-in at once, add a new version of `espn-mcp-token` the same way.
+#### Updating the deployed server
+
+Everything you configured at the first deploy (secrets, variables, service account, instance
+cap) is stored on the Cloud Run service and carried forward to every new revision. Updating
+therefore means "build the current code and swap it in", nothing more. Your Claude connector
+stays signed in across updates, because sign-in tokens are tied to the passphrase, not to a
+particular build.
+
+**From Cloud Shell: one block.** Open [Cloud Shell](https://shell.cloud.google.com), paste
+this, parentheses included. It is complete on its own: it does not depend on any variable or
+step from the sections above, and it can be run as often as you like. Set `PROJECT_ID` the
+first time and keep the block somewhere handy. The parentheses make it stop at the first
+problem without closing your terminal.
+
+```bash
+(
+set -euo pipefail
+PROJECT_ID=espn-mcp-YOURNAME   # your Google Cloud project ID: the only line to edit
+BRANCH=main                    # the branch to deploy
+REGION=us-central1
+SERVICE=espn-fantasy-mcp
+REPO_URL=https://github.com/lindsayevanslee/espn-fantasy-basketball-mcp
+REPO_DIR="$HOME/espn-fantasy-basketball-mcp"
+
+# 1. Get the latest code for that branch (cloning first if this machine has no copy).
+[ -d "$REPO_DIR/.git" ] || git clone "$REPO_URL" "$REPO_DIR"
+cd "$REPO_DIR"
+git fetch origin
+git checkout "$BRANCH"
+git merge --ff-only "origin/$BRANCH"
+[ -f Dockerfile ] || { echo "STOP: no Dockerfile on branch $BRANCH; nothing was deployed."; exit 1; }
+echo "Deploying: $(git log --oneline -1)"
+
+# 2. Build it and replace the running revision. Settings and secrets carry over untouched.
+gcloud run deploy "$SERVICE" --source . --region "$REGION" --project "$PROJECT_ID" --quiet
+
+# 3. Check the new revision the same way the first deploy was checked.
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+URL="https://${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
+check() { if [ "$2" = "$3" ]; then echo "PASS  $1"; else echo "FAIL  $1: expected $3, got $2"; exit 1; fi; }
+check "health check answers"       "$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")" 200
+check "MCP endpoint needs sign-in" "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$URL/mcp")" 401
+check "sign-in metadata matches"   "$(curl -s "$URL/.well-known/oauth-protected-resource" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["resource"])')" "$URL/mcp"
+echo "Updated. MCP server URL (unchanged): $URL/mcp"
+)
+```
+
+Three `PASS` lines mean the new code is live. A `FAIL` or an error from `gcloud` means the
+previous revision is still serving: Cloud Run only switches traffic to a revision that
+starts successfully. If Claude does not show a newly added tool, start a new chat.
+
+**From the Google Cloud console: no commands.** The console cannot build from a folder on
+your computer, but it can connect the service to this GitHub repository. After that there are
+two ways to update without a terminal, and both use the same connection.
+
+One-time setup, in the [Cloud Run console](https://console.cloud.google.com/run):
+
+1. Click the `espn-fantasy-mcp` service, then **Connect to repo** at the top of the page.
+2. Choose **Cloud Build** as the provider (it supports GitHub), sign in to GitHub when asked,
+   install the Google Cloud Build app on this repository only, and select the repository.
+3. For the branch, enter `^main$`. For the build type, choose **Dockerfile** and leave the
+   location as `/Dockerfile`. Save.
+
+This creates a Cloud Build *trigger*. From then on:
+
+- **Automatic:** every push or merged pull request to `main` builds and deploys. Combined
+  with [working on this repo from your phone](#working-on-this-repo-from-your-phone), the
+  whole loop needs no computer: ask Claude for a change, merge the pull request, and the live
+  server updates a few minutes later.
+- **On demand:** in the console go to **Cloud Build > Triggers**, find the trigger, and click
+  **Run**. Use this to redeploy without a new commit.
+
+Watch a build under **Cloud Build > History**; the new revision appears on the service's
+**Revisions** tab. Things to know before relying on it:
+
+- The exact console labels change over time. The steps above follow Google's
+  [continuous deployment guide](https://cloud.google.com/run/docs/continuous-deployment), which
+  is the reference if a screen looks different. This route has not been exercised end to end
+  by this project's tests the way the Cloud Shell block has.
+- The first build may fail with a permission error naming the `espn-mcp-runner` service
+  account. The build's own service account needs permission to deploy a service that runs
+  as it. The build log names the account that was refused; grant it with
+  `gcloud iam service-accounts add-iam-policy-binding espn-mcp-runner@PROJECT_ID.iam.gserviceaccount.com --member "serviceAccount:THE_ACCOUNT_IN_THE_LOG" --role roles/iam.serviceAccountUser`
+  and run the trigger again.
+- Automatic deploys mean that whatever lands on `main` goes live on a server that holds your
+  ESPN cookies, without waiting for the test workflow. Keep changes going through pull
+  requests, and do not point the trigger at a branch others can push to.
+- Each build uses a minute or two of the free Cloud Build allowance and stores a new image.
+
+**Refreshing an expired ESPN cookie.** When tools start returning authentication errors,
+copy the new `espn_s2` value from your browser and paste this block. It adds the new value,
+retires the old one so it stops counting toward the free allowance, and restarts the service
+on it. Use `SECRET=espn-swid` for the other cookie, or `SECRET=espn-mcp-token` to change the
+passphrase, which signs every Claude connector out at once.
+
+```bash
+(
+set -euo pipefail
+PROJECT_ID=espn-mcp-YOURNAME   # your Google Cloud project ID
+SECRET=espn-s2
+REGION=us-central1
+SERVICE=espn-fantasy-mcp
+
+read -rsp "New value for $SECRET: " V; echo
+printf '%s' "$V" | gcloud secrets versions add "$SECRET" --project "$PROJECT_ID" --data-file=-
+NEWEST=$(gcloud secrets versions list "$SECRET" --project "$PROJECT_ID" \
+  --filter='state=ENABLED' --sort-by='~createTime' --limit=1 --format='value(name.basename())')
+for OLD in $(gcloud secrets versions list "$SECRET" --project "$PROJECT_ID" \
+  --filter='state=ENABLED' --format='value(name.basename())'); do
+  [ "$OLD" = "$NEWEST" ] || gcloud secrets versions disable "$OLD" --secret "$SECRET" --project "$PROJECT_ID"
+done
+gcloud run services update "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+  --update-env-vars "SECRETS_REFRESHED_AT=$(date -u +%Y%m%dT%H%M%SZ)"
+)
+```
+
+**Moving league and team ID into secrets on an existing service.** Only needed once, and
+only if you deployed when this guide still put those two IDs in the deploy command. The last
+command swaps both settings in a single new revision, so the server is never without them.
+(`gcloud` refuses `--update-secrets` for a name that is still a plain variable, which is why
+the removal is in the same command.)
+
+```bash
+(
+set -euo pipefail
+PROJECT_ID=espn-mcp-YOURNAME   # your Google Cloud project ID
+REGION=us-central1
+SERVICE=espn-fantasy-mcp
+SA="espn-mcp-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+
+read -rp 'ESPN league ID: ' V
+printf '%s' "$V" | gcloud secrets create espn-league-id --project "$PROJECT_ID" --data-file=-
+read -rp 'ESPN team ID: ' V
+printf '%s' "$V" | gcloud secrets create espn-team-id --project "$PROJECT_ID" --data-file=-
+for s in espn-league-id espn-team-id; do
+  gcloud secrets add-iam-policy-binding "$s" --project "$PROJECT_ID" \
+    --member "serviceAccount:${SA}" --role roles/secretmanager.secretAccessor > /dev/null
+done
+gcloud run services update "$SERVICE" --region "$REGION" --project "$PROJECT_ID" \
+  --remove-env-vars ESPN_LEAGUE_ID,ESPN_TEAM_ID \
+  --update-secrets ESPN_LEAGUE_ID=espn-league-id:latest,ESPN_TEAM_ID=espn-team-id:latest
+)
+```
 
 #### What it costs
 
@@ -345,7 +497,7 @@ account per month, as of November 2026 (check
 | Service | Free each month | What this server uses |
 |---|---|---|
 | Cloud Run | 2 million requests, 180,000 vCPU-seconds, 360,000 GiB-seconds | Billed only while a request is in flight; a tool call takes a few seconds |
-| Secret Manager | 6 active secret versions, 10,000 reads | 3 versions; read once per cold start |
+| Secret Manager | 6 active secret versions, 10,000 reads | 5 versions; read once per cold start |
 | Artifact Registry | 0.5 GB of storage | One image of about 225 MB uncompressed per deploy; delete old ones |
 | Cloud Build | 2,500 build-minutes | A minute or two per deploy |
 

@@ -63,6 +63,14 @@
   predictable URL, secrets entered without touching shell history, a dedicated least-privilege
   service account, an instance cap and request timeout, and a cost table. The image is now a
   two-stage build (225 MB, was 409 MB) whose runtime user cannot modify the code.
+- Cloud Run guide: league ID and team ID are stored in Secret Manager with the cookies, so no
+  later command needs them typed. Updating the deployed server is one self-contained,
+  re-runnable block (pull, build, redeploy, verify) that leaves the service's settings alone
+  and stops before deploying if the code is not ready. Added a no-terminal route through the
+  Cloud console (connect the service to the repository; deploy on merge or on demand), a
+  self-contained block for refreshing an expired cookie, and a one-time block for moving the
+  IDs to secrets on an existing service. `tests/test_readme_deploy.py` runs each block against
+  stand-in `gcloud`, `git` and `curl` commands.
 - Claude Code cloud sessions (claude.ai/code and the Claude mobile app's Code tab) now install
   the locked dependencies at startup via `.claude/hooks/session-start.sh`, so tests and linters
   work from the first message. `CLAUDE.md` records the project conventions for those sessions.

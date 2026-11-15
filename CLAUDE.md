@@ -35,6 +35,9 @@ An MCP server (FastMCP, Python 3.10+) exposing ESPN Fantasy Basketball data as t
   docstring is what Claude sees. Credentials come from `_get_espn_credentials` / `_get_team_id`
   with environment fallbacks.
 - Keep the README tool list and the CHANGELOG in step with code changes.
+- The Cloud Run blocks in the README are tested as code (`tests/test_readme_deploy.py` runs
+  them against stand-in commands). Blocks meant to be re-run must stay self-contained, wrapped
+  in `( set -euo pipefail ... )`, and must not restate service settings on redeploy.
 
 ## Security
 
