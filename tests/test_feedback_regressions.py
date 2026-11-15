@@ -503,9 +503,11 @@ async def test_expected_games_gap_is_itemised_and_method_is_stated(client):
     assert analysis.projectionMethod.endswith("noisy.")
     opp = {p.playerName: p for p in analysis.opponentPlayers}
     assert opp["Solid Wing"].gamesRemaining == 4 and opp["Solid Wing"].expectedGames == 4.0
-    assert set(opp["Solid Wing"].projectedPerGame) == {
-        c.category for c in analysis.categoryProjections
-    }
+    categories = {c.category for c in analysis.categoryProjections}
+    shooting = {"fieldGoalsMade", "fieldGoalsAttempted", "freeThrowsMade", "freeThrowsAttempted"}
+    assert set(opp["Solid Wing"].projectedPerGame) == categories | shooting, (
+        "made/attempted ride along with FG% and FT% so the percentage math is checkable"
+    )
 
 
 # ------------------------------------------------------------------ 11. compact output

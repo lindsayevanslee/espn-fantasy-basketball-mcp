@@ -42,7 +42,11 @@ def _day(offset: int) -> str:
     return (TODAY + timedelta(days=offset)).isoformat()
 
 
-def _settings(stat_ids: list[int], lock_type: str = "INDIVIDUAL_GAME") -> LeagueSettings:
+def _settings(
+    stat_ids: list[int],
+    lock_type: str = "INDIVIDUAL_GAME",
+    slot_counts: dict[str, int] | None = None,
+) -> LeagueSettings:
     return LeagueSettings(
         leagueId=12345,
         leagueName="Test League",
@@ -61,7 +65,7 @@ def _settings(stat_ids: list[int], lock_type: str = "INDIVIDUAL_GAME") -> League
             playoffMatchupPeriodLength=1,
         ),
         rosterSettings=RosterSettings(
-            lineupSlotCounts={}, positionLimits={}, lineupLocktimeType=lock_type
+            lineupSlotCounts=slot_counts or {}, positionLimits={}, lineupLocktimeType=lock_type
         ),
         acquisitionSettings=AcquisitionSettings(
             acquisitionType="WAIVERS_TRADITIONAL",

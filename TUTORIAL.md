@@ -430,9 +430,19 @@ The inputs are: the matchup (both rosters and current category scores), both tea
 schedules for the matchup window, every player's ESPN **projections** and **last-7-day** stats,
 and the league's scoring categories.
 
-**Step 1: how many games does each player have left?** `games_remaining_by_player()` counts games
-in the window that have not tipped off. Games already played are already in the current scores,
-so counting them again would double count.
+**Step 0: which players?** `get_matchup_for_period()` builds each roster from the union of today's
+roster and the roster for `status.transactionScoringPeriod`, the day ESPN applies an add made now
+(after today's games start that is the next day, or in a weekly-lock league the next week's first
+day). An add made tonight is on the later roster only, so reading today's alone misses it; the
+reverse lag has also been seen, so neither is trusted alone. `Roster.pendingAdds` names the
+players found only on the later roster and the day they take effect, and `rosterSource` repeats
+it. The same effective roster feeds `check_roster_move`, so a pending add is counted against the
+roster size and position limits and is reported as already on the roster.
+
+**Step 1: how many games does each player have left?** `remaining_game_dates_by_player()` lists the
+games in the window that have not tipped off (`games_remaining_by_player()` counts them). Games
+already played are already in the current scores, so counting them again would double count. A
+pending add's games before his effective day are left out.
 
 **Step 2: discount by availability and slot.** `expected_games_for()` turns each roster entry's
 remaining game dates into an `ExpectedGames` record. `player_availability()` supplies the label
@@ -450,7 +460,9 @@ player is still compared against the starters. Every discount carries a note tha
 **Step 3: project each category.** For counting categories (points, rebounds, and so on),
 projected = current + Σ(player's projected per-game × expected games). For FG% and FT%, the code
 instead projects made and attempted separately and divides at the end, because averaging
-percentages is wrong. It reads current FGM/FGA from `componentStats`, falling back to the raw
+percentages is wrong; the made/attempted behind both teams' current and projected values are
+returned on the category, each player's per-game line carries his made/attempted, and
+`projectedTotals` gives per-game × games counted, so the arithmetic can be checked to the shot. It reads current FGM/FGA from `componentStats`, falling back to the raw
 `scoreByStat` entries for stat IDs 13–16, and it validates that the numbers look like counts (≥ 1)
 rather than fractions before trusting them. If ESPN has no per-game made/attempted for a player,
 there is a rough fallback from points and FG%.

@@ -53,6 +53,7 @@ from .models import (
     MatchupTeam,
     NBAGame,
     OverallRecord,
+    PendingAdd,
     Player,
     PlayerComparison,
     PlayerDraftInfo,
@@ -1259,31 +1260,81 @@ class ESPNFantasyBasketballClient:
         raise ValueError("Team not found in this league")
 
     @staticmethod
-    def _with_planned_lineup(today: Roster, planned: Roster) -> Roster:
-        """Today's players carrying the lineup slots ESPN has set for a future day.
+    def _merge_rosters(
+        base: Roster,
+        later: Roster,
+        effective_period: int | None,
+        effective_date: str | None,
+        slots_from_later: bool,
+    ) -> Roster:
+        """Union of a team's roster for today and for a later day.
 
-        A player on today's roster but absent from the planned one (added today) keeps today's
-        slot; a player only in the planned roster (dropped today) is not included.
+        ESPN applies an add made after today's games started from status.transactionScoringPeriod,
+        so until then the player is on the later day's roster only (recorded live 2026-11-14: an
+        add at 19:00 CT appeared on the scoring-period-28 roster and not on today's, period 26).
+        The reverse has also been seen, a future day's roster lagging an add made today, so
+        neither roster is trusted alone: a player on either, whose onTeamId still points at this
+        team, is kept. Players only on the later roster are listed in pendingAdds with the day
+        they take effect; players only on today's are named in missingFromLaterRoster. With
+        slots_from_later the lineup slot and lock flag come from the later roster where it has
+        the player (the lineup set for that day).
         """
-        planned_by_id = {e.playerId: e for e in planned.entries}
-        entries = []
-        for entry in today.entries:
-            future = planned_by_id.get(entry.playerId)
-            if future is None:
+        team_id = base.teamId
+
+        def owned(entry: RosterEntry) -> bool:
+            on_team = entry.playerPoolEntry.onTeamId
+            return on_team is None or on_team == team_id
+
+        kept = [e for e in base.entries if owned(e)]
+        later_by_id = {e.playerId: e for e in later.entries if owned(e)}
+        entries: list[RosterEntry] = []
+        for entry in kept:
+            future = later_by_id.get(entry.playerId)
+            if future is not None and slots_from_later:
+                entries.append(
+                    entry.model_copy(
+                        update={
+                            "lineupSlotId": future.lineupSlotId,
+                            "lineupSlotName": future.lineupSlotName,
+                            "lineupLocked": future.lineupLocked,
+                        }
+                    )
+                )
+            else:
                 entries.append(entry)
+        kept_ids = {e.playerId for e in kept}
+        pending: list[PendingAdd] = []
+        for pid, future in later_by_id.items():
+            if pid in kept_ids:
                 continue
-            entries.append(
-                entry.model_copy(
-                    update={
-                        "lineupSlotId": future.lineupSlotId,
-                        "lineupSlotName": future.lineupSlotName,
-                        "lineupLocked": future.lineupLocked,
-                    }
+            entries.append(future)
+            pending.append(
+                PendingAdd(
+                    playerId=pid,
+                    playerName=future.playerPoolEntry.player.fullName,
+                    effectiveScoringPeriod=effective_period,
+                    effectiveDate=effective_date,
+                    lineupSlotName=future.lineupSlotName,
                 )
             )
-        return today.model_copy(
+        missing = [e.playerPoolEntry.player.fullName for e in kept if e.playerId not in later_by_id]
+        return base.model_copy(
             update={
                 "entries": entries,
+                "pendingAdds": ((base.pendingAdds or []) + pending) or None,
+                "missingFromLaterRoster": missing or None,
+            }
+        )
+
+    @classmethod
+    def _with_planned_lineup(cls, today: Roster, planned: Roster) -> Roster:
+        """Today's players (plus any only on the planned day) carrying the lineup slots ESPN has
+        set for that future day."""
+        merged = cls._merge_rosters(
+            today, planned, planned.scoringPeriodId, planned.scoringPeriodDate, True
+        )
+        return merged.model_copy(
+            update={
                 "scoringPeriodId": planned.scoringPeriodId or today.scoringPeriodId,
                 "scoringPeriodDate": planned.scoringPeriodDate or today.scoringPeriodDate,
                 "lineupLocked": planned.lineupLocked,
@@ -1291,6 +1342,27 @@ class ESPNFantasyBasketballClient:
                 "unlockedSlots": planned.unlockedSlots,
                 "note": None,
             }
+        )
+
+    async def get_effective_roster(
+        self, team_id: int, league_settings: LeagueSettings | None = None
+    ) -> Roster:
+        """Today's roster plus the players whose add takes effect at the next transaction period.
+
+        status.transactionScoringPeriod is the scoring period ESPN charges an add made now to;
+        when it is later than today, the roster for that period shows pending adds that today's
+        roster does not. This is the roster ESPN checks a new add against and the one next
+        week's lineup is built from. Returns today's roster unchanged when the two coincide.
+        """
+        settings = league_settings or await self.get_league_settings()
+        status = settings.status
+        today = await self.get_team_roster(team_id)
+        tx_period = status.transactionScoringPeriod
+        if not tx_period or tx_period <= status.latestScoringPeriod:
+            return today
+        later = await self.get_team_roster(team_id, scoring_period=tx_period)
+        return self._merge_rosters(
+            today, later, tx_period, status.transactionScoringPeriodDate, slots_from_later=False
         )
 
     def _make_roster_slim(self, roster: Roster) -> Roster:
@@ -2356,13 +2428,24 @@ class ESPNFantasyBasketballClient:
             return None
 
         # Which rosters to show. Current week: today's (ESPN's default, the same roster
-        # get_team_roster returns). Past week: the final day's, as stored. Future week: the
-        # PLAYERS are today's roster (a future-day roster can lag an add made today) and the
-        # lineup SLOTS come from the lineup set for the week's first day where ESPN has one.
+        # get_team_roster returns), plus pending adds when they take effect inside the week.
+        # Past week: the final day's, as stored. Future week: the PLAYERS are the union of
+        # today's roster and the roster for the period an add made now takes effect (an add
+        # made after today's games started is only on the latter; a future-day roster can also
+        # lag an add made today), and the lineup SLOTS come from the lineup set for the week's
+        # first day where ESPN has one.
         status = league_settings.status
         scoring_period = status.latestScoringPeriod
         requested_period: int | None = None
         roster_note = "Rosters: today's, the same players get_team_roster returns"
+        tx_date = status.transactionScoringPeriodDate
+        current_window = status.currentMatchupPeriodDates or []
+        tx_in_current_week = bool(
+            tx_date
+            and len(current_window) == 2
+            and (status.transactionScoringPeriod or 0) > status.latestScoringPeriod
+            and tx_date <= current_window[1]
+        )
         if matchup_period != status.currentMatchupPeriod:
             window = await self.get_matchup_period_dates(matchup_period, league_settings)
             anchor = await self._scoring_period_anchor(league_settings)
@@ -2374,17 +2457,27 @@ class ESPNFantasyBasketballClient:
 
         if requested_period is not None and matchup_period > status.currentMatchupPeriod:
             today_yours, today_theirs, planned_yours, planned_theirs = await asyncio.gather(
-                self.get_team_roster(team_id),
-                self.get_team_roster(opponent_team_id),
+                self.get_effective_roster(team_id, league_settings),
+                self.get_effective_roster(opponent_team_id, league_settings),
                 self.get_team_roster(team_id, scoring_period=requested_period),
                 self.get_team_roster(opponent_team_id, scoring_period=requested_period),
             )
             your_roster = self._with_planned_lineup(today_yours, planned_yours)
             opponent_roster = self._with_planned_lineup(today_theirs, planned_theirs)
             roster_note = (
-                "Rosters: today's players (the same get_team_roster returns), with lineup "
-                f"slots from the lineup set for scoring period {requested_period} where ESPN "
-                "has one"
+                "Rosters: today's players plus pending adds (players ESPN lists on the roster "
+                f"for scoring period {status.transactionScoringPeriod or requested_period}, when "
+                "an add made now takes effect, or for the week's first day), with lineup slots "
+                f"from the lineup set for scoring period {requested_period} where ESPN has one"
+            )
+        elif requested_period is None and tx_in_current_week:
+            your_roster, opponent_roster = await asyncio.gather(
+                self.get_effective_roster(team_id, league_settings),
+                self.get_effective_roster(opponent_team_id, league_settings),
+            )
+            roster_note = (
+                "Rosters: today's players plus pending adds, which take effect on "
+                f"{tx_date} (scoring period {status.transactionScoringPeriod}) inside this week"
             )
         else:
             your_roster, opponent_roster = await asyncio.gather(
@@ -2393,6 +2486,17 @@ class ESPNFantasyBasketballClient:
             )
             if requested_period is not None:
                 roster_note = f"Rosters: as stored for scoring period {requested_period}"
+            elif tx_date and (status.transactionScoringPeriod or 0) > status.latestScoringPeriod:
+                roster_note += (
+                    f"; adds made now take effect on {tx_date} (scoring period "
+                    f"{status.transactionScoringPeriod}), after this week, so they are not "
+                    "included"
+                )
+        pending = [
+            p.playerName for r in (your_roster, opponent_roster) for p in r.pendingAdds or []
+        ]
+        if pending:
+            roster_note += "; pending adds included: " + ", ".join(pending)
 
         # Apply slim roster if not verbose
         if not verbose:
@@ -2491,16 +2595,27 @@ class ESPNFantasyBasketballClient:
         add_ids: list[int],
         matchup_period: int | None = None,
         basis: str = "projections",
+        start_ids: list[int] | None = None,
+        sit_ids: list[int] | None = None,
     ) -> RosterMoveSimulation:
-        """Re-run the matchup projection with hypothetical drops/adds and return the deltas.
-        See analysis.simulate_roster_move."""
+        """Re-run the matchup projection with hypothetical drops/adds and lineup changes and
+        return the deltas. See analysis.simulate_roster_move."""
         self._validate_positive_int(team_id, "team_id")
-        for pid in list(drop_ids) + list(add_ids):
+        start_ids = list(start_ids or [])
+        sit_ids = list(sit_ids or [])
+        for pid in list(drop_ids) + list(add_ids) + start_ids + sit_ids:
             self._validate_positive_int(pid, "player_id")
-        if not drop_ids and not add_ids:
-            raise ValueError("Give at least one player to drop or add")
+        if not drop_ids and not add_ids and not start_ids and not sit_ids:
+            raise ValueError("Give at least one player to drop, add, start or sit")
         return await simulate_roster_move_impl(
-            self, team_id, list(drop_ids), list(add_ids), matchup_period, basis
+            self,
+            team_id,
+            list(drop_ids),
+            list(add_ids),
+            matchup_period,
+            basis,
+            start_ids=start_ids,
+            sit_ids=sit_ids,
         )
 
     async def roster_entries_for_players(self, player_ids: list[int]) -> list[RosterEntry]:
@@ -2607,15 +2722,34 @@ class ESPNFantasyBasketballClient:
         """
         self._validate_positive_int(team_id, "team_id")
         drop_ids = list(drop_ids or [])
-        settings, roster, teams, adds = await asyncio.gather(
-            self.get_league_settings(),
-            self.get_team_roster(team_id),
+        settings = await self.get_league_settings()
+        roster, teams, adds = await asyncio.gather(
+            self.get_effective_roster(team_id, settings),
             self.get_league_teams(),
             self.roster_entries_for_players(list(dict.fromkeys(add_ids))),
         )
         drop_set = set(drop_ids)
         reasons: list[str] = []
         warnings: list[str] = []
+        pending_by_id = {p.playerId: p for p in roster.pendingAdds or []}
+        status = settings.status
+        tx_period = status.transactionScoringPeriod
+        if tx_period and tx_period > status.latestScoringPeriod:
+            roster_period: int | None = tx_period
+            roster_note = (
+                f"Counts use the roster for scoring period {tx_period}"
+                + (
+                    f" ({status.transactionScoringPeriodDate})"
+                    if status.transactionScoringPeriodDate
+                    else ""
+                )
+                + ", the period an add made now takes effect, so pending adds are included"
+            )
+            if pending_by_id:
+                roster_note += " (" + ", ".join(p.playerName for p in pending_by_id.values()) + ")"
+        else:
+            roster_period = status.latestScoringPeriod
+            roster_note = "Counts use today's roster; adds made now take effect today"
 
         kept = [e for e in roster.entries if e.lineupSlotId != self._SLOT_IR]
         now_count = len(kept)
@@ -2636,7 +2770,14 @@ class ESPNFantasyBasketballClient:
                 owner = next((t.name for t in teams if t.id == on_team), f"team {on_team}")
                 added_status[label] = f"ONTEAM: owned by {owner}"
                 if on_team == team_id:
-                    reasons.append(f"{label} is already on your roster")
+                    pending = pending_by_id.get(player.id)
+                    if pending is not None:
+                        reasons.append(
+                            f"{label} is already on your roster: a pending add that takes "
+                            f"effect on {pending.effectiveDate or 'the next transaction period'}"
+                        )
+                    else:
+                        reasons.append(f"{label} is already on your roster")
                 else:
                     reasons.append(f"{label} is owned by {owner}; a trade, not an add")
             elif player.availabilityStatus == "WAIVERS":
@@ -2753,6 +2894,8 @@ class ESPNFantasyBasketballClient:
             positionLimitEvidence=evidence,
             acquisitionsRemainingThisMatchup=remaining,
             addedPlayerStatus=added_status,
+            rosterScoringPeriod=roster_period,
+            rosterNote=roster_note,
         )
 
     async def get_team_season_stats(self, team_id: int) -> TeamSeasonStats:

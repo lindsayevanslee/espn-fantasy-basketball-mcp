@@ -190,6 +190,16 @@ class CategoryProjection(BaseModel):
     # percentages use the lead expressed in made shots over the projected attempts.
     closeThreshold: float | None = None
     closenessRule: str | None = None
+    # Percentage categories only: the made/attempted behind the current and projected values,
+    # so yourProjected == yourProjectedMade / yourProjectedAttempted can be checked
+    yourCurrentMade: float | None = None
+    yourCurrentAttempted: float | None = None
+    yourProjectedMade: float | None = None
+    yourProjectedAttempted: float | None = None
+    opponentCurrentMade: float | None = None
+    opponentCurrentAttempted: float | None = None
+    opponentProjectedMade: float | None = None
+    opponentProjectedAttempted: float | None = None
 
 
 class PlayerRecommendation(BaseModel):
@@ -227,6 +237,9 @@ class PlayerRecommendation(BaseModel):
     basisPerGame: dict[str, float] | None = None
     seasonPerGame: dict[str, float] | None = None
     projectedPerGame: dict[str, float] | None = None
+    # What he adds to the team's projected totals: basisPerGame x gamesInProjection for each
+    # counting category plus made/attempted shots, so FG% and FT% effects can be checked
+    projectedTotals: dict[str, float] | None = None
     seasonGamesPlayed: int | None = None
 
 
@@ -244,9 +257,10 @@ class OpponentPlayerSummary(BaseModel):
     availabilityNote: str | None = None
     injuryStatus: str | None = None
     injuryDetails: str | None = None
-    projectedPerGame: dict[str, float] | None = None  # scoring categories only
+    projectedPerGame: dict[str, float] | None = None  # scoring categories (+ made/attempted)
     basisPerGame: dict[str, float] | None = None  # the line the projection actually used
     seasonPerGame: dict[str, float] | None = None
+    projectedTotals: dict[str, float] | None = None  # basisPerGame x gamesInProjection
 
 
 class MatchupAnalysis(BaseModel):
@@ -326,6 +340,9 @@ class CategoryDelta(BaseModel):
     closenessBefore: str | None = None  # close / near / clear
     closenessAfter: str | None = None
     changed: bool = False  # result or closeness changed
+    # Percentage categories only: your projected [made, attempted] before and after
+    yourMadeAttemptedBefore: list[float] | None = None
+    yourMadeAttemptedAfter: list[float] | None = None
 
 
 class RosterLegality(BaseModel):
@@ -350,6 +367,10 @@ class RosterLegality(BaseModel):
     # What this league's own roster says about the rule, e.g. the current roster already
     # exceeds a limit by eligibility and ESPN accepted it.
     positionLimitEvidence: list[str] = []
+    # Which roster the counts come from: the roster for the scoring period an add made now
+    # takes effect (status.transactionScoringPeriod), which includes pending adds
+    rosterScoringPeriod: int | None = None
+    rosterNote: str | None = None
     acquisitionsRemainingThisMatchup: int | None = None
     addedPlayerStatus: dict[str, str] = {}  # "Name (id)" -> FREEAGENT / WAIVERS ... / ONTEAM ...
 
@@ -367,6 +388,12 @@ class RosterMoveSimulation(BaseModel):
     # Which slot each added player was given: a dropped starter's slot when it can still be
     # filled, else the bench (which does not score under a weekly lock)
     placements: list[str] = []
+    # Lineup changes simulated: who moved into a starting slot, who went to the bench, and
+    # anything that could not be done as asked (ineligible slot, no open slot, locked slot)
+    started: list[str] = []
+    benched: list[str] = []
+    lineupChanges: list[str] = []
+    lineupWarnings: list[str] = []
     gamesRemainingBefore: int | None = None
     gamesRemainingAfter: int | None = None
     expectedGamesBefore: float | None = None
@@ -483,9 +510,26 @@ class RosterEntry(BaseModel):
     lineupLocked: bool | None = None  # This slot is locked for the roster's scoring period
 
 
+class PendingAdd(BaseModel):
+    """A player ESPN lists on this team's roster for a later scoring period but not today's:
+    an add made after today's games started, which ESPN applies from
+    status.transactionScoringPeriod. He cannot score before that day."""
+
+    playerId: int
+    playerName: str
+    effectiveScoringPeriod: int | None = None
+    effectiveDate: str | None = None  # YYYY-MM-DD
+    lineupSlotName: str | None = None
+
+
 class Roster(BaseModel):
     teamId: int
     entries: list[RosterEntry]
+    # Players present only on a later day's roster (see PendingAdd); included in `entries`
+    pendingAdds: list[PendingAdd] | None = None
+    # Players on today's roster that a later day's roster does not list (ESPN's future roster
+    # can lag an add made today); kept in `entries` and named here so the reader can check
+    missingFromLaterRoster: list[str] | None = None
     # Which day this roster is for. ESPN's scoring periods are days (1 = opening night); the
     # default is today's. requestedScoringPeriod is what the caller asked for (None = today),
     # espnScoringPeriodId is what ESPN echoed back, so a mismatch is visible.

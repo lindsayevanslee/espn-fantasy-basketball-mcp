@@ -828,7 +828,9 @@ async def analyze_matchup(
     "last_15", "last_30", or "blend" (mean of projections and season). The response says which
     basis it used, lists players who fell back to projections, and gives every player's season,
     projected and basis per-game lines side by side. Rosters are today's players (the same
-    get_team_roster returns), so an add or drop made today is reflected.
+    get_team_roster returns) plus pending adds: an add made after today's games started is
+    on the roster for the period it takes effect (status.transactionScoringPeriod), not
+    today's, and is included with games counted from that day; rosterSource names them.
 
     By default, analyzes your next matchup (current week + 1). Can also analyze
     any other matchup period by specifying matchup_period.
@@ -870,6 +872,10 @@ async def analyze_matchup(
           the gap (same for the opponent)
         - opponentPlayers: the opponent's roster as the projection sees it (games remaining,
           availability, injury detail, projected per-game numbers)
+        - per-game lines (basisPerGame, seasonPerGame, projectedPerGame) carry made/attempted
+          shots beside FG% and FT%, each player has projectedTotals (per-game x games
+          counted), and percentage categoryProjections carry the made/attempted behind the
+          current and projected values, so the FG% / FT% arithmetic can be checked
         - currentCategoryWins/Losses/Ties: Current category record
         - projectedCategoryWins/Losses: Projected category record
         - strategyNotes: Strategic recommendations
@@ -894,13 +900,16 @@ async def analyze_matchup(
 async def simulate_roster_move(
     drop_ids: list[int] | None = None,
     add_ids: list[int] | None = None,
+    start_ids: list[int] | None = None,
+    sit_ids: list[int] | None = None,
     team_id: int | None = None,
     matchup_period: int | None = None,
     basis: str = "projections",
     league_id: int | None = None,
     year: int | None = None,
 ) -> dict:
-    """What if I drop X and add Y? Re-run the matchup projection and return the deltas.
+    """What if I drop X and add Y, or start A and sit B? Re-run the matchup projection and
+    return the deltas.
 
     Runs analyze_matchup twice, before and after the hypothetical move, on ONE basis for both
     teams, and reports per-category deltas, which categories flip (loss -> win etc.), the
@@ -911,11 +920,23 @@ async def simulate_roster_move(
     Each added player takes a dropped starter's slot when that slot can still be filled (the
     week has not started, or ESPN says the slot is not locked); otherwise he goes to the
     bench. In a weekly-lock league bench games do not score, so such an add changes nothing
-    this period and the summary says so; drop a starter instead to see the real swap.
+    this period and the summary says so; drop a starter, or name him in start_ids, to see
+    the real swap.
+
+    Lineup changes: start_ids[i] takes sit_ids[i]'s starting slot when eligible and the sat
+    player goes to the bench ("start Sheppard, sit Dunn" is start_ids=[Sheppard],
+    sit_ids=[Dunn]). An unpaired start fills an open starting slot he is eligible for; an
+    unpaired sit frees his slot. A player in add_ids may also appear in start_ids. Anything
+    that cannot be done as asked is listed in lineupWarnings and skipped; a change to a slot
+    ESPN has locked for the period is simulated but flagged. Pending adds (players ESPN lists
+    on the roster for the period an add made now takes effect) are on the roster.
 
     Args:
         drop_ids: ESPN player IDs to drop from your roster (optional)
         add_ids: ESPN player IDs to add (free agents or waiver players; use search_players)
+        start_ids: ESPN player IDs to move into starting slots (optional)
+        sit_ids: ESPN player IDs to move to the bench, paired with start_ids by position
+            (optional)
         team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
         matchup_period: Matchup period to project (optional, defaults to the next one, like
             analyze_matchup; pass the current period for this week)
@@ -925,9 +946,11 @@ async def simulate_roster_move(
 
     Returns:
         Dictionary with dropped/added names, placements (which slot each added player was
-        given), projectedRecordBefore/After, categoryDeltas (before, after, delta, result and
-        closeness before/after), categoriesFlipped, addedPlayers (their projection lines and
-        games), legality (its warnings are repeated in the summary), and a summary.
+        given), started / benched / lineupChanges / lineupWarnings, projectedRecordBefore/After,
+        categoryDeltas (before, after, delta, result and closeness before/after, and your
+        projected made/attempted before and after for FG% and FT%), categoriesFlipped,
+        addedPlayers (their projection lines, games and projectedTotals), legality (its
+        warnings are repeated in the summary), and a summary.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     team_id = _get_team_id(team_id)
@@ -937,10 +960,14 @@ async def simulate_roster_move(
         )
     drops = _coerce_player_ids(drop_ids) if drop_ids else []
     adds = _coerce_player_ids(add_ids) if add_ids else []
+    starts = _coerce_player_ids(start_ids) if start_ids else []
+    sits = _coerce_player_ids(sit_ids) if sit_ids else []
     if matchup_period is not None:
         matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
     client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
-    result = await client.simulate_roster_move(team_id, drops, adds, matchup_period, basis)
+    result = await client.simulate_roster_move(
+        team_id, drops, adds, matchup_period, basis, start_ids=starts, sit_ids=sits
+    )
     return _dump(result)
 
 
@@ -956,7 +983,9 @@ async def can_add_player(
 
     Checks roster size against the league's non-IR roster limit, each position's count
     against the position limits (e.g. "max 4 centers"), acquisitions left this matchup
-    period, and whether each player is a free agent, on waivers, or owned. Position counts
+    period, and whether each player is a free agent, on waivers, or owned. Counts use the
+    roster for the scoring period an add made now takes effect (rosterNote says which), so a
+    pending add is counted and reported as already on your roster. Position counts
     are given both by primary position and by slot eligibility, before and after the move,
     because ESPN does not document which one it enforces for basketball. The verdict uses
     primary positions unless ESPN_POSITION_LIMIT_BASIS=eligibility is set; a warning says
