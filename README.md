@@ -232,11 +232,30 @@ is [Cloud Shell](https://shell.cloud.google.com), a browser terminal with `gclou
 installed and signed in, so nothing has to be installed on your computer. Clone this repository
 there, `cd` into it, and run the blocks below in order in the same terminal.
 
-**a. Names.** Cloud Run gives every service a predictable URL built from the service name,
-project number, and region, so the sign-in can be told its own address before the first deploy.
+**Choose a project first.** A new Cloud Shell session has no project selected, and every
+command below needs one. A project of its own for this server is the tidy option: its secrets,
+service account, and budget alert stay separate from anything else you run, and deleting the
+project later removes everything. The free allowances are per billing account, so an extra
+project costs nothing.
 
 ```bash
-PROJECT_ID=$(gcloud config get-value project)
+gcloud projects list                                   # what you already have
+gcloud projects create espn-mcp-YOURNAME --name "ESPN MCP"   # or skip this and reuse one; IDs are globally unique
+gcloud config set project espn-mcp-YOURNAME
+
+gcloud billing accounts list                           # copy the ACCOUNT_ID that is open
+gcloud billing projects link espn-mcp-YOURNAME --billing-account ACCOUNT_ID
+gcloud billing projects describe espn-mcp-YOURNAME --format='value(billingEnabled)'   # True
+```
+
+**a. Names.** Cloud Run gives every service a predictable URL built from the service name,
+project number, and region, so the sign-in can be told its own address before the first deploy.
+The `echo` must print a URL with a 12-digit number in it, like
+`https://espn-fantasy-mcp-123456789012.us-central1.run.app`. If the number is missing, no
+project is selected; go back one step.
+
+```bash
+PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 REGION=us-central1
 SERVICE=espn-fantasy-mcp
