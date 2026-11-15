@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .analysis import analyze_matchup as analyze_matchup_impl
+from .analysis import optimize_lineup as optimize_lineup_impl
 from .analysis import player_availability
 from .analysis import simulate_roster_move as simulate_roster_move_impl
 from .constants import (
@@ -47,6 +48,7 @@ from .models import (
     DraftStatus,
     LeagueSettings,
     LeagueStatus,
+    LineupOptimization,
     Matchup,
     MatchupAnalysis,
     MatchupRecord,
@@ -2597,16 +2599,26 @@ class ESPNFantasyBasketballClient:
         basis: str = "projections",
         start_ids: list[int] | None = None,
         sit_ids: list[int] | None = None,
+        absent_ids: list[int] | None = None,
+        missed_games: dict[int, int] | None = None,
     ) -> RosterMoveSimulation:
-        """Re-run the matchup projection with hypothetical drops/adds and lineup changes and
-        return the deltas. See analysis.simulate_roster_move."""
+        """Re-run the matchup projection with hypothetical drops/adds, lineup changes and
+        absences and return the deltas. See analysis.simulate_roster_move."""
         self._validate_positive_int(team_id, "team_id")
         start_ids = list(start_ids or [])
         sit_ids = list(sit_ids or [])
-        for pid in list(drop_ids) + list(add_ids) + start_ids + sit_ids:
+        absent_ids = list(absent_ids or [])
+        missed_games = dict(missed_games or {})
+        for pid in list(drop_ids) + list(add_ids) + start_ids + sit_ids + absent_ids:
             self._validate_positive_int(pid, "player_id")
-        if not drop_ids and not add_ids and not start_ids and not sit_ids:
-            raise ValueError("Give at least one player to drop, add, start or sit")
+        for pid, games in missed_games.items():
+            self._validate_positive_int(pid, "player_id")
+            if not isinstance(games, int) or isinstance(games, bool) or games < 0:
+                raise ValueError(
+                    f"missed_games[{pid}] must be a non-negative integer, got {games!r}"
+                )
+        if not any((drop_ids, add_ids, start_ids, sit_ids, absent_ids, missed_games)):
+            raise ValueError("Give at least one player to drop, add, start, sit, or mark absent")
         return await simulate_roster_move_impl(
             self,
             team_id,
@@ -2616,7 +2628,23 @@ class ESPNFantasyBasketballClient:
             basis,
             start_ids=start_ids,
             sit_ids=sit_ids,
+            absent_ids=absent_ids,
+            missed_games=missed_games,
         )
+
+    async def optimize_lineup(
+        self,
+        team_id: int,
+        matchup_period: int | None = None,
+        basis: str = "projections",
+        top: int = 3,
+    ) -> LineupOptimization:
+        """Rank every valid starting lineup by the matchup projection. See
+        analysis.optimize_lineup."""
+        self._validate_positive_int(team_id, "team_id")
+        if not isinstance(top, int) or isinstance(top, bool) or not 1 <= top <= 10:
+            raise ValueError(f"top must be an integer from 1 to 10, got {top!r}")
+        return await optimize_lineup_impl(self, team_id, matchup_period, basis, top)
 
     async def roster_entries_for_players(self, player_ids: list[int]) -> list[RosterEntry]:
         """Build roster entries (bench slot) for arbitrary players, e.g. free agents to add.
@@ -2816,21 +2844,30 @@ class ESPNFantasyBasketballClient:
         }
         basis = self._position_limit_basis()
         evidence: list[str] = []
+        real_adds = sum(1 for e in adds if not e.playerPoolEntry.onTeamId)
         for pos, limit in limits.items():
             if limit is None or limit < 0 or pos not in slot_for:
                 continue
+            primary_over = by_default.get(pos, 0) > limit
+            eligibility_over = by_eligibility.get(pos, 0) > limit
             # The roster ESPN already accepted is the one fact this league offers about the
             # rule: if it exceeds a limit by eligibility, ESPN is not counting eligibility
-            # (unless a player gained that eligibility after he was rostered).
-            if now_eligibility.get(pos, 0) > limit >= now_default.get(pos, 0):
+            # (unless a player gained that eligibility after he was rostered). When that is
+            # so, the eligibility count after the move is not held against it either.
+            proven = now_eligibility.get(pos, 0) > limit >= now_default.get(pos, 0)
+            if proven:
                 evidence.append(
                     f"Your current roster has {now_eligibility[pos]} players eligible at {pos} "
                     f"against a limit of {limit} and ESPN accepted it, so ESPN is not counting "
                     "eligibility for this limit (unless a player gained that eligibility after "
                     "he was rostered)"
+                    + (
+                        f"; the {by_eligibility[pos]} eligible after this move is therefore not "
+                        "a warning"
+                        if eligibility_over and basis != "eligibility"
+                        else ""
+                    )
                 )
-            primary_over = by_default.get(pos, 0) > limit
-            eligibility_over = by_eligibility.get(pos, 0) > limit
             if basis == "eligibility":
                 if eligibility_over:
                     reasons.append(
@@ -2842,11 +2879,12 @@ class ESPNFantasyBasketballClient:
                 reasons.append(
                     f"{by_default[pos]} players whose primary position is {pos}; the limit is {limit}"
                 )
-            elif eligibility_over:
+            elif eligibility_over and not proven:
+                what = "this add" if real_adds else "a move this tool allowed"
                 warnings.append(
                     f"{by_eligibility[pos]} players are eligible at {pos} against a limit of "
                     f"{limit}; allowed if ESPN counts primary positions (as assumed), not if it "
-                    "counts eligibility. If ESPN rejects this add, that settles it: set "
+                    f"counts eligibility. If ESPN rejects {what}, that settles it: set "
                     "ESPN_POSITION_LIMIT_BASIS=eligibility so this tool counts the same way"
                 )
         if basis == "eligibility":
@@ -2869,7 +2907,6 @@ class ESPNFantasyBasketballClient:
 
         mine = next((t for t in teams if t.id == team_id), None)
         remaining = mine.acquisitionsRemainingThisMatchup if mine else None
-        real_adds = sum(1 for e in adds if not e.playerPoolEntry.onTeamId)
         if remaining is not None and real_adds > remaining:
             reasons.append(
                 f"{real_adds} add(s) requested but only {remaining} acquisition(s) left this "

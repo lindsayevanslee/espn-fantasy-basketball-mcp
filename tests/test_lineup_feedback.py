@@ -531,8 +531,10 @@ async def test_current_roster_over_the_limit_by_eligibility_is_evidence(monkeypa
     assert result.positionLimitEvidence == [
         "Your current roster has 4 players eligible at C against a limit of 3 and ESPN "
         "accepted it, so ESPN is not counting eligibility for this limit (unless a player "
-        "gained that eligibility after he was rostered)"
+        "gained that eligibility after he was rostered); the 5 eligible after this move is "
+        "therefore not a warning"
     ]
+    assert result.warnings == [], "the evidence line replaces the eligibility warning"
 
 
 @pytest.mark.asyncio
