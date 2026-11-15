@@ -41,6 +41,39 @@
   "not recognised, trust the per-slot flags" note instead of daily-lock advice.
 
 ### Added
+- The server can now be used from the Claude mobile app and claude.ai as a remote MCP server.
+  `MCP_TRANSPORT=streamable-http` serves the tools over Streamable HTTP at `/mcp`, gated by a
+  bearer token (`MCP_AUTH_TOKEN`, required; constant-time comparison; never accepted in the
+  URL) with an open `/health` (not `/healthz`, which Cloud Run reserves). A `Dockerfile` packages it for Cloud Run, Fly.io, Railway, or
+  Render. Claude Desktop is unaffected: stdio remains the default.
+  (`espn_fantasy_basketball_mcp/http_transport.py`, `tests/test_http_transport.py`.)
+- `MCP_AUTH_MODE=oauth` adds a single-user OAuth 2.1 sign-in (`espn_fantasy_basketball_mcp/oauth.py`)
+  so the hosted server can be added to claude.ai as a custom connector on any account: Claude
+  registers itself (DCR), the owner pastes `MCP_AUTH_TOKEN` on a login page once, and PKCE-bound
+  codes are exchanged for 1-hour access tokens and 30-day refresh tokens. Clients, codes and
+  tokens are HMAC-signed rather than stored, so it needs no database and survives scale-to-zero.
+  Client registration only accepts Claude's callback URL and loopback callbacks. Requires
+  `MCP_PUBLIC_URL`. Also serves the RFC 9728 metadata at the path the SDK's own 401 points to,
+  which the SDK does not. (`tests/test_oauth.py` drives the full flow in-process.)
+- The hosted server answers an authenticated `GET /mcp` with `405` instead of opening the
+  optional long-lived event stream, which the MCP spec permits. The server never pushes
+  messages, and on hosts that bill by open-request time (Cloud Run) a held stream would keep an
+  instance billable. Unauthenticated `GET` still gets the `401` discovery challenge.
+- The README has a verified Cloud Run walkthrough: one-step deploy using the service's
+  predictable URL, secrets entered without touching shell history, a dedicated least-privilege
+  service account, an instance cap and request timeout, and a cost table. The image is now a
+  two-stage build (225 MB, was 409 MB) whose runtime user cannot modify the code.
+- Cloud Run guide: league ID and team ID are stored in Secret Manager with the cookies, so no
+  later command needs them typed. Updating the deployed server is one self-contained,
+  re-runnable block (pull, build, redeploy, verify) that leaves the service's settings alone
+  and stops before deploying if the code is not ready. Added a no-terminal route through the
+  Cloud console (connect the service to the repository; deploy on merge or on demand), a
+  self-contained block for refreshing an expired cookie, and a one-time block for moving the
+  IDs to secrets on an existing service. `tests/test_readme_deploy.py` runs each block against
+  stand-in `gcloud`, `git` and `curl` commands.
+- Claude Code cloud sessions (claude.ai/code and the Claude mobile app's Code tab) now install
+  the locked dependencies at startup via `.claude/hooks/session-start.sh`, so tests and linters
+  work from the first message. `CLAUDE.md` records the project conventions for those sessions.
 - Rosters carry `requestedScoringPeriod` and `espnScoringPeriodId` (what ESPN echoed), and the
   note flags a mismatch, so "did I get the day I asked for" is answerable from the response.
   Each scoring period is its own ESPN request and cache entry (the cache key includes the
