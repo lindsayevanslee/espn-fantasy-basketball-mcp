@@ -71,6 +71,17 @@
   self-contained block for refreshing an expired cookie, and a one-time block for moving the
   IDs to secrets on an existing service. `tests/test_readme_deploy.py` runs each block against
   stand-in `gcloud`, `git` and `curl` commands.
+- Cloud console update route rewritten from a real setup: start from the existing service's
+  own page (the list page's **Connect repo** builds a separate service), the exact fields to
+  set, a step that confirms the trigger's `_SERVICE_NAME` and `_DEPLOY_REGION` before the
+  first merge (with a read-only Cloud Shell equivalent), and a one-off test run. States what a
+  triggered build does: it swaps the image with `gcloud run services update` and leaves every
+  setting in place.
+- The console route now covers creating the service from the console as well as connecting an
+  existing one, with a field-by-field table of the service form (name, region, authentication,
+  billing, scaling, port, memory, timeout, instance limit, variables, secrets, service
+  account) mapped to the flags the Cloud Shell deploy uses. A test keeps the table and the
+  command in step.
 - Claude Code cloud sessions (claude.ai/code and the Claude mobile app's Code tab) now install
   the locked dependencies at startup via `.claude/hooks/session-start.sh`, so tests and linters
   work from the first message. `CLAUDE.md` records the project conventions for those sessions.

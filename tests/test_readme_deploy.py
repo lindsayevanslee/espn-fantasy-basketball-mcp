@@ -293,3 +293,88 @@ def test_migration_moves_both_ids_to_secrets_in_one_revision(run_block):
     bindings = [c for c in calls if c.startswith("secrets add-iam-policy-binding")]
     assert [c.split()[2] for c in bindings] == ["espn-league-id", "espn-team-id"]
     assert calls.index(bindings[-1]) < calls.index(updates[0])  # access granted before use
+
+
+# --------------------------------------------------------------------------- console route
+
+
+def test_trigger_target_check_only_reads(run_block):
+    """The block that confirms where the Cloud Build trigger deploys must change nothing."""
+    run, read_log = run_block
+    result = run(bash_block_after("**Confirm where it will deploy before you merge anything.**"))
+    assert result.returncode == 0, result.stderr
+
+    calls = read_log("gcloud.argv").splitlines()
+    assert [c.split(" --format")[0] for c in calls] == [
+        "builds triggers list --project espn-mcp-YOURNAME --region global",
+        "builds triggers list --project espn-mcp-YOURNAME --region us-central1",
+    ]
+    for call in calls:  # the two fields that decide which service gets the build
+        assert "substitutions._SERVICE_NAME" in call
+        assert "substitutions._DEPLOY_REGION" in call
+
+
+def test_console_route_names_the_service_the_cli_route_deploys():
+    """The console steps and the Cloud Shell block must agree on the service and region."""
+    text = README.read_text()
+    console = text[
+        text.index("**From the Google Cloud console: no commands.**") : text.index(
+            "**Refreshing an expired ESPN cookie.**"
+        )
+    ]
+    update_block = bash_block_after(UPDATE_MARKER)
+    service = re.search(r"^SERVICE=(\S+)", update_block, re.M).group(1)
+    region = re.search(r"^REGION=(\S+)", update_block, re.M).group(1)
+    assert f"| `_SERVICE_NAME` | `{service}` |" in console
+    assert f"| `_DEPLOY_REGION` | `{region}` |" in console
+
+
+def _console_settings_rows() -> list[str]:
+    text = README.read_text()
+    section = text[
+        text.index("##### The service's settings in the console") : text.index(
+            "**Confirm where it will deploy before you merge anything.**"
+        )
+    ]
+    return [line for line in section.splitlines() if line.startswith("| ")]
+
+
+def test_console_settings_table_matches_the_cli_deploy():
+    """The console form's values must be the ones block d deploys with, setting for setting."""
+    block = bash_block_after("**d. Deploy.**")
+    rows = _console_settings_rows()
+
+    def row_with(flag: str) -> str:
+        matches = [row for row in rows if f"`{flag}" in row.rsplit("|", 2)[-2]]
+        assert len(matches) == 1, f"expected one settings row for {flag}"
+        return matches[0]
+
+    assert "--allow-unauthenticated" in block and "Allow unauthenticated" in row_with(
+        "--allow-unauthenticated"
+    )
+    assert "--min-instances 0" in block and "`0`" in row_with("--min-instances 0")
+    assert "--max-instances 1" in block and "`1`" in row_with("--max-instances 1")
+    assert "--timeout 60" in block and "`60`" in row_with("--timeout 60")
+    assert "--cpu 1 --memory 512Mi" in block and "`512 MiB` and `1`" in row_with("--memory 512Mi")
+    assert '--service-account "$SA"' in block and "`espn-mcp-runner`" in row_with(
+        "--service-account"
+    )
+
+    env_row = row_with("--set-env-vars")
+    for pair in re.search(r'--set-env-vars "([^"]+)"', block).group(1).split(","):
+        assert f"`{pair.split('=')[0]}`" in env_row, pair
+
+    secret_row = row_with("--set-secrets")
+    for pair in re.search(r'--set-secrets "([^"]+)"', block).group(1).split(","):
+        env_name, secret = pair.split("=")
+        assert f"`{env_name}` from `{secret.removesuffix(':latest')}`" in secret_row, pair
+    assert "five" in secret_row and "`latest`" in secret_row
+
+
+def test_console_form_uses_the_same_service_name_and_region_as_everything_else():
+    rows = _console_settings_rows()
+    update_block = bash_block_after(UPDATE_MARKER)
+    service = re.search(r"^SERVICE=(\S+)", update_block, re.M).group(1)
+    region = re.search(r"^REGION=(\S+)", update_block, re.M).group(1)
+    assert any("**Service name**" in row and f"`{service}`" in row for row in rows)
+    assert any("**Region**" in row and f"`{region}`" in row for row in rows)
