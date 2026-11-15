@@ -35,7 +35,7 @@ from .constants import (
     TURNOVER_HURTS_ABOVE,
     WEEKLY_LOCK_RULES,
 )
-from .dates import games_remaining_by_player
+from .dates import remaining_game_dates_by_player
 from .models import (
     CategoryDelta,
     CategoryProjection,
@@ -149,25 +149,122 @@ def category_verdict(category: str, value: float) -> tuple[str, str] | None:
     return None
 
 
+@dataclass(frozen=True)
+class ExpectedGames:
+    """How many of one player's remaining games the projection counts, and why.
+
+    `playable` is what he is expected to play whatever slot he is in (scheduled games times
+    the availability factor, or the games on and after a reported return date for a player
+    listed OUT). `counted` is what reaches the projection: `playable` when his slot scores,
+    0 when it does not (bench in a weekly-lock league, IR).
+    """
+
+    availability: str
+    factor: float
+    scheduled: int
+    playable: float
+    counted: float
+    slot_scores: bool
+    note: str | None = None
+
+    @property
+    def detail(self) -> str:
+        """ "(note; injury detail)" for messages, or "" when there is nothing to say."""
+        return f" ({self.note})" if self.note else ""
+
+
+def _return_date(entry: RosterEntry) -> date | None:
+    raw = entry.playerPoolEntry.player.injuryReturnDate
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def expected_games_for(
+    entry: RosterEntry,
+    game_dates: list[date],
+    window_end: date | None,
+    today: date,
+    weekly_lock: bool,
+) -> ExpectedGames:
+    """Expected games for one roster entry from its remaining game dates.
+
+    - Availability discounts as in `player_availability` (OUT = 0, DOUBTFUL = 0.5, ...).
+    - A player listed OUT whose ESPN return date is a reported timeline (not the next-game
+      placeholder ESPN uses for day-to-day players) and falls inside the window keeps the
+      games on and after that date. A return date already passed with the status still OUT
+      is treated as stale: nothing counts.
+    - In a weekly-lock league a bench player's games never reach the score, so they are
+      playable but not counted; the note says so. The IR slot never counts.
+    """
+    label, factor = player_availability(entry)
+    scheduled = len(game_dates)
+    playable = scheduled * factor
+    notes: list[str] = []
+    player = entry.playerPoolEntry.player
+    return_date = _return_date(entry) if label == "OUT" and scheduled else None
+    if return_date is not None:
+        if player.injuryReturnDateType == "placeholder":
+            notes.append(
+                f"expected return {return_date} is ESPN's next-game placeholder, not an "
+                "estimate; no games counted"
+            )
+        elif return_date <= today:
+            notes.append(
+                f"expected return {return_date} has passed but the status is still OUT; "
+                "no games counted"
+            )
+        elif window_end is not None and return_date > window_end:
+            notes.append(f"expected return {return_date} is after this matchup period")
+        else:
+            back = sum(1 for d in game_dates if d >= return_date)
+            playable = float(back)
+            notes.append(
+                f"expected return {return_date}: {back} of {scheduled} game(s) on or after it count"
+            )
+    slot_scores = entry.lineupSlotId != SLOT_IR
+    if weekly_lock and entry.lineupSlotId == SLOT_BENCH:
+        slot_scores = False
+        if playable > 0:
+            notes.append("on the bench: bench games do not score under the weekly lineup lock")
+    if player.injuryDetails and (factor < 1.0 or return_date is not None):
+        # ESPN's own words first, then the arithmetic
+        notes.insert(0, player.injuryDetails.rstrip(".") if notes else player.injuryDetails)
+    return ExpectedGames(
+        availability=label,
+        factor=factor,
+        scheduled=scheduled,
+        playable=playable,
+        counted=playable if slot_scores else 0.0,
+        slot_scores=slot_scores,
+        note="; ".join(notes) if notes else None,
+    )
+
+
 def expected_games_breakdown(
-    entries: list[RosterEntry],
-    games_left: dict[int, int],
-    availability: dict[int, tuple[str, float]],
+    entries: list[RosterEntry], games: dict[int, ExpectedGames]
 ) -> list[str]:
     """One line per player whose remaining games are discounted, plus the arithmetic."""
     lines: list[str] = []
     scheduled = 0
     expected = 0.0
     for entry in entries:
-        games = games_left.get(entry.playerId, 0)
-        label, factor = availability.get(entry.playerId, ("ACTIVE", 1.0))
-        scheduled += games
-        expected += games * factor
-        if games > 0 and factor < 1.0:
+        g = games.get(entry.playerId)
+        if g is None:
+            continue
+        scheduled += g.scheduled
+        expected += g.counted
+        if g.scheduled > 0 and g.counted < g.scheduled:
             player = entry.playerPoolEntry.player
-            detail = f"; {player.injuryDetails}" if player.injuryDetails else ""
+            label = g.availability
+            if not g.slot_scores and entry.lineupSlotId == SLOT_BENCH:
+                label += ", not counted"
+            detail = f"; {g.note}" if g.note else ""
             lines.append(
-                f"{player.fullName}: {games} scheduled, {games * factor:g} expected "
+                f"{player.fullName}: {g.scheduled} scheduled, {g.counted:g} expected "
                 f"({label}{detail})"
             )
     if lines:
@@ -187,18 +284,26 @@ BASIS_DESCRIPTIONS = {
 }
 
 
-def projection_method(end_date: str, basis: str = "projections") -> str:
+def projection_method(end_date: str, basis: str = "projections", weekly_lock: bool = False) -> str:
     """Spell out how the projections are built, so the reader can weigh them."""
+    slots = (
+        "Only players in starting slots count: this league locks lineups for the week, so a "
+        "bench player's games never reach the score (benchPlayersNotCounted lists yours). "
+        if weekly_lock
+        else "Every non-IR player counts, bench included, on the assumption that a daily-lock "
+        "lineup is set each day. "
+    )
     return (
         "Projected total = current matchup total + sum over rostered players of (per-game "
         f"average x expected remaining games), for BOTH teams on the same basis: "
         f"{BASIS_DESCRIPTIONS.get(basis, basis)} (basis='{basis}'). Expected games are the "
         f"player's scheduled games from now through {end_date} multiplied by an availability "
         "factor: OUT, suspended, in the IR slot or unsigned = 0; DOUBTFUL = 0.5; everything "
-        "else = 1. A player listed OUT contributes nothing even if his expected return date "
-        "falls inside the window. FG% and FT% are projected as made/attempted. A player with no "
-        "numbers on the chosen basis falls back to ESPN's projections (listed in basisNotes). "
-        "There is no confidence range given: early-season numbers are noisy."
+        "else = 1. A player listed OUT with a reported return date inside the window keeps the "
+        "games on and after that date (ESPN's next-game placeholder dates for day-to-day "
+        f"players are ignored). {slots}FG% and FT% are projected as made/attempted. A player "
+        "with no numbers on the chosen basis falls back to ESPN's projections (listed in "
+        "basisNotes). There is no confidence range given: early-season numbers are noisy."
     )
 
 
@@ -436,25 +541,38 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
     your_scores = matchup.yourTeam.categoryScores or {}
     opp_scores = matchup.opponentTeam.categoryScores or {}
 
+    # What a starter's owner can actually do about a dead slot depends on the lock rule, and
+    # under a weekly lock only starting slots score at all
+    lock_rule = inputs.settings.rosterSettings.lineupLocktimeType
+    weekly_lock = lock_rule in WEEKLY_LOCK_RULES
+    week_in_progress = inputs.target_period <= inputs.settings.status.currentMatchupPeriod
+
     # Games left and expected games, per player, for both sides
-    your_games_left = games_remaining_by_player(
+    today = inputs.now.date()
+    your_dates = remaining_game_dates_by_player(
         inputs.your_schedule, inputs.now, inputs.matchup_end
     )
-    opp_games_left = games_remaining_by_player(
+    opp_dates = remaining_game_dates_by_player(
         inputs.opponent_schedule, inputs.now, inputs.matchup_end
     )
-    your_avail = {e.playerId: player_availability(e) for e in inputs.your_entries}
-    opp_avail = {e.playerId: player_availability(e) for e in inputs.opponent_entries}
-    your_expected = {
-        e.playerId: your_games_left.get(e.playerId, 0) * your_avail[e.playerId][1]
+    your_games = {
+        e.playerId: expected_games_for(
+            e, your_dates.get(e.playerId, []), inputs.matchup_end, today, weekly_lock
+        )
         for e in inputs.your_entries
     }
-    opp_expected = {
-        e.playerId: opp_games_left.get(e.playerId, 0) * opp_avail[e.playerId][1]
+    opp_games = {
+        e.playerId: expected_games_for(
+            e, opp_dates.get(e.playerId, []), inputs.matchup_end, today, weekly_lock
+        )
         for e in inputs.opponent_entries
     }
-    your_games_remaining = sum(your_games_left.get(e.playerId, 0) for e in inputs.your_entries)
-    opp_games_remaining = sum(opp_games_left.get(e.playerId, 0) for e in inputs.opponent_entries)
+    your_games_left = {pid: g.scheduled for pid, g in your_games.items()}
+    opp_games_left = {pid: g.scheduled for pid, g in opp_games.items()}
+    your_expected = {pid: g.counted for pid, g in your_games.items()}
+    opp_expected = {pid: g.counted for pid, g in opp_games.items()}
+    your_games_remaining = sum(your_games_left.values())
+    opp_games_remaining = sum(opp_games_left.values())
     your_expected_games = round(sum(your_expected.values()), 1)
     opp_expected_games = round(sum(opp_expected.values()), 1)
 
@@ -603,10 +721,6 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
     lineup_warnings: list[str] = []
     close_set = set(close)
 
-    # What a starter's owner can actually do about a dead slot depends on the lock rule
-    lock_rule = inputs.settings.rosterSettings.lineupLocktimeType
-    weekly_lock = lock_rule in WEEKLY_LOCK_RULES
-    week_in_progress = inputs.target_period <= inputs.settings.status.currentMatchupPeriod
     next_period = inputs.target_period + 1
     if weekly_lock and week_in_progress:
         fix_now = (
@@ -624,18 +738,21 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
     season_map = inputs.stats.get("season", {})
     proj_map = inputs.stats.get("projections", {})
 
+    bench_not_counted: list[str] = []
+
     for entry in inputs.your_entries:
         pid = entry.playerId
         player = entry.playerPoolEntry.player
-        games_remaining = your_games_left.get(pid, 0)
-        availability, factor = your_avail[pid]
+        g = your_games[pid]
+        games_remaining = g.scheduled
+        availability = g.availability
         slot_name = entry.lineupSlotName or dict(LINEUP_SLOT_NAMES).get(
             entry.lineupSlotId, f"SLOT_{entry.lineupSlotId}"
         )
         is_starter = entry.lineupSlotId not in (SLOT_BENCH, SLOT_IR)
-        detail = f" ({player.injuryDetails})" if player.injuryDetails else ""
+        detail = g.detail
 
-        if is_starter and factor == 0.0:
+        if is_starter and g.playable == 0.0:
             if availability == "FA":
                 lineup_warnings.append(
                     f"{player.fullName} ({slot_name}) is not on an NBA roster and cannot "
@@ -655,6 +772,31 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
                 f"{player.fullName} ({slot_name}) is {availability}{detail}; {check_now}"
             )
 
+        # A bench player's games are real but do not score under a weekly lock. Say what the
+        # owner can still do about it, by the slot's own lock flag when ESPN gives one.
+        bench_text: str | None = None
+        if not g.slot_scores and entry.lineupSlotId == SLOT_BENCH and g.playable > 0:
+            bench_not_counted.append(f"{player.fullName}: {g.playable:g} playable game(s)")
+            if not week_in_progress:
+                bench_text = (
+                    "On the bench in the planned lineup: his games count only if he is "
+                    "started before the week's first game locks the slot"
+                )
+            elif entry.lineupLocked is False:
+                bench_text = (
+                    "On the bench with the slot not yet locked: his games count only if he "
+                    "is moved into the lineup before his first game"
+                )
+            elif entry.lineupLocked is True or lock_rule == "FIRSTGAME_WEEKLY":
+                bench_text = (
+                    "On the bench and locked for the week: his games do not count this period"
+                )
+            else:
+                bench_text = (
+                    "On the bench: his games do not count unless the slot is still unlocked "
+                    "(see lineupLocked on get_team_roster)"
+                )
+
         if entry.lineupSlotId == SLOT_IR:
             continue  # IR players are not start/sit candidates
 
@@ -672,9 +814,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             _entry: RosterEntry = entry,
             _line: PlayerStats | None = line,
             _season: PlayerStats | None = season_line,
-            _games: int = games_remaining,
-            _availability: str = availability,
-            _factor: float = factor,
+            _g: ExpectedGames = g,
             _slot: str = slot_name,
         ) -> PlayerRecommendation:
             p = _entry.playerPoolEntry.player
@@ -684,9 +824,12 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
                 position=p.defaultPosition,
                 lineupSlotId=_entry.lineupSlotId,
                 lineupSlotName=_slot,
-                gamesRemaining=_games,
-                availability=_availability,
-                expectedGames=round(_games * _factor, 1),
+                gamesRemaining=_g.scheduled,
+                availability=_g.availability,
+                expectedGames=round(_g.playable, 1),
+                gamesInProjection=round(_g.counted, 1),
+                countsInProjection=_g.slot_scores,
+                availabilityNote=_g.note,
                 priority=priority,
                 reasoning=reasoning,
                 categoriesHelped=helped,
@@ -702,10 +845,10 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
                 seasonGamesPlayed=_season.gamesPlayed if _season else None,
             )
 
-        if games_remaining == 0 or factor == 0.0 or line is None:
+        if games_remaining == 0 or g.playable == 0.0 or line is None:
             if games_remaining == 0:
                 why = "No games left in this matchup window"
-            elif factor == 0.0:
+            elif g.playable == 0.0:
                 why = f"{availability}{detail}: contributes no expected games"
             else:
                 why = "No per-game numbers available on any basis"
@@ -761,8 +904,8 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             priority += 1
         if availability == "DOUBTFUL":
             priority -= 2
-        elif availability in ("DAY_TO_DAY", "QUESTIONABLE"):
-            priority -= 1
+        elif availability in ("DAY_TO_DAY", "QUESTIONABLE", "OUT"):
+            priority -= 1  # OUT reaches here only with a return date inside the window
         if len(close_helped) >= 3:
             priority += 2
         elif len(close_helped) >= 2:
@@ -785,6 +928,8 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             parts.append(f"{games_remaining} games remaining")
         if availability not in ("ACTIVE", "NORMAL"):
             parts.append(f"Status: {availability}{detail}")
+        if bench_text:
+            parts.append(bench_text)
         if line is not None and line.timeframe != inputs.basis and inputs.basis != "blend":
             parts.append(f"Per-game numbers from '{line.timeframe}' (no {inputs.basis} line)")
         if not parts:
@@ -799,17 +944,19 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
     opponent_players: list[OpponentPlayerSummary] = []
     for entry in inputs.opponent_entries:
         player = entry.playerPoolEntry.player
-        games = opp_games_left.get(entry.playerId, 0)
-        label, factor = opp_avail[entry.playerId]
+        og = opp_games[entry.playerId]
         opponent_players.append(
             OpponentPlayerSummary(
                 playerId=entry.playerId,
                 playerName=player.fullName,
                 lineupSlotName=entry.lineupSlotName
                 or dict(LINEUP_SLOT_NAMES).get(entry.lineupSlotId, f"SLOT_{entry.lineupSlotId}"),
-                gamesRemaining=games,
-                availability=label,
-                expectedGames=round(games * factor, 1),
+                gamesRemaining=og.scheduled,
+                availability=og.availability,
+                expectedGames=round(og.playable, 1),
+                gamesInProjection=round(og.counted, 1),
+                countsInProjection=og.slot_scores,
+                availabilityNote=og.note,
                 injuryStatus=entry.injuryStatus or player.injuryStatus,
                 injuryDetails=player.injuryDetails,
                 projectedPerGame=_per_game_map(proj_map.get(entry.playerId), category_names),
@@ -844,6 +991,11 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
         )
     if lineup_warnings:
         notes.append(f"{len(lineup_warnings)} lineup warning(s): see lineupWarnings")
+    if bench_not_counted:
+        notes.append(
+            f"Weekly lineup lock: {len(bench_not_counted)} bench player(s) with games left "
+            "are not in the projection (bench games do not score): " + "; ".join(bench_not_counted)
+        )
     priority_cats = [c for c in category_names if c in in_play]
     if priority_cats:
         notes.append(
@@ -878,17 +1030,14 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
         closeCategories=close,
         nearCategories=near,
         playerRecommendations=recommendations,
-        projectionMethod=projection_method(inputs.end_date, inputs.basis),
+        projectionMethod=projection_method(inputs.end_date, inputs.basis, weekly_lock),
         yourGamesRemaining=your_games_remaining,
         opponentGamesRemaining=opp_games_remaining,
         yourExpectedGames=your_expected_games,
         opponentExpectedGames=opp_expected_games,
-        expectedGamesBreakdown=expected_games_breakdown(
-            inputs.your_entries, your_games_left, your_avail
-        ),
-        opponentExpectedGamesBreakdown=expected_games_breakdown(
-            inputs.opponent_entries, opp_games_left, opp_avail
-        ),
+        expectedGamesBreakdown=expected_games_breakdown(inputs.your_entries, your_games),
+        opponentExpectedGamesBreakdown=expected_games_breakdown(inputs.opponent_entries, opp_games),
+        benchPlayersNotCounted=bench_not_counted,
         opponentPlayers=opponent_players,
         currentCategoryWins=cur_w,
         currentCategoryLosses=cur_l,
@@ -942,24 +1091,47 @@ async def simulate_roster_move(
     """Re-run the matchup projection with players dropped and/or added; report the deltas.
 
     Before and after use the same basis, the same window and the same opponent. Added players
-    are looked up in the league (free agents or anyone else), given a bench slot, and their
-    NBA schedule for the window is fetched like a rostered player's.
+    are looked up in the league (free agents or anyone else) and their NBA schedule for the
+    window is fetched like a rostered player's. Each added player takes the starting slot of
+    a dropped starter when that slot can still be filled (the week has not started, or ESPN
+    says the slot is not locked); otherwise he goes to the bench, which under a weekly lock
+    means his games do not count this period.
     """
     inputs = await gather_inputs(client, team_id, matchup_period, basis)
     before = compute_analysis(inputs)
+    weekly_lock = inputs.settings.rosterSettings.lineupLocktimeType in WEEKLY_LOCK_RULES
+    week_in_progress = inputs.target_period <= inputs.settings.status.currentMatchupPeriod
 
     drop_set = set(drop_ids)
     kept = [e for e in inputs.your_entries if e.playerId not in drop_set]
-    dropped_names = [
-        f"{e.playerPoolEntry.player.fullName} ({e.playerId})"
-        for e in inputs.your_entries
-        if e.playerId in drop_set
-    ]
+    dropped = [e for e in inputs.your_entries if e.playerId in drop_set]
+    dropped_names = [f"{e.playerPoolEntry.player.fullName} ({e.playerId})" for e in dropped]
     unknown_drops = sorted(drop_set - {e.playerId for e in inputs.your_entries})
 
     wanted_adds = [pid for pid in dict.fromkeys(add_ids) if pid not in {e.playerId for e in kept}]
     added_entries = await client.roster_entries_for_players(wanted_adds)
-    added_entries = [_roster_entry_for(e) for e in added_entries]
+    # Starting slots freed by the drops that an added player could still take
+    open_slots = [
+        e
+        for e in dropped
+        if e.lineupSlotId not in (SLOT_BENCH, SLOT_IR)
+        and (not week_in_progress or e.lineupLocked is False)
+    ]
+    placements: list[str] = []
+    placed: list[RosterEntry] = []
+    for e in added_entries:
+        name = e.playerPoolEntry.player.fullName
+        if open_slots:
+            freed = open_slots.pop(0)
+            placed.append(replace_slot(e, freed.lineupSlotId))
+            placements.append(
+                f"{name} takes {freed.playerPoolEntry.player.fullName}'s "
+                f"{LINEUP_SLOT_NAMES.get(freed.lineupSlotId, freed.lineupSlotId)} slot"
+            )
+        else:
+            placed.append(_roster_entry_for(e))
+            placements.append(f"{name} goes to the bench")
+    added_entries = placed
     unknown_adds = sorted(set(wanted_adds) - {e.playerId for e in added_entries})
     new_entries = kept + added_entries
 
@@ -1026,16 +1198,23 @@ async def simulate_roster_move(
         f"Projected record {_record(before)} -> {_record(after)} on basis '{basis}'",
         f"Expected games {before.yourExpectedGames} -> {after.yourExpectedGames}",
     ]
-    if (
-        added_entries
-        and inputs.settings.rosterSettings.lineupLocktimeType in WEEKLY_LOCK_RULES
-        and inputs.target_period <= inputs.settings.status.currentMatchupPeriod
-    ):
-        summary.append(
-            "Weekly lineup lock: an added player cannot enter a starting slot until matchup "
-            f"period {inputs.target_period + 1}, so his games this period may not count; the "
-            "deltas above assume he plays"
-        )
+    if placements:
+        summary.append("Slots: " + "; ".join(placements))
+    benched_adds = [r for r in added_recs if not r.countsInProjection]
+    if weekly_lock and benched_adds:
+        names = ", ".join(r.playerName for r in benched_adds)
+        if week_in_progress:
+            summary.append(
+                f"Weekly lineup lock: {names} cannot enter a starting slot until matchup "
+                f"period {inputs.target_period + 1} (no dropped starter's slot is open), so the "
+                "deltas above give him no games this period"
+            )
+        else:
+            summary.append(
+                f"Weekly lineup lock: {names} is on the bench in this simulation, so the deltas "
+                "above give him no games; drop a starter or start him before the week's first "
+                "game for his games to count"
+            )
     if flipped:
         summary.append("Categories that flip: " + "; ".join(flipped))
     else:
@@ -1046,6 +1225,8 @@ async def simulate_roster_move(
         summary.append(f"Unknown player IDs, ignored: {unknown_adds}")
     if legality is not None and not legality.canMake:
         summary.append("Move is NOT legal as-is: " + "; ".join(legality.reasons))
+    if legality is not None and legality.warnings:
+        summary.append("Legality warnings: " + "; ".join(legality.warnings))
 
     return RosterMoveSimulation(
         teamId=team_id,
@@ -1055,6 +1236,7 @@ async def simulate_roster_move(
         added=[f"{e.playerPoolEntry.player.fullName} ({e.playerId})" for e in added_entries],
         unknownDropIds=unknown_drops,
         unknownAddIds=unknown_adds,
+        placements=placements,
         gamesRemainingBefore=before.yourGamesRemaining,
         gamesRemainingAfter=after.yourGamesRemaining,
         expectedGamesBefore=before.yourExpectedGames,

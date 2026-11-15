@@ -57,10 +57,10 @@ def matchup_period_window(
     return start, end
 
 
-def games_remaining_by_player(
+def remaining_game_dates_by_player(
     schedule: RosterScheduleSummary, now: datetime, window_end: date | None = None
-) -> dict[int, int]:
-    """Count each player's games that have not started yet, within the matchup window.
+) -> dict[int, list[date]]:
+    """The dates of each player's games that have not started yet, within the matchup window.
 
     Games already played (or in progress) are reflected in the matchup's current category
     scores, so projecting them again would double count. Games after ``window_end`` belong
@@ -76,12 +76,12 @@ def games_remaining_by_player(
         window_end: Last date (inclusive) of the matchup period, or None for no bound
 
     Returns:
-        Mapping of playerId -> number of remaining games
+        Mapping of playerId -> dates of the remaining games, in schedule order
     """
     today = now.date()
-    remaining: dict[int, int] = {}
+    remaining: dict[int, list[date]] = {}
     for player_schedule in schedule.playerSchedules:
-        count = 0
+        dates: list[date] = []
         for game in player_schedule.games:
             try:
                 game_day = date.fromisoformat(game.date)
@@ -97,11 +97,21 @@ def games_remaining_by_player(
                     tip_off = None
             if tip_off is not None and tip_off.tzinfo is not None and now.tzinfo is not None:
                 if tip_off > now:
-                    count += 1
+                    dates.append(game_day)
             elif game_day >= today:
-                count += 1
-        remaining[player_schedule.playerId] = count
+                dates.append(game_day)
+        remaining[player_schedule.playerId] = dates
     return remaining
+
+
+def games_remaining_by_player(
+    schedule: RosterScheduleSummary, now: datetime, window_end: date | None = None
+) -> dict[int, int]:
+    """Count each player's remaining games in the window (see remaining_game_dates_by_player)."""
+    return {
+        pid: len(dates)
+        for pid, dates in remaining_game_dates_by_player(schedule, now, window_end).items()
+    }
 
 
 def week_boundaries(date: str, week_start_day: int = 0) -> tuple[str, str]:
