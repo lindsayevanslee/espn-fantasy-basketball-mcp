@@ -77,6 +77,11 @@
   first merge (with a read-only Cloud Shell equivalent), and a one-off test run. States what a
   triggered build does: it swaps the image with `gcloud run services update` and leaves every
   setting in place.
+- The console route now covers creating the service from the console as well as connecting an
+  existing one, with a field-by-field table of the service form (name, region, authentication,
+  billing, scaling, port, memory, timeout, instance limit, variables, secrets, service
+  account) mapped to the flags the Cloud Shell deploy uses. A test keeps the table and the
+  command in step.
 - Claude Code cloud sessions (claude.ai/code and the Claude mobile app's Code tab) now install
   the locked dependencies at startup via `.claude/hooks/session-start.sh`, so tests and linters
   work from the first message. `CLAUDE.md` records the project conventions for those sessions.
