@@ -859,11 +859,15 @@ async def analyze_matchup(
           close categories (closeCategoriesHelped / closeCategoriesHurt); hurting a category
           already projected lost by a wide margin is not penalised. Each reasoning carries the
           per-game numbers behind it.
-        - projectionMethod: how the projections are built (ESPN projected per-game averages x
-          expected remaining games; OUT players contribute nothing; no confidence range)
+        - projectionMethod: how the projections are built (per-game averages x expected
+          remaining games; no confidence range). An OUT player with a reported return date
+          inside the window keeps the games on and after that date. In a weekly-lock league
+          only starting slots count: bench players' games never reach the score, so they are
+          listed under benchPlayersNotCounted and each player carries gamesInProjection /
+          countsInProjection next to expectedGames (what he would play if started)
         - yourGamesRemaining / yourExpectedGames and expectedGamesBreakdown: scheduled games
-          not yet played, the availability-discounted figure, and one line per discounted
-          player explaining the gap (same for the opponent)
+          not yet played, the counted figure, and one line per discounted player explaining
+          the gap (same for the opponent)
         - opponentPlayers: the opponent's roster as the projection sees it (games remaining,
           availability, injury detail, projected per-game numbers)
         - currentCategoryWins/Losses/Ties: Current category record
@@ -904,6 +908,11 @@ async def simulate_roster_move(
     (roster size, position limits, acquisitions left, waiver status). Use this instead of
     adding and subtracting per-game numbers by hand.
 
+    Each added player takes a dropped starter's slot when that slot can still be filled (the
+    week has not started, or ESPN says the slot is not locked); otherwise he goes to the
+    bench. In a weekly-lock league bench games do not score, so such an add changes nothing
+    this period and the summary says so; drop a starter instead to see the real swap.
+
     Args:
         drop_ids: ESPN player IDs to drop from your roster (optional)
         add_ids: ESPN player IDs to add (free agents or waiver players; use search_players)
@@ -915,9 +924,10 @@ async def simulate_roster_move(
         year: ESPN season ID, the year the season ends in (optional)
 
     Returns:
-        Dictionary with dropped/added names, projectedRecordBefore/After, categoryDeltas
-        (before, after, delta, result and closeness before/after), categoriesFlipped,
-        addedPlayers (their projection lines and games), legality, and a summary.
+        Dictionary with dropped/added names, placements (which slot each added player was
+        given), projectedRecordBefore/After, categoryDeltas (before, after, delta, result and
+        closeness before/after), categoriesFlipped, addedPlayers (their projection lines and
+        games), legality (its warnings are repeated in the summary), and a summary.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     team_id = _get_team_id(team_id)
@@ -947,9 +957,13 @@ async def can_add_player(
     Checks roster size against the league's non-IR roster limit, each position's count
     against the position limits (e.g. "max 4 centers"), acquisitions left this matchup
     period, and whether each player is a free agent, on waivers, or owned. Position counts
-    are given both by primary position (used for the verdict) and by slot eligibility, with
-    a warning when only the eligibility count would break a limit, because ESPN does not
-    document which one it enforces.
+    are given both by primary position and by slot eligibility, before and after the move,
+    because ESPN does not document which one it enforces for basketball. The verdict uses
+    primary positions unless ESPN_POSITION_LIMIT_BASIS=eligibility is set; a warning says
+    when only the eligibility count would break a limit, and positionLimitEvidence reports
+    what the current roster proves (a roster ESPN already accepted that exceeds a limit by
+    eligibility means eligibility is not the rule). If ESPN rejects an add this tool allowed,
+    that settles it: set ESPN_POSITION_LIMIT_BASIS=eligibility.
 
     Args:
         add_ids: ESPN player IDs to add (use search_players to find them)
@@ -960,8 +974,9 @@ async def can_add_player(
 
     Returns:
         Dictionary with canMake, reasons (why not), warnings, roster sizes, position counts
-        after the move by primary position and by eligibility, the position limits,
-        acquisitions remaining, and each added player's availability.
+        now and after the move by primary position and by eligibility, the position limits,
+        positionLimitBasisSetting / positionLimitBasis / positionLimitEvidence, acquisitions
+        remaining, and each added player's availability.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     team_id = _get_team_id(team_id)

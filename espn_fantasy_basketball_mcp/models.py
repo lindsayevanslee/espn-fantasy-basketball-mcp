@@ -204,7 +204,15 @@ class PlayerRecommendation(BaseModel):
     availability: str | None = (
         None  # ACTIVE, DAY_TO_DAY, QUESTIONABLE, DOUBTFUL, OUT, SUSPENDED, IR, FA
     )
-    expectedGames: float | None = None  # gamesRemaining discounted by availability
+    # gamesRemaining discounted by availability: the games this player is expected to PLAY,
+    # whatever slot he is in. An OUT player with a reported return date inside the window
+    # keeps the games on and after that date.
+    expectedGames: float | None = None
+    # The games the projection actually counted for him. Equal to expectedGames when his slot
+    # scores; 0 for a bench player in a weekly-lock league, whose games never reach the score.
+    gamesInProjection: float | None = None
+    countsInProjection: bool = True
+    availabilityNote: str | None = None  # why expectedGames or gamesInProjection is discounted
     priority: int  # Priority score (1-10, higher = more important to start)
     reasoning: str
     categoriesHelped: list[str]  # Close or losing categories this player helps in
@@ -230,7 +238,10 @@ class OpponentPlayerSummary(BaseModel):
     lineupSlotName: str | None = None
     gamesRemaining: int = 0
     availability: str | None = None
-    expectedGames: float = 0.0
+    expectedGames: float = 0.0  # games he is expected to play (availability-discounted)
+    gamesInProjection: float = 0.0  # games the projection counted (0 for a locked-out bench)
+    countsInProjection: bool = True
+    availabilityNote: str | None = None
     injuryStatus: str | None = None
     injuryDetails: str | None = None
     projectedPerGame: dict[str, float] | None = None  # scoring categories only
@@ -279,13 +290,16 @@ class MatchupAnalysis(BaseModel):
     # Additional context
     yourGamesRemaining: int | None = None  # Scheduled games not yet played, all rostered players
     opponentGamesRemaining: int | None = None
-    yourExpectedGames: float | None = (
-        None  # Games remaining discounted by availability (OUT, IR, FA...)
-    )
+    # Games remaining discounted by availability (OUT, IR, FA...) and, in a weekly-lock
+    # league, by slot: bench players' games never reach the score, so they are not counted.
+    yourExpectedGames: float | None = None
     opponentExpectedGames: float | None = None
     # Why expected games are below games remaining: one line per discounted player
     expectedGamesBreakdown: list[str] = []
     opponentExpectedGamesBreakdown: list[str] = []
+    # Weekly-lock leagues only: your bench players with games left that the projection does
+    # not count ("Name: 3 playable game(s)"), so a swap can be weighed before the lock.
+    benchPlayersNotCounted: list[str] = []
     # The opponent's roster as the projection sees it
     opponentPlayers: list[OpponentPlayerSummary] = []
     currentCategoryWins: int | None = None  # Current category wins
@@ -325,9 +339,17 @@ class RosterLegality(BaseModel):
     rosterSizeAfter: int
     rosterLimit: int | None = None  # non-IR roster spots from league settings
     positionLimits: dict[str, int] = {}  # position -> max (-1 = no limit)
+    positionCountsNowByDefaultPosition: dict[str, int] = {}  # current non-IR roster
+    positionCountsNowByEligibility: dict[str, int] = {}
     positionCountsAfterByDefaultPosition: dict[str, int] = {}
     positionCountsAfterByEligibility: dict[str, int] = {}
+    # "primary" (default) or "eligibility": which count decides the verdict. Set with the
+    # ESPN_POSITION_LIMIT_BASIS environment variable once ESPN has shown which it enforces.
+    positionLimitBasisSetting: str = "primary"
     positionLimitBasis: str | None = None  # which count the verdict used, and why
+    # What this league's own roster says about the rule, e.g. the current roster already
+    # exceeds a limit by eligibility and ESPN accepted it.
+    positionLimitEvidence: list[str] = []
     acquisitionsRemainingThisMatchup: int | None = None
     addedPlayerStatus: dict[str, str] = {}  # "Name (id)" -> FREEAGENT / WAIVERS ... / ONTEAM ...
 
@@ -342,6 +364,9 @@ class RosterMoveSimulation(BaseModel):
     added: list[str]
     unknownDropIds: list[int] = []
     unknownAddIds: list[int] = []
+    # Which slot each added player was given: a dropped starter's slot when it can still be
+    # filled, else the bench (which does not score under a weekly lock)
+    placements: list[str] = []
     gamesRemainingBefore: int | None = None
     gamesRemainingAfter: int | None = None
     expectedGamesBefore: float | None = None

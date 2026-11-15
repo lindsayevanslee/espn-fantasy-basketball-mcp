@@ -29,9 +29,9 @@ An MCP (Model Context Protocol) server that provides access to ESPN Fantasy Bask
 #### Matchup Tools
 8. **get_matchups** - Matchups for a matchup period, with category scores by human-readable name
 9. **get_my_current_matchup** - Your current matchup, both rosters with per-game averages, and category scores in one call (`verbose=true` adds season totals)
-10. **analyze_matchup** - Category-by-category projections on a chosen basis (ESPN projections, season actuals, last 7/15/30 days, or a blend) applied to both teams, close and near categories, start/sit priorities with season and projected lines side by side, and lineup warnings
-11. **simulate_roster_move** - What if I drop X and add Y? Re-runs the projection before and after on one basis and returns per-category deltas, categories that flip, the added players' lines, and whether the move is legal
-12. **can_add_player** - Roster-legality check for an add (and optional drops): roster size, position limits by primary position and by eligibility, acquisitions left, and whether each player is a free agent, on waivers, or owned
+10. **analyze_matchup** - Category-by-category projections on a chosen basis (ESPN projections, season actuals, last 7/15/30 days, or a blend) applied to both teams, close and near categories, start/sit priorities with season and projected lines side by side, and lineup warnings. In a weekly-lock league only starting slots count (bench players are listed separately); a player listed OUT with a reported return date inside the week keeps the games from that date
+11. **simulate_roster_move** - What if I drop X and add Y? Re-runs the projection before and after on one basis and returns per-category deltas, categories that flip, the added players' lines, which slot each added player was given (a dropped starter's when it can still be filled, else the bench), and whether the move is legal
+12. **can_add_player** - Roster-legality check for an add (and optional drops): roster size, position limits by primary position and by eligibility (the verdict's basis is configurable; the current roster is used as evidence of which count ESPN enforces), acquisitions left, and whether each player is a free agent, on waivers, or owned
 13. **get_roster_schedule** - Games this matchup period and next for every player on your roster, using the league's own period-to-date mapping; pass `player_ids` to compare streaming candidates alongside
 14. **get_player_schedule** - Games this matchup period and next for any ESPN player IDs (free agents, trade targets), with the date windows counted
 
@@ -128,6 +128,7 @@ The following environment variables can be configured:
 - **ESPN_S2**: ESPN authentication cookie for private leagues (required for private leagues)
 - **ESPN_SWID**: ESPN SWID cookie for private leagues (required for private leagues)
 - **MY_TIMEZONE**: Timezone for date/time conversions (optional, defaults to `America/New_York`)
+- **ESPN_POSITION_LIMIT_BASIS**: How `can_add_player` and `simulate_roster_move` count players against the league's position limits: `primary` (default; each player counts once, at his default position) or `eligibility` (every position he is eligible at). ESPN does not document which it uses for basketball; the response reports both counts either way. If ESPN rejects an add this tool allowed, set `eligibility`.
 - **ESPN_MCP_DISABLE_CACHE**: Set to `1` to bypass the response cache (see [Caching](#caching))
 
 The `MY_TIMEZONE` variable controls how dates and times are converted from UTC in API responses. All ISO datetime strings (such as game times, acquisition dates, and trade deadlines) will be converted to this timezone. Use standard IANA timezone names (e.g., `America/Los_Angeles`, `America/Chicago`, `Europe/London`). If not set, the default is `America/New_York`.
@@ -516,8 +517,13 @@ settings page and no league seen so far uses them.
 
 **Player position IDs** (`defaultPositionId`): 1 PG, 2 SG, 3 SF, 4 PF, 5 C.
 
-**Position-limit keys** (`rosterSettings.positionLimits`): 2 PG, 3 SG, 4 SF, 5 PF, 6 C, where
-`-1` means no limit. Confirmed against a league whose settings page shows a maximum of 4 centers.
+**Position-limit keys** (`rosterSettings.positionLimits`): 1 PG, 2 SG, 3 SF, 4 PF, 5 C (the same
+numbering as `defaultPositionId`, plus an unexplained key `0`), where `-1` means no limit.
+Confirmed against a league whose settings page shows a maximum of 4 centers. ESPN does not
+document for basketball whether the limit counts a player's primary position or every position he
+is eligible at; `can_add_player` assumes primary (the key choice above and ESPN's baseball help
+article both point that way), reports both counts, and can be switched with
+`ESPN_POSITION_LIMIT_BASIS=eligibility` once ESPN has shown which it enforces.
 
 **Pro team IDs** (`proTeamId`): 1–30, with 0 meaning the player is not on an NBA roster (`FA`).
 See `espn_fantasy_basketball_mcp/constants.py` for the full table.

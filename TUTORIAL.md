@@ -434,10 +434,18 @@ and the league's scoring categories.
 in the window that have not tipped off. Games already played are already in the current scores,
 so counting them again would double count.
 
-**Step 2: discount by availability.** `player_availability()` returns a label and a factor for
-each roster entry. OUT, suspended, in the IR slot, or not on an NBA roster gives 0.0; DOUBTFUL
-gives 0.5; everything else gives 1.0. Expected games = remaining games × factor. This is why a
-player on the bench with an injury does not inflate your projected totals.
+**Step 2: discount by availability and slot.** `expected_games_for()` turns each roster entry's
+remaining game dates into an `ExpectedGames` record. `player_availability()` supplies the label
+and factor: OUT, suspended, in the IR slot, or not on an NBA roster gives 0.0; DOUBTFUL gives 0.5;
+everything else gives 1.0. Two refinements sit on top. A player listed OUT whose ESPN return date
+is a reported timeline (not the next-game placeholder ESPN uses for day-to-day players) and falls
+inside the window keeps the games on and after that date; a return date already passed with the
+status still OUT is treated as stale and gives nothing. And in a weekly-lock league
+(`FIRSTGAME_WEEKLY`, `INDIVIDUAL_FIRSTGAME_WEEKLY`) a bench player's games never reach the score,
+so the record keeps them as `playable` (what he would give if started) but sets `counted` to 0.
+`counted` is what the projection sums; `playable` is what the start/sit ranking uses, so a benched
+player is still compared against the starters. Every discount carries a note that ends up in
+`expectedGamesBreakdown`, the player's `availabilityNote` and the lineup warnings.
 
 **Step 3: project each category.** For counting categories (points, rebounds, and so on),
 projected = current + Σ(player's projected per-game × expected games). For FG% and FT%, the code
@@ -457,10 +465,13 @@ thresholds such as 15 points or 6 rebounds), −1 per category they hurt, +1 or 
 games remaining, −1 or −2 for questionable or doubtful status, and a bonus for helping in several
 categories. Cap at 1–10 and sort.
 
-**Step 6: warn about dead slots.** Any starter (not bench, not IR) with a factor of 0.0 and games
+**Step 6: warn about dead slots and idle benches.** Any starter (not bench, not IR) with no playable games
 left produces a `lineupWarnings` entry naming them, the slot, and ESPN's injury note when there
 is one ("is OUT (Knee - Sprain (left); expected return 2026-11-10 ...)"). Starters who are
-questionable get a softer "check status before tip-off" warning.
+questionable get a softer "check status before tip-off" warning. In a weekly-lock league the
+bench players with games left are listed in `benchPlayersNotCounted` and a strategy note, and each
+one's reasoning says what can still be done about it (start him before the first game, the slot is
+not yet locked, or locked for the week), using the per-slot `lineupLocked` flag when ESPN gives one.
 
 **Step 7: write strategy notes.** Projected record, which categories to focus on, the expected
 games edge between the two teams, and which losing categories to prioritise.
