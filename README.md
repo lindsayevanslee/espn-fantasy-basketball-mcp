@@ -132,6 +132,16 @@ The following environment variables can be configured:
 
 The `MY_TIMEZONE` variable controls how dates and times are converted from UTC in API responses. All ISO datetime strings (such as game times, acquisition dates, and trade deadlines) will be converted to this timezone. Use standard IANA timezone names (e.g., `America/Los_Angeles`, `America/Chicago`, `Europe/London`). If not set, the default is `America/New_York`.
 
+These apply only when serving the tools over HTTP for claude.ai and the Claude mobile app (see
+[Using the server from the Claude mobile app](#using-the-server-from-the-claude-mobile-app-remote-mcp)):
+
+- **MCP_TRANSPORT**: `stdio` (default, for Claude Desktop and Claude Code) or `streamable-http`.
+- **MCP_AUTH_TOKEN**: Required in HTTP mode. A random secret of at least 32 characters. In `bearer` mode every request must present it as `Authorization: Bearer <token>`; in `oauth` mode it is the passphrase you type on the sign-in page and the key that signs the tokens. The server refuses to start over HTTP without it.
+- **MCP_AUTH_MODE**: `bearer` (default) or `oauth`. Use `oauth` for claude.ai and the Claude mobile app; see the section above for when each applies.
+- **MCP_PUBLIC_URL**: Required in `oauth` mode. The HTTPS origin the server is reached at, with no path, e.g. `https://espn-fantasy-mcp-abc123-uc.a.run.app`. The MCP endpoint is that plus `/mcp`.
+- **MCP_HOST**: Bind address in HTTP mode. Defaults to `127.0.0.1`; the Docker image sets `0.0.0.0`.
+- **PORT**: Bind port in HTTP mode. Defaults to `8000`; the Docker image sets `8080`, and hosting platforms that inject `PORT` are honoured.
+
 ### Caching
 
 ESPN responses are cached in memory for the life of the server process and shared across tool
@@ -151,6 +161,244 @@ tool call makes (for example `analyze_matchup` fetching league settings once per
 short enough that a roster move shows up on your next question. Concurrent identical requests
 share one in-flight fetch, and failed requests are never cached. Set `ESPN_MCP_DISABLE_CACHE=1`
 to turn the cache off.
+
+## Using the server from the Claude mobile app (remote MCP)
+
+Claude Desktop launches this server on your computer and talks to it over stdio. The Claude
+iOS and Android apps (and claude.ai in a browser) cannot launch a local process; they only talk
+to **remote MCP servers** over HTTPS, added to your account as a *custom connector*. This repo
+supports that with a second transport:
+
+- `MCP_TRANSPORT=streamable-http` serves the same tools at `/mcp` over MCP's Streamable HTTP
+  transport (`espn_fantasy_basketball_mcp/http_transport.py`).
+- Every request must carry a valid `Authorization: Bearer` token or it gets a `401` before it
+  reaches any tool. The server refuses to start over HTTP without `MCP_AUTH_TOKEN`, tokens are
+  never accepted in the URL, and `GET /healthz` is open for platform health checks.
+- Two ways to prove you hold `MCP_AUTH_TOKEN`, chosen with `MCP_AUTH_MODE`:
+  - **`oauth`** (use this for claude.ai and the Claude app): the server runs a tiny single-user
+    OAuth 2.1 sign-in (`espn_fantasy_basketball_mcp/oauth.py`). When you add the connector,
+    Claude opens a page on your server, you paste the token once, and Claude receives short-lived
+    access tokens plus a refresh token. This is the standard flow every custom connector
+    supports, so it works regardless of account or plan.
+  - **`bearer`** (default): the token itself is sent on every request. Only for clients that can
+    attach a fixed header: Claude Code (`claude mcp add --transport http ... --header
+    "Authorization: Bearer ..."`) and claude.ai accounts that have the **Request headers** beta
+    in the connector dialog. Most accounts do not; if yours only shows **Name** and **URL**, use
+    `oauth`.
+- Your ESPN cookies live only in the hosted server's environment. Anyone who knows
+  `MCP_AUTH_TOKEN` can sign in and read your league, so treat it like a password.
+
+The Claude app itself is only a client: once you have added the connector on claude.ai in a
+browser, it is available in the mobile app automatically. You cannot add connectors from the
+phone.
+
+### 1. Try it locally
+
+```bash
+export MCP_AUTH_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+echo "$MCP_AUTH_TOKEN"   # keep this; you will paste it into claude.ai
+
+MCP_TRANSPORT=streamable-http uv run espn_fantasy_basketball.py
+# in another terminal:
+curl -s localhost:8000/healthz                                   # {"status":"ok"}
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8000/mcp  # 401 without the token
+```
+
+The same thing in Docker, which is what you will deploy:
+
+```bash
+docker build -t espn-fantasy-mcp .
+docker run --rm -p 8080:8080 --env-file .env -e MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" espn-fantasy-mcp
+curl -s localhost:8080/healthz
+```
+
+(`.env` is the file described in `.env.example`; it never leaves your machine.)
+
+To try the sign-in flow locally, add `MCP_AUTH_MODE=oauth MCP_PUBLIC_URL=http://localhost:8000`
+(plain `http` is accepted only for localhost) and open
+`http://localhost:8000/.well-known/oauth-authorization-server` to see the discovery document
+Claude reads.
+
+### 2. Host it with HTTPS
+
+The `Dockerfile` runs as an unprivileged user, listens on `$PORT`, and works unchanged on
+Google Cloud Run, Fly.io, Railway, and Render. All of them terminate TLS for you, which is
+required: tokens travel in a header and must only cross the internet over HTTPS. Cloud Run
+scales to zero and bills only while a request is being handled, so a personal server stays
+inside its free tier (see [What it costs](#what-it-costs)). It is the suggested default.
+
+You need a Google Cloud project with billing enabled. The easiest place to run the commands
+is [Cloud Shell](https://shell.cloud.google.com), a browser terminal with `gcloud` already
+installed and signed in, so nothing has to be installed on your computer. Clone this repository
+there, `cd` into it, and run the blocks below in order in the same terminal.
+
+**a. Names.** Cloud Run gives every service a predictable URL built from the service name,
+project number, and region, so the sign-in can be told its own address before the first deploy.
+
+```bash
+PROJECT_ID=$(gcloud config get-value project)
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+REGION=us-central1
+SERVICE=espn-fantasy-mcp
+URL="https://${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
+echo "$URL"
+
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com secretmanager.googleapis.com
+```
+
+**b. Secrets.** These go into Secret Manager, never into the deploy command, your shell
+history, or the image. `read -s` keeps what you paste off the screen.
+
+```bash
+python3 -c 'import secrets; print(secrets.token_urlsafe(32), end="")' \
+  | gcloud secrets create espn-mcp-token --data-file=-
+
+read -rsp 'Paste ESPN_S2: ' V && printf '%s' "$V" | gcloud secrets create espn-s2 --data-file=-; unset V; echo
+read -rsp 'Paste ESPN_SWID (with the braces): ' V && printf '%s' "$V" | gcloud secrets create espn-swid --data-file=-; unset V; echo
+```
+
+**c. A service account that can read those three secrets and nothing else.** Without this the
+service would run as the project's default account, which usually has far broader rights.
+
+```bash
+gcloud iam service-accounts create espn-mcp-runner --display-name "ESPN MCP runtime"
+SA="espn-mcp-runner@${PROJECT_ID}.iam.gserviceaccount.com"
+for s in espn-mcp-token espn-s2 espn-swid; do
+  gcloud secrets add-iam-policy-binding "$s" \
+    --member "serviceAccount:${SA}" --role roles/secretmanager.secretAccessor
+done
+```
+
+**d. Deploy.** Replace the league ID, team ID, and timezone with yours. The first run asks to
+create a container repository; answer yes. `.env` is never uploaded (it is in `.gitignore`,
+which `gcloud` honours, and in `.dockerignore`).
+
+```bash
+gcloud run deploy "$SERVICE" --source . --region "$REGION" \
+  --service-account "$SA" \
+  --allow-unauthenticated \
+  --min-instances 0 --max-instances 1 --timeout 60 --cpu 1 --memory 512Mi \
+  --set-env-vars "MCP_AUTH_MODE=oauth,MCP_PUBLIC_URL=${URL},ESPN_LEAGUE_ID=123456,ESPN_TEAM_ID=1,MY_TIMEZONE=America/Chicago" \
+  --set-secrets "MCP_AUTH_TOKEN=espn-mcp-token:latest,ESPN_S2=espn-s2:latest,ESPN_SWID=espn-swid:latest"
+```
+
+- `--allow-unauthenticated` only removes Google's own sign-in gate, which Claude cannot pass.
+  The server still rejects every MCP request without a valid token.
+- `--max-instances 1` is the hard ceiling on what the service can ever cost, and
+  `--timeout 60` stops any single request from running longer than a minute.
+
+**e. Check it.**
+
+```bash
+curl -s "$URL/healthz"                                        # {"status":"ok"}
+curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL/mcp"   # 401
+curl -s "$URL/.well-known/oauth-protected-resource"          # "resource" is exactly $URL/mcp
+echo "MCP server URL for Claude: $URL/mcp"
+```
+
+If the first `curl` cannot reach the service, print the address Cloud Run assigned with
+`gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)'`, set
+`URL` to it, and run `gcloud run services update "$SERVICE" --region "$REGION"
+--update-env-vars "MCP_PUBLIC_URL=${URL}"`. The address you give Claude and `MCP_PUBLIC_URL`
+must be the same one.
+
+When you reach the sign-in page in step 3, this prints the passphrase to paste:
+
+```bash
+gcloud secrets versions access latest --secret espn-mcp-token; echo
+```
+
+**Later.** To ship new code, pull it and repeat block d (re-run block a first in a fresh
+terminal to set the variables). When `ESPN_S2` expires, add a new version and redeploy:
+`read -rsp 'ESPN_S2: ' V && printf '%s' "$V" | gcloud secrets versions add espn-s2 --data-file=-; unset V`,
+then disable the old version in the console so it stops counting toward the free allowance.
+To revoke every Claude sign-in at once, add a new version of `espn-mcp-token` the same way.
+
+#### What it costs
+
+Expected cost for one person's use is zero. Google's always-free allowances, per billing
+account per month, as of November 2026 (check
+[the Cloud Run pricing page](https://cloud.google.com/run/pricing) and
+[the free tier list](https://cloud.google.com/free) before relying on them):
+
+| Service | Free each month | What this server uses |
+|---|---|---|
+| Cloud Run | 2 million requests, 180,000 vCPU-seconds, 360,000 GiB-seconds | Billed only while a request is in flight; a tool call takes a few seconds |
+| Secret Manager | 6 active secret versions, 10,000 reads | 3 versions; read once per cold start |
+| Artifact Registry | 0.5 GB of storage | One image of about 225 MB uncompressed per deploy; delete old ones |
+| Cloud Build | 2,500 build-minutes | A minute or two per deploy |
+
+Three things keep it there. The server answers `GET /mcp` with `405` instead of holding a
+stream open, because an open connection is billable time. `--max-instances 1` caps the worst
+case: one instance busy every second of a month is roughly $65, and reaching that would take
+continuous traffic. And you should add a budget alert (**Billing > Budgets & alerts**, a $1
+budget with email alerts): alerts do not stop spending, but they tell you the same day.
+
+On Fly.io the equivalent is `fly launch --no-deploy`, `fly secrets set MCP_AUTH_TOKEN=... ESPN_S2=... ESPN_SWID=...`,
+the non-secret variables (including `MCP_AUTH_MODE=oauth` and `MCP_PUBLIC_URL=https://<app>.fly.dev`)
+in `fly.toml` under `[env]`, then `fly deploy`.
+
+### 3. Add it to Claude as a custom connector
+
+Do this once, on claude.ai in a browser (Pro or Max plan; on Team or Enterprise an Owner adds it
+under **Organization settings > Connectors**):
+
+1. Go to **Customize > Connectors** and click **Add custom connector**.
+2. Name it (for example `ESPN Fantasy Basketball`) and enter the **MCP server URL**:
+   `https://YOUR-SERVICE.run.app/mcp`. Leave any OAuth client ID/secret fields under
+   **Advanced settings** empty: Claude registers itself with the server automatically. If your
+   dialog asks, choose **Sign in now** and **Register automatically**.
+3. Click **Add**, then **Connect**. Claude opens your server's sign-in page.
+4. Paste your `MCP_AUTH_TOKEN` into the passphrase box and press **Allow**. You are sent back
+   to claude.ai and the connector shows as connected.
+
+That is the only time you type the token. Claude keeps a refresh token and renews access on
+its own for 30 days, after which it asks you to sign in again. To cut off access at any time,
+deploy a new `MCP_AUTH_TOKEN`: every existing token stops working immediately.
+
+If your dialog *does* have a **Request headers** section you may instead deploy with
+`MCP_AUTH_MODE=bearer` (the default), choose **No sign-in**, pick the `authorization` header,
+and enter `Bearer <your MCP_AUTH_TOKEN>` as its value. Either mode is equally secure; `oauth` is
+recommended because it works for every account.
+
+Then, on your phone, open the Claude app, start a chat, tap **+**, choose **Connectors**, and
+turn the connector on. Ask something like *"Using my ESPN connector, how is my matchup looking
+this week?"*; the first call will ask you to allow the tool.
+
+### How the sign-in works, and its limits
+
+Claude follows the MCP authorization spec: your server answers an unauthenticated request with
+`401` and a pointer to its discovery documents, Claude registers itself as an OAuth client
+(Dynamic Client Registration), sends you to `/authorize`, which shows the passphrase page, and
+exchanges the resulting code for tokens using PKCE. The MCP SDK provides those endpoints and all
+of the protocol checks; this repo adds the login page and a provider that needs **no database**:
+clients, codes and tokens are HMAC-signed payloads keyed from `MCP_AUTH_TOKEN`, so the server
+works on hosts that restart or scale to zero. Client registration is restricted to Claude's
+callback URL and the loopback callback Claude Code uses, so no third party can register a
+client that receives your codes.
+
+Being stateless has two consequences: a refresh token stays valid until it expires (30 days)
+even after a newer one is issued, and the only way to revoke access is to change
+`MCP_AUTH_TOKEN`, which revokes everything at once. Both are acceptable for a server with one
+owner; if you ever share the server, move to a real user store.
+
+### Security notes for the hosted server
+
+- `MCP_AUTH_TOKEN` is the only thing between the internet and your league. Generate it
+  randomly (the command above), never commit it, and keep it out of chat logs. The sign-in page
+  logs failed attempts with their source IP; a 32-character random token is not guessable
+  online, but keep an eye on the logs anyway.
+- Claude's requests to your server come from Anthropic's published range
+  `160.79.104.0/21`. If your host lets you restrict inbound traffic, allowing only that range
+  adds a second layer.
+- If you front the server with Cloudflare, turn off **Security > Settings > Block AI bots** for
+  the hostname; it has been reported to drop Claude's connector requests.
+- `ESPN_S2` expires eventually. When tools start returning authentication errors, refresh the
+  cookie in your browser, update the secret, and redeploy.
+- The server logs rejected requests with their source IP and never logs token values.
+- In HTTP mode outside the container the server binds to `127.0.0.1` on purpose; set
+  `MCP_HOST=0.0.0.0` only behind a TLS-terminating proxy or platform.
 
 ## Draft Tools Usage
 
@@ -414,11 +662,32 @@ GitHub Actions (`.github/workflows/test.yml`) runs on every push and on pull req
 
 Coverage is enforced with `fail_under` in `pyproject.toml` (currently 78%, with coverage around 81%). It is a ratchet: raise it as tests are added, never lower it.
 
+### Working on this repo from your phone
+
+Claude Code *cloud sessions* run on Anthropic's infrastructure and are driven from the **Code**
+tab of the Claude iOS/Android app, so you can ask for a change, close the app, and come back
+to a pushed branch. One-time setup, done in a browser at [claude.ai/code](https://claude.ai/code):
+connect GitHub and install the Claude GitHub App on this repository. (If you have already run
+a cloud session on this repo, that is done.) After that, on the phone:
+
+1. Open the Claude app, tap **Code**, then start a new session.
+2. Pick this repository and a base branch, describe the change, and send it.
+3. Claude works on its own branch and pushes. From the session you can review the diff, ask
+   for changes, and create a pull request. Tell it to *"watch this PR and fix CI failures or
+   review comments"* to have it respond to GitHub activity on its own.
+
+Cloud sessions start from a fresh clone with nothing installed. `.claude/hooks/session-start.sh`,
+registered in `.claude/settings.json`, runs `uv sync --locked --all-extras --dev` at the start of
+every cloud session so `uv run pytest`, ruff, mypy, and `./scripts/check.sh` work from the first
+message. The hook exits immediately outside the cloud (`CLAUDE_CODE_REMOTE` unset), so it never
+touches your local machine. Sessions read the hook from the branch they start on, so it applies
+to new sessions once it is on `main`. `CLAUDE.md` gives each session the project conventions.
+
 ### Project Structure
 
 ```
 espn-fantasy-basketball-mcp/
-├── espn_fantasy_basketball.py      # Main MCP server using FastMCP
+├── espn_fantasy_basketball.py      # Main MCP server using FastMCP (stdio or HTTP via MCP_TRANSPORT)
 ├── espn_fantasy_basketball_mcp/    # Core library package
 │   ├── __init__.py
 │   ├── client.py                   # ESPN API client: requests, cache, fetchers, draft, stats
@@ -426,7 +695,9 @@ espn-fantasy-basketball-mcp/
 │   ├── constants.py                # Stat IDs, slot/position names, pro team codes, thresholds
 │   ├── dates.py                    # Scoring/matchup period calendar math, games remaining
 │   ├── search.py                   # Player name matching
-│   └── models.py                   # Pydantic data models
+│   ├── models.py                   # Pydantic data models
+│   ├── http_transport.py           # Streamable HTTP transport + auth gate (remote use)
+│   └── oauth.py                    # Single-user OAuth 2.1 sign-in for claude.ai connectors
 ├── tests/                          # Test suite (all ESPN calls are mocked; no network needed)
 │   ├── fixtures/                  # ESPN-shaped JSON responses (synthetic; build_synthetic.py)
 │   ├── fixture_espn.py            # Routes client requests to fixtures; freezes the clock
@@ -436,9 +707,11 @@ espn-fantasy-basketball-mcp/
 │   ├── test_client.py             # Client tests
 │   ├── test_draft.py              # Draft client tests
 │   ├── test_draft_server.py       # Draft tool tests
+│   ├── test_http_transport.py     # HTTP transport, bearer auth gate, and MCP-over-HTTP tests
 │   ├── test_matchup_analysis.py   # analyze_matchup projections and recommendations
 │   ├── test_matchup_periods.py    # Matchup period -> calendar date mapping
 │   ├── test_models.py             # Model tests
+│   ├── test_oauth.py              # OAuth discovery, registration, login, PKCE, token tests
 │   ├── test_pro_teams.py          # Team abbreviations and today's-game lookups
 │   ├── test_search.py             # Player search
 │   ├── test_server.py             # Server tool tests
@@ -449,6 +722,9 @@ espn-fantasy-basketball-mcp/
 ├── scripts/check.sh               # Runs the CI checks locally
 ├── scripts/verify_live.py         # Read-only checks against your real league
 ├── scripts/record_fixtures.py     # Records sanitised ESPN responses into tests/fixtures/recorded/
+├── Dockerfile                     # Image for hosting the server as a remote MCP server
+├── .claude/                       # Claude Code cloud-session hook (installs deps on start)
+├── CLAUDE.md                      # Conventions for Claude Code sessions
 ├── .github/workflows/test.yml     # CI
 ├── .github/dependabot.yml         # Weekly GitHub Actions updates
 ├── pyproject.toml                 # Project configuration, tool settings, coverage gate
