@@ -293,3 +293,37 @@ def test_migration_moves_both_ids_to_secrets_in_one_revision(run_block):
     bindings = [c for c in calls if c.startswith("secrets add-iam-policy-binding")]
     assert [c.split()[2] for c in bindings] == ["espn-league-id", "espn-team-id"]
     assert calls.index(bindings[-1]) < calls.index(updates[0])  # access granted before use
+
+
+# --------------------------------------------------------------------------- console route
+
+
+def test_trigger_target_check_only_reads(run_block):
+    """The block that confirms where the Cloud Build trigger deploys must change nothing."""
+    run, read_log = run_block
+    result = run(bash_block_after("**Confirm where it will deploy before you merge anything.**"))
+    assert result.returncode == 0, result.stderr
+
+    calls = read_log("gcloud.argv").splitlines()
+    assert [c.split(" --format")[0] for c in calls] == [
+        "builds triggers list --project espn-mcp-YOURNAME --region global",
+        "builds triggers list --project espn-mcp-YOURNAME --region us-central1",
+    ]
+    for call in calls:  # the two fields that decide which service gets the build
+        assert "substitutions._SERVICE_NAME" in call
+        assert "substitutions._DEPLOY_REGION" in call
+
+
+def test_console_route_names_the_service_the_cli_route_deploys():
+    """The console steps and the Cloud Shell block must agree on the service and region."""
+    text = README.read_text()
+    console = text[
+        text.index("**From the Google Cloud console: no commands.**") : text.index(
+            "**Refreshing an expired ESPN cookie.**"
+        )
+    ]
+    update_block = bash_block_after(UPDATE_MARKER)
+    service = re.search(r"^SERVICE=(\S+)", update_block, re.M).group(1)
+    region = re.search(r"^REGION=(\S+)", update_block, re.M).group(1)
+    assert f"| `_SERVICE_NAME` | `{service}` |" in console
+    assert f"| `_DEPLOY_REGION` | `{region}` |" in console

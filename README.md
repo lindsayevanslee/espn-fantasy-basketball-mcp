@@ -395,42 +395,88 @@ previous revision is still serving: Cloud Run only switches traffic to a revisio
 starts successfully. If Claude does not show a newly added tool, start a new chat.
 
 **From the Google Cloud console: no commands.** The console cannot build from a folder on
-your computer, but it can connect the service to this GitHub repository. After that there are
-two ways to update without a terminal, and both use the same connection.
+your computer, but it can connect the service to this GitHub repository, so that merging to
+`main` updates the server. Two things must already be true: the first deploy above is done
+and working, and the branch you connect has the `Dockerfile` at the top of the repository
+(`main` does).
 
-One-time setup, in the [Cloud Run console](https://console.cloud.google.com/run):
+One-time setup. Check the project name in the console's top bar before you start.
 
-1. Click the `espn-fantasy-mcp` service, then **Connect to repo** at the top of the page.
-2. Choose **Cloud Build** as the provider (it supports GitHub), sign in to GitHub when asked,
-   install the Google Cloud Build app on this repository only, and select the repository.
-3. For the branch, enter `^main$`. For the build type, choose **Dockerfile** and leave the
-   location as `/Dockerfile`. Save.
+1. Open the [Cloud Run services list](https://console.cloud.google.com/run) and click the
+   **name** `espn-fantasy-mcp`. This opens that service's own page, and the setup must start
+   from there: the **Connect repo** button on the list page itself builds a new, separate
+   service instead of connecting this one.
+2. In the row of buttons at the top of the service's page, click **Connect to repo** (some
+   console versions label it **Set up continuous deployment**). It is not under the service's
+   **Triggers** tab, which lists event triggers and has nothing to do with GitHub.
+3. Choose **Cloud Build** as the repository provider and click **Set up with Cloud Build**.
+   Sign in to GitHub when asked, install the Google Cloud Build app on **only this
+   repository**, select `lindsayevanslee/espn-fantasy-basketball-mcp` (or your fork), and
+   continue.
+4. On the build configuration step set **Branch** to `^main$`, set **Build Type** to
+   **Dockerfile**, leave **Source location** as `/Dockerfile`, and save.
+5. **Confirm where it will deploy before you merge anything.** The setup creates a Cloud Build
+   *trigger*, and one field on it decides which service receives each build. Open
+   [Cloud Build > Triggers](https://console.cloud.google.com/cloud-build/triggers) (if the list
+   is empty, change the **Region** dropdown to `global`, then `us-central1`), click the
+   trigger's name, and under **Advanced > Substitution variables** check:
 
-This creates a Cloud Build *trigger*. From then on:
+   | Variable | Must be |
+   |---|---|
+   | `_SERVICE_NAME` | `espn-fantasy-mcp` |
+   | `_DEPLOY_REGION` | `us-central1` |
+
+   If either differs, type the value above and click **Save**. The same check from Cloud
+   Shell, which only reads:
+
+   ```bash
+   (
+   set -euo pipefail
+   PROJECT_ID=espn-mcp-YOURNAME   # your Google Cloud project ID
+   for TRIGGER_REGION in global us-central1; do
+     echo "Triggers in $TRIGGER_REGION:"
+     gcloud builds triggers list --project "$PROJECT_ID" --region "$TRIGGER_REGION" \
+       --format='table(name,substitutions._SERVICE_NAME,substitutions._DEPLOY_REGION)'
+   done
+   )
+   ```
+
+6. Test it once without a commit. On the Triggers list click **Run** at the end of the
+   trigger's row, keep the branch as `main`, and click **Run trigger**. Follow it under
+   [Cloud Build > History](https://console.cloud.google.com/cloud-build/builds): the build has
+   three steps, **Build**, **Push** and **Deploy**, and takes a few minutes. When all three are
+   green, `curl -s https://YOUR-SERVICE-URL/health` prints `{"status":"ok"}` and the new
+   revision is listed on the service's **Revisions** tab.
+
+What a triggered build does: it builds the image from the `Dockerfile`, pushes it to Artifact
+Registry, and runs `gcloud run services update` on the service named by `_SERVICE_NAME`. That
+command changes the image and nothing else, so the secrets, variables, service account and
+instance cap you set at the first deploy all stay as they are, and your Claude connector
+stays signed in.
+
+From then on:
 
 - **Automatic:** every push or merged pull request to `main` builds and deploys. Combined
   with [working on this repo from your phone](#working-on-this-repo-from-your-phone), the
   whole loop needs no computer: ask Claude for a change, merge the pull request, and the live
   server updates a few minutes later.
-- **On demand:** in the console go to **Cloud Build > Triggers**, find the trigger, and click
-  **Run**. Use this to redeploy without a new commit.
+- **On demand:** repeat step 6 to redeploy without a new commit.
 
-Watch a build under **Cloud Build > History**; the new revision appears on the service's
-**Revisions** tab. Things to know before relying on it:
+Things to know:
 
-- The exact console labels change over time. The steps above follow Google's
-  [continuous deployment guide](https://cloud.google.com/run/docs/continuous-deployment), which
-  is the reference if a screen looks different. This route has not been exercised end to end
-  by this project's tests the way the Cloud Shell block has.
-- The first build may fail with a permission error naming the `espn-mcp-runner` service
-  account. The build's own service account needs permission to deploy a service that runs
-  as it. The build log names the account that was refused; grant it with
+- Automatic deploys mean that whatever lands on `main` goes live on a server that holds your
+  ESPN cookies, without waiting for the test workflow. Merge pull requests only after their
+  checks are green, and do not point the trigger at a branch others can push to.
+- Each build uses a minute or two of the free Cloud Build allowance and stores a new image.
+- If the **Deploy** step is refused with a permission error naming `espn-mcp-runner`, the
+  account the trigger runs as may not deploy a service that runs as that account. The build
+  log names the account that was refused; grant it with
   `gcloud iam service-accounts add-iam-policy-binding espn-mcp-runner@PROJECT_ID.iam.gserviceaccount.com --member "serviceAccount:THE_ACCOUNT_IN_THE_LOG" --role roles/iam.serviceAccountUser`
   and run the trigger again.
-- Automatic deploys mean that whatever lands on `main` goes live on a server that holds your
-  ESPN cookies, without waiting for the test workflow. Keep changes going through pull
-  requests, and do not point the trigger at a branch others can push to.
-- Each build uses a minute or two of the free Cloud Build allowance and stores a new image.
+- These steps were followed for this project's own server in November 2026. Console labels
+  move over time; Google's
+  [continuous deployment guide](https://cloud.google.com/run/docs/continuous-deployment) is the
+  reference if a screen looks different, and step 5 holds whatever the screens look like.
 
 **Refreshing an expired ESPN cookie.** When tools start returning authentication errors,
 copy the new `espn_s2` value from your browser and paste this block. It adds the new value,
