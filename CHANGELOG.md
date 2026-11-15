@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Fixed
+- The alternate-basis strategy note said the bases "disagree on 3 categories" while showing
+  the same record on both, because the only difference was closeness (live report). The note
+  now separates a different result ("gives a different result in N categories: ...") from a
+  different closeness ("agrees with every result but differs on how close ... are").
+- A player in both `absent_ids` and `missed_games` had the latter silently overridden; the
+  `absences` list now says absent_ids won and asks for one or the other.
+- Unknown-argument suggestions put spelling before meaning, so `bench_ids` suggested
+  `absent_ids` first; a synonym table (bench -> sit_ids, out -> absent_ids, miss ->
+  missed_games, week -> matchup_period, ...) is consulted first, camelCase names are split,
+  and at most two suggestions are given.
+- Percentage projections' made/attempted are reported to two decimals so the ratio reproduces
+  `yourProjected` instead of being out by rounding.
+- `analyze_matchup` docstring says that IR players are not start/sit candidates (they appear
+  in `expectedGamesBreakdown` only) and that `availabilityNote` is present only when a
+  player's games are discounted.
+
 ### Added
 - `optimize_lineup` tool: for a weekly-lock league, evaluates every valid assignment of your
   players to the starting slots with the matchup projection and ranks the lineups by projected

@@ -4,6 +4,7 @@
 import difflib
 import logging
 import os
+import re
 from collections.abc import Sequence
 from datetime import date
 from typing import Any
@@ -19,6 +20,51 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("espn-fantasy-basketball-mcp")
+
+
+# Words a caller might use for an argument, mapped to the argument they mean. Checked before
+# string similarity, which cannot tell that "bench" means sit_ids.
+_ARGUMENT_SYNONYMS: dict[str, str] = {
+    "bench": "sit_ids",
+    "benched": "sit_ids",
+    "sit": "sit_ids",
+    "sat": "sit_ids",
+    "start": "start_ids",
+    "starter": "start_ids",
+    "starters": "start_ids",
+    "drop": "drop_ids",
+    "drops": "drop_ids",
+    "remove": "drop_ids",
+    "cut": "drop_ids",
+    "add": "add_ids",
+    "adds": "add_ids",
+    "pickup": "add_ids",
+    "absent": "absent_ids",
+    "out": "absent_ids",
+    "injured": "absent_ids",
+    "miss": "missed_games",
+    "missed": "missed_games",
+    "misses": "missed_games",
+    "week": "matchup_period",
+    "period": "matchup_period",
+    "team": "team_id",
+    "league": "league_id",
+    "season": "year",
+}
+
+
+def _suggest(arg: str, accepted: list[str]) -> str:
+    """ " (did you mean 'sit_ids' or 'absent_ids'?)" for an unknown argument, or ""."""
+    words = [w.lower() for w in re.split(r"[_\W]+|(?<=[a-z])(?=[A-Z])", arg) if w]
+    by_meaning = [_ARGUMENT_SYNONYMS[w] for w in words if _ARGUMENT_SYNONYMS.get(w) in accepted]
+    by_spelling = difflib.get_close_matches(arg, accepted, n=2, cutoff=0.6)
+    seen: list[str] = []
+    for name in by_meaning + by_spelling:
+        if name not in seen:
+            seen.append(name)
+    if not seen:
+        return ""
+    return " (did you mean " + " or ".join(f"'{n}'" for n in seen[:2]) + "?)"
 
 
 class StrictFastMCP(FastMCP):
@@ -38,13 +84,7 @@ class StrictFastMCP(FastMCP):
             accepted = sorted((tool.parameters or {}).get("properties", {}))
             unknown = sorted(set(arguments) - set(accepted))
             if unknown:
-                hints = []
-                for arg in unknown:
-                    close = difflib.get_close_matches(arg, accepted, n=3, cutoff=0.5)
-                    hint = f"'{arg}'"
-                    if close:
-                        hint += " (did you mean " + " or ".join(f"'{c}'" for c in close) + "?)"
-                    hints.append(hint)
+                hints = [f"'{arg}'" + _suggest(arg, accepted) for arg in unknown]
                 raise ValueError(
                     f"Unknown argument(s) for {name}: {', '.join(hints)}. Accepted arguments: "
                     f"{', '.join(accepted)}"
@@ -892,7 +932,11 @@ async def analyze_matchup(
         - closeCategories: Categories that are close; each projection carries the
           closeThreshold used and a closenessRule explaining it (per-category margins for
           counting stats, made-shot equivalents for percentages)
-        - playerRecommendations: Players to start, sorted by priority. Priority is driven by
+        - playerRecommendations: every non-IR player, sorted by priority (players in the IR
+          slot are not start/sit candidates; they appear only in expectedGamesBreakdown).
+          availabilityNote is present only when a player's games are discounted (OUT with a
+          return date, bench under a weekly lock, pending add); a healthy or day-to-day
+          player counted in full has none. Priority is driven by
           close categories (closeCategoriesHelped / closeCategoriesHurt); hurting a category
           already projected lost by a wide margin is not penalised. Each reasoning carries the
           per-game numbers behind it.
