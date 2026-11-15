@@ -1902,9 +1902,25 @@ async def optimize_lineup(
         extra = [e for e in fillers if e.playerId not in chosen_ids]
         while len(chosen) < k and extra:
             chosen.append(extra.pop(0))
-        assignment = _assign_slots(chosen, free_slots)
-        if assignment is None:
-            return None
+        # Keep every starter who stays a starter in his current slot and place only the
+        # newcomers, so an option differs from the lineup as set only where it has to;
+        # fall back to a full reshuffle when that leaves a newcomer no eligible slot.
+        kept_slots: dict[int, int] = {}
+        open_slots = list(free_slots)
+        newcomers: list[RosterEntry] = []
+        for e in chosen:
+            if e.lineupSlotId in open_slots and e.lineupSlotId not in (SLOT_BENCH, SLOT_IR):
+                kept_slots[e.playerId] = e.lineupSlotId
+                open_slots.remove(e.lineupSlotId)
+            else:
+                newcomers.append(e)
+        assignment = _assign_slots(newcomers, open_slots)
+        if assignment is not None:
+            assignment.update(kept_slots)
+        else:
+            assignment = _assign_slots(chosen, free_slots)
+            if assignment is None:
+                return None
         out = list(fixed) + list(ir)
         for e in movable:
             out.append(replace_slot(e, assignment.get(e.playerId, SLOT_BENCH)))

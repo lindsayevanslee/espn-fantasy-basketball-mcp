@@ -252,9 +252,8 @@ async def test_optimizer_finds_the_lineup_that_benches_the_out_starter(monkeypat
     assert result.currentLineup == {"PG": "Player 101", "SG": "Player 102"}
     best = result.options[0]
     assert best.rank == 1 and best.projectedRecord == "1-0-0" and best.isCurrent is False
-    assert best.lineup in (
-        {"PG": "Player 101", "SG": "Player 103"},
-        {"PG": "Player 103", "SG": "Player 101"},
+    assert best.lineup == {"PG": "Player 101", "SG": "Player 103"}, (
+        "101 keeps his PG slot; only the newcomer is placed"
     )
     assert best.bench == ["Player 102"]
     assert best.changes == ["start Player 103 (2 games)", "sit Player 102 (0 games)"]
@@ -286,6 +285,9 @@ async def test_optimizer_keeps_locked_players_and_handles_daily_leagues(monkeypa
     assert locked.fixedPlayers == ["Player 102 (SG, locked)"]
     assert locked.currentIsBest is True, "only PG is free and 101 already has it"
     assert locked.options[0].isCurrent and locked.options[0].lineup["SG"] == "Player 102"
+    assert locked.options[0].lineup == locked.currentLineup, (
+        "an option with the same starters echoes the current slot assignment (live report)"
+    )
     assert any(n.startswith("Locked for this period and not moved") for n in locked.notes)
 
     settings.rosterSettings.lineupLocktimeType = "INDIVIDUAL_GAME"
@@ -390,3 +392,12 @@ def test_argument_suggestions_understand_meaning_and_spelling():
     assert server._suggest("out_players", accepted) == " (did you mean 'absent_ids'?)"
     assert server._suggest("sit_id", accepted) == " (did you mean 'sit_ids' or 'start_ids'?)"
     assert server._suggest("foo", accepted) == ""
+
+
+def test_newcomer_forces_a_reshuffle_only_when_needed():
+    """A guard who can only play PG joins; the current PG, who is also G-eligible, moves."""
+    pg_only = _with_slots(1, [0, 11, 12])
+    flexible = _with_slots(2, [0, 5, 11, 12]).model_copy(update={"lineupSlotId": 0})
+    # keeping 2 at PG leaves 1 nowhere: the full reshuffle finds PG for 1 and G for 2
+    assert _assign_slots([pg_only], [5]) is None
+    assert _assign_slots([pg_only, flexible], [0, 5]) == {1: 0, 2: 5}
