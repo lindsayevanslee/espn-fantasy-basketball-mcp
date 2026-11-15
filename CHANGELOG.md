@@ -3,6 +3,31 @@
 ## [Unreleased]
 
 ### Fixed
+- Pending adds were missing from next week's projection and the legality check. An add made
+  after today's games started is applied by ESPN from `status.transactionScoringPeriod` (live,
+  2026-11-14: Queta appeared on the scoring-period-28 roster, not today's), while both tools
+  read today's roster, so `analyze_matchup` projected without him and `can_add_player` said
+  "already on your roster" while counting 12 players and 3 centres. Both now use the
+  effective roster: today's players plus those ESPN lists for the transaction period (and,
+  for a future week, the week's first day), with `Roster.pendingAdds` naming them and the day
+  they take effect. Their games are counted only from that day. `can_add_player` reports
+  `rosterScoringPeriod` / `rosterNote` and says when an "already on your roster" player is a
+  pending add. Pending adds whose effective day falls after the current week are left out of
+  this week's projection, and the roster note says so.
+
+### Added
+- Lineup-swap simulation: `simulate_roster_move` takes `start_ids` and `sit_ids` ("start
+  Sheppard, sit Dunn"). A started player takes the sat player's slot when eligible, or an open
+  starting slot; a sat player goes to the bench. Ineligible slots, players not on the roster,
+  no open slot and slots ESPN has locked are reported in `lineupWarnings`; `started`,
+  `benched` and `lineupChanges` say what was simulated. Adds may be started in the same call.
+- Attempt counts behind FG% and FT%: per-game lines (`basisPerGame`, `seasonPerGame`,
+  `projectedPerGame`) carry made/attempted shots, every player has `projectedTotals` (per-game
+  times games counted), percentage `categoryProjections` carry current and projected
+  made/attempted for both teams, and `categoryDeltas` carry your made/attempted before and
+  after, so a percentage effect can be checked to the shot.
+
+### Fixed
 - Projections counted every non-IR player, bench included, in weekly-lock leagues, where a
   bench player's games never reach the score (live feedback, 2026-11-15). Under
   `FIRSTGAME_WEEKLY` / `INDIVIDUAL_FIRSTGAME_WEEKLY` only starting slots count now, for both
