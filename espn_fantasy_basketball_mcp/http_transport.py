@@ -17,7 +17,9 @@ transport behind a small authentication layer:
     :mod:`espn_fantasy_basketball_mcp.oauth`, where the owner proves they hold
     ``MCP_AUTH_TOKEN`` once on a login page. For claude.ai and the Claude mobile app, whose
     connector dialog only offers a sign-in flow. Requires ``MCP_PUBLIC_URL``.
-* ``GET /healthz`` is open so a hosting platform can probe liveness without the token.
+* ``GET /health`` is open so a hosting platform can probe liveness without the token. (Not
+  ``/healthz``: Cloud Run reserves some paths ending in ``z`` and answers them itself with a
+  404 before the request reaches the container.)
 * The transport runs stateless, so the server works behind load balancers and on platforms
   that scale to zero and back (each request is self-contained).
 * ``GET`` on the MCP endpoint answers ``405``. The MCP spec lets a server decline the optional
@@ -58,7 +60,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger("espn-fantasy-basketball-mcp.http")
 
-HEALTH_PATH = "/healthz"
+HEALTH_PATH = "/health"
 MIN_TOKEN_LENGTH = 32
 AUTH_MODES = ("bearer", "oauth")
 DEFAULT_HOST = "127.0.0.1"

@@ -259,3 +259,11 @@ class TestMain:
         monkeypatch.setenv("MCP_TRANSPORT", "carrier-pigeon")
         with pytest.raises(SystemExit, match="Unknown MCP_TRANSPORT"):
             entry.main()
+
+
+def test_health_path_avoids_cloud_run_reserved_suffix():
+    """Cloud Run answers some paths ending in "z" (e.g. /healthz) with its own 404.
+
+    Seen on the first live deploy: the request never reached the container.
+    """
+    assert not HEALTH_PATH.endswith("z")

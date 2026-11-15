@@ -174,7 +174,7 @@ supports that with a second transport:
   transport (`espn_fantasy_basketball_mcp/http_transport.py`).
 - Every request must carry a valid `Authorization: Bearer` token or it gets a `401` before it
   reaches any tool. The server refuses to start over HTTP without `MCP_AUTH_TOKEN`, tokens are
-  never accepted in the URL, and `GET /healthz` is open for platform health checks.
+  never accepted in the URL, and `GET /health` is open for platform health checks.
 - Two ways to prove you hold `MCP_AUTH_TOKEN`, chosen with `MCP_AUTH_MODE`:
   - **`oauth`** (use this for claude.ai and the Claude app): the server runs a tiny single-user
     OAuth 2.1 sign-in (`espn_fantasy_basketball_mcp/oauth.py`). When you add the connector,
@@ -201,7 +201,7 @@ echo "$MCP_AUTH_TOKEN"   # keep this; you will paste it into claude.ai
 
 MCP_TRANSPORT=streamable-http uv run espn_fantasy_basketball.py
 # in another terminal:
-curl -s localhost:8000/healthz                                   # {"status":"ok"}
+curl -s localhost:8000/health                                    # {"status":"ok"}
 curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8000/mcp  # 401 without the token
 ```
 
@@ -210,7 +210,7 @@ The same thing in Docker, which is what you will deploy:
 ```bash
 docker build -t espn-fantasy-mcp .
 docker run --rm -p 8080:8080 --env-file .env -e MCP_AUTH_TOKEN="$MCP_AUTH_TOKEN" espn-fantasy-mcp
-curl -s localhost:8080/healthz
+curl -s localhost:8080/health
 ```
 
 (`.env` is the file described in `.env.example`; it never leaves your machine.)
@@ -251,7 +251,7 @@ gcloud billing projects describe espn-mcp-YOURNAME --format='value(billingEnable
 
 **a. Names.** Cloud Run gives every service a predictable URL built from the service name,
 project number, and region, so the sign-in can be told its own address before the first deploy.
-The `echo` must print a URL with a 12-digit number in it, like
+The `echo` must print a URL with your project number in it, like
 `https://espn-fantasy-mcp-123456789012.us-central1.run.app`. If the number is missing, no
 project is selected; go back one step.
 
@@ -311,7 +311,7 @@ gcloud run deploy "$SERVICE" --source . --region "$REGION" \
 **e. Check it.**
 
 ```bash
-curl -s "$URL/healthz"                                        # {"status":"ok"}
+curl -s "$URL/health"                                         # {"status":"ok"}
 curl -s -o /dev/null -w '%{http_code}\n' -X POST "$URL/mcp"   # 401
 curl -s "$URL/.well-known/oauth-protected-resource"          # "resource" is exactly $URL/mcp
 echo "MCP server URL for Claude: $URL/mcp"

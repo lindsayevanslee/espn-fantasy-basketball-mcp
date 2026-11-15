@@ -44,7 +44,7 @@
 - The server can now be used from the Claude mobile app and claude.ai as a remote MCP server.
   `MCP_TRANSPORT=streamable-http` serves the tools over Streamable HTTP at `/mcp`, gated by a
   bearer token (`MCP_AUTH_TOKEN`, required; constant-time comparison; never accepted in the
-  URL) with an open `/healthz`. A `Dockerfile` packages it for Cloud Run, Fly.io, Railway, or
+  URL) with an open `/health` (not `/healthz`, which Cloud Run reserves). A `Dockerfile` packages it for Cloud Run, Fly.io, Railway, or
   Render. Claude Desktop is unaffected: stdio remains the default.
   (`espn_fantasy_basketball_mcp/http_transport.py`, `tests/test_http_transport.py`.)
 - `MCP_AUTH_MODE=oauth` adds a single-user OAuth 2.1 sign-in (`espn_fantasy_basketball_mcp/oauth.py`)

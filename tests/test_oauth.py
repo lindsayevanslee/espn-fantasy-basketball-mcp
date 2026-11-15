@@ -305,7 +305,7 @@ def test_authorization_server_metadata(client):
 
 
 def test_health_stays_open(client):
-    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok"}
 
 
 def test_registration_rejects_foreign_redirect_uri(client):

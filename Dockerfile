@@ -3,7 +3,7 @@
 #
 # Build:  docker build -t espn-fantasy-mcp .
 # Run:    docker run --rm -p 8080:8080 --env-file .env espn-fantasy-mcp
-# Then:   curl -s localhost:8080/healthz        -> {"status":"ok"}
+# Then:   curl -s localhost:8080/health         -> {"status":"ok"}
 #
 # Required env: MCP_AUTH_TOKEN plus the ESPN_* variables from .env.example. Never bake them
 # into the image; pass them at run time (or as your host's secrets).
@@ -45,6 +45,6 @@ ENV MCP_TRANSPORT=streamable-http \
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-  CMD ["/app/.venv/bin/python", "-c", "import os, urllib.request; urllib.request.urlopen(f\"http://127.0.0.1:{os.environ['PORT']}/healthz\", timeout=2)"]
+  CMD ["/app/.venv/bin/python", "-c", "import os, urllib.request; urllib.request.urlopen(f\"http://127.0.0.1:{os.environ['PORT']}/health\", timeout=2)"]
 
 CMD ["/app/.venv/bin/python", "espn_fantasy_basketball.py"]
