@@ -52,10 +52,13 @@ from .models import (
     PlayerRecommendation,
     PlayerStats,
     RecordProbability,
+    ReturnScenario,
     RosterEntry,
     RosterLegality,
     RosterMoveSimulation,
     RosterScheduleSummary,
+    StreamerOption,
+    StreamerRanking,
 )
 from .outcomes import (
     CONFIDENCE,
@@ -213,6 +216,7 @@ def expected_games_for(
     weekly_lock: bool,
     effective_from: date | None = None,
     absence: int | None = None,
+    assume_return: bool = False,
 ) -> ExpectedGames:
     """Expected games for one roster entry from its remaining game dates.
 
@@ -227,6 +231,8 @@ def expected_games_for(
       is treated as stale: nothing counts.
     - In a weekly-lock league a bench player's games never reach the score, so they are
       playable but not counted; the note says so. The IR slot never counts.
+    - assume_return (what-if only) counts an OUT player's games on and after his listed
+      return date even when that date is ESPN's placeholder or has already passed.
     """
     label, factor = player_availability(entry)
     notes: list[str] = []
@@ -251,7 +257,11 @@ def expected_games_for(
     player = entry.playerPoolEntry.player
     return_date = _return_date(entry) if label == "OUT" and scheduled else None
     if return_date is not None:
-        if player.injuryReturnDateType == "placeholder":
+        if assume_return and not (window_end is not None and return_date > window_end):
+            back = sum(1 for d in game_dates if d >= return_date)
+            playable = float(back)
+            notes.append(f"what-if: assumed to play his {back} game(s) from {return_date}")
+        elif player.injuryReturnDateType == "placeholder":
             notes.append(
                 f"expected return {return_date} is ESPN's next-game placeholder, not an "
                 "estimate; no games counted"
@@ -387,6 +397,8 @@ class MatchupInputs:
     # playerId -> game-to-game spread from his recent game logs (see outcomes.py). A player
     # missing here gets the league-typical spread, so the range still works without logs.
     dispersion: dict[int, PlayerDispersion] = field(default_factory=dict)
+    # What-if only: players listed OUT who are assumed to play from their listed return date
+    assume_returns: frozenset[int] = frozenset()
 
 
 def _blend(a: PlayerStats, b: PlayerStats) -> PlayerStats:
@@ -715,6 +727,29 @@ def _shooting_loads(
     return loads
 
 
+STANDINGS_NOTES = {
+    "categories": (
+        "This league's standings count every category (H2H Each Category): each category "
+        "won or lost goes on your record, so expectedCategoryWins is the figure that moves "
+        "your standing. matchupWinProbability only says who takes more categories."
+    ),
+    "matchups": (
+        "This league's standings count one result per matchup, so matchupWinProbability is "
+        "the figure that moves your standing."
+    ),
+}
+
+
+def _standings_unit(inputs: MatchupInputs) -> str | None:
+    """ "categories" when every category goes on the record, "matchups" when the week does."""
+    scoring_type = inputs.settings.scoringSettings.scoringType
+    if scoring_type == "H2H_CATEGORY":
+        return "categories"
+    if scoring_type == "H2H_MOST_CATEGORIES":
+        return "matchups"
+    return None
+
+
 def _outcome_range(
     inputs: MatchupInputs,
     projections: list[CategoryProjection],
@@ -745,6 +780,8 @@ def _outcome_range(
             f"{with_logs} of {len(counted_ids)} players with games counted use their own game "
             "logs for game-to-game spread; the rest use league-typical values"
         ),
+        standingsUnit=_standings_unit(inputs),
+        standingsNote=STANDINGS_NOTES.get(_standings_unit(inputs) or ""),
         method=METHOD,
     )
 
@@ -831,6 +868,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             weekly_lock,
             effective_from=inputs.effective_from.get(e.playerId),
             absence=inputs.absences.get(e.playerId),
+            assume_return=e.playerId in inputs.assume_returns,
         )
         for e in inputs.your_entries
     }
@@ -842,6 +880,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             today,
             weekly_lock,
             effective_from=inputs.effective_from.get(e.playerId),
+            assume_return=e.playerId in inputs.assume_returns,
         )
         for e in inputs.opponent_entries
     }
@@ -1368,14 +1407,28 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
         pid for pid, n in opp_expected.items() if n > 0
     ]
     outcome_range = _outcome_range(inputs, category_projections, category_outcomes, counted_ids)
-    odds_note = (
-        f"Estimated matchup odds: {outcome_range.matchupWinProbability:.0%} win, "
-        f"{outcome_range.matchupTieProbability:.0%} tie, "
-        f"{outcome_range.matchupLossProbability:.0%} loss "
-        f"(expected categories {outcome_range.expectedCategoryWins:g}-"
-        f"{outcome_range.expectedCategoryLosses:g}-{outcome_range.expectedCategoryTies:g}); "
-        "an approximation, see outcomeRange.method"
+    expected_record = (
+        f"{outcome_range.expectedCategoryWins:g}-{outcome_range.expectedCategoryLosses:g}-"
+        f"{outcome_range.expectedCategoryTies:g}"
     )
+    matchup_odds_text = (
+        f"{outcome_range.matchupWinProbability:.0%} win, "
+        f"{outcome_range.matchupTieProbability:.0%} tie, "
+        f"{outcome_range.matchupLossProbability:.0%} loss"
+    )
+    if outcome_range.standingsUnit == "categories":
+        # every category goes on the record here, so lead with the category count
+        odds_note = (
+            f"Expected category record {expected_record} (this league's standings count "
+            f"every category, so this is the figure that matters); odds of taking more "
+            f"categories than the opponent: {matchup_odds_text}; an approximation, see "
+            "outcomeRange.method"
+        )
+    else:
+        odds_note = (
+            f"Estimated matchup odds: {matchup_odds_text} (expected categories "
+            f"{expected_record}); an approximation, see outcomeRange.method"
+        )
     if outcome_range.tossUpCategories:
         odds_note += ". Toss-ups (35-65% to win): " + ", ".join(outcome_range.tossUpCategories)
     notes.append(odds_note)
@@ -1435,7 +1488,76 @@ async def analyze_matchup(
     used for BOTH teams: projections (default), season, last_7, last_15, last_30, or blend.
     """
     inputs = await gather_inputs(client, team_id, matchup_period, basis)
-    return with_alternate_basis(compute_analysis(inputs), inputs)
+    return with_return_scenarios(with_alternate_basis(compute_analysis(inputs), inputs), inputs)
+
+
+MAX_RETURN_SCENARIOS = 4
+
+
+def with_return_scenarios(analysis: MatchupAnalysis, inputs: MatchupInputs) -> MatchupAnalysis:
+    """Add the odds if a player listed OUT plays from his listed return date.
+
+    ESPN's return date for a day-to-day player is often his team's next game (a placeholder),
+    so the projection counts none of his games. For each such player on either team whose
+    return date falls inside the window, the matchup is re-run with those games counted. A
+    player the projection already counts from a reported date changes nothing and is skipped.
+    """
+    if analysis.outcomeRange is None:
+        return analysis
+    scenarios: list[ReturnScenario] = []
+    base_results = {c.category: c.projectedResult for c in analysis.categoryProjections}
+    for side, entries in (("you", inputs.your_entries), ("opponent", inputs.opponent_entries)):
+        for e in entries:
+            label, _ = player_availability(e)
+            return_date = _return_date(e)
+            if label != "OUT" or return_date is None:
+                continue
+            if inputs.matchup_end is not None and return_date > inputs.matchup_end:
+                continue
+            what_if = compute_analysis(
+                replace(inputs, assume_returns=frozenset({e.playerId}), basis_notes=[])
+            )
+            before = analysis.yourExpectedGames if side == "you" else analysis.opponentExpectedGames
+            after = what_if.yourExpectedGames if side == "you" else what_if.opponentExpectedGames
+            games = round((after or 0.0) - (before or 0.0), 1)
+            if games <= 0 or what_if.outcomeRange is None:
+                continue
+            player = e.playerPoolEntry.player
+            scenarios.append(
+                ReturnScenario(
+                    playerId=e.playerId,
+                    playerName=player.fullName,
+                    side=side,
+                    returnDate=return_date.isoformat(),
+                    returnDateType=player.injuryReturnDateType,
+                    gamesAssumed=games,
+                    projectedRecord=_record(what_if),
+                    expectedCategoryWins=what_if.outcomeRange.expectedCategoryWins,
+                    matchupWinProbability=what_if.outcomeRange.matchupWinProbability,
+                    categoriesFlipped=[
+                        f"{c.category}: {base_results[c.category]} -> {c.projectedResult}"
+                        for c in what_if.categoryProjections
+                        if base_results.get(c.category) not in (None, c.projectedResult)
+                    ],
+                )
+            )
+    # the ones that move the expected record most first
+    base_wins = analysis.outcomeRange.expectedCategoryWins
+    scenarios.sort(key=lambda s: -abs(s.expectedCategoryWins - base_wins))
+    scenarios = scenarios[:MAX_RETURN_SCENARIOS]
+    analysis.outcomeRange.returnScenarios = scenarios
+    for s in scenarios:
+        whose = "your" if s.side == "you" else "the opponent's"
+        flips = f"; flips {', '.join(s.categoriesFlipped)}" if s.categoriesFlipped else ""
+        analysis.strategyNotes.append(
+            f"What if {whose} {s.playerName} (listed OUT, return date {s.returnDate}"
+            f"{', ' + s.returnDateType if s.returnDateType else ''}) plays his "
+            f"{s.gamesAssumed:g} game(s) from then: expected category wins "
+            f"{base_wins:g} -> {s.expectedCategoryWins:g}, chance of taking more categories "
+            f"{analysis.outcomeRange.matchupWinProbability:.0%} -> "
+            f"{s.matchupWinProbability:.0%}{flips}"
+        )
+    return analysis
 
 
 def with_alternate_basis(analysis: MatchupAnalysis, inputs: MatchupInputs) -> MatchupAnalysis:
@@ -1673,6 +1795,32 @@ def _expected_wins(analysis: MatchupAnalysis) -> float | None:
     return analysis.outcomeRange.expectedCategoryWins if analysis.outcomeRange else None
 
 
+PROJECTION_GAP = 0.25  # projection and season points this far apart are worth a warning
+PROJECTION_GAP_MIN_GAMES = 5
+
+
+def projection_gap_note(stats: dict[str, dict[int, PlayerStats]], player_id: int) -> str | None:
+    """A warning when ESPN's projection and a player's season actuals are far apart.
+
+    The two bases will then disagree about him, and a move that looks good on one may not on
+    the other. Points per game stands in for his role; fewer than five games played is too
+    little to compare against.
+    """
+    proj = stats.get("projections", {}).get(player_id)
+    season = stats.get("season", {}).get(player_id)
+    if proj is None or season is None or (season.gamesPlayed or 0) < PROJECTION_GAP_MIN_GAMES:
+        return None
+    p, s = proj.points or 0.0, season.points or 0.0
+    if p <= 0 or s <= 0 or abs(p - s) / s < PROJECTION_GAP:
+        return None
+    direction = "above" if p > s else "below"
+    return (
+        f"ESPN projects {p:g} points a game, {abs(p - s) / s:.0%} {direction} the {s:g} he has "
+        f"averaged over {season.gamesPlayed} games this season; check the season basis before "
+        "trusting the projection"
+    )
+
+
 async def simulate_roster_move(
     client: ESPNFantasyBasketballClient,
     team_id: int,
@@ -1861,11 +2009,33 @@ async def simulate_roster_move(
         f"Expected games {before.yourExpectedGames} -> {after.yourExpectedGames}",
     ]
     p_before, p_after = _win_probability(before), _win_probability(after)
+    w_before, w_after = _expected_wins(before), _expected_wins(after)
     if p_before is not None and p_after is not None:
         summary.append(
-            f"Estimated chance to win the matchup {p_before:.0%} -> {p_after:.0%} (an "
+            f"Expected category wins {w_before:g} -> {w_after:g}; estimated chance to win the "
+            f"matchup {p_before:.0%} -> {p_after:.0%} (an "
             "approximation; see analyze_matchup's outcomeRange.method)"
         )
+    if _standings_unit(inputs) == "categories":
+        summary.append(
+            "This league's standings count every category, so the change in expected "
+            "category wins is the figure that matters"
+        )
+    # Second opinion: the same move on the other everyday basis
+    alternate = "season" if basis != "season" else "projections"
+    before_alt = after_alt = None
+    if inputs.stats.get(alternate):
+        before_alt = compute_analysis(replace(inputs, basis=alternate, basis_notes=[]))
+        after_alt = compute_analysis(replace(after_inputs, basis=alternate, basis_notes=[]))
+        summary.append(
+            f"On the {alternate} basis: projected record {_record(before_alt)} -> "
+            f"{_record(after_alt)}, expected category wins {_expected_wins(before_alt):g} -> "
+            f"{_expected_wins(after_alt):g}"
+        )
+    for added in added_entries:
+        gap = projection_gap_note(merged_stats, added.playerId)
+        if gap:
+            summary.append(f"{added.playerPoolEntry.player.fullName}: {gap}")
     if placements:
         summary.append("Slots: " + "; ".join(placements))
     if lineup_changes:
@@ -1931,6 +2101,11 @@ async def simulate_roster_move(
         matchupWinProbabilityAfter=_win_probability(after),
         expectedCategoryWinsBefore=_expected_wins(before),
         expectedCategoryWinsAfter=_expected_wins(after),
+        alternateBasis=alternate if before_alt is not None else None,
+        alternateProjectedRecordBefore=_record(before_alt) if before_alt else None,
+        alternateProjectedRecordAfter=_record(after_alt) if after_alt else None,
+        alternateExpectedCategoryWinsBefore=_expected_wins(before_alt) if before_alt else None,
+        alternateExpectedCategoryWinsAfter=_expected_wins(after_alt) if after_alt else None,
         categoryDeltas=deltas,
         categoriesFlipped=flipped,
         addedPlayers=added_recs,
@@ -2006,6 +2181,312 @@ def _lineup_map(entries: list[RosterEntry]) -> tuple[dict[str, str], list[str]]:
 
 def _starting_ids(entries: list[RosterEntry]) -> set[int]:
     return {e.playerId for e in entries if e.lineupSlotId not in (SLOT_BENCH, SLOT_IR)}
+
+
+# --------------------------------------------------------------------------- streamers
+STREAMER_MAX_POOL = 50
+WIN_PROBABILITY_CHANGE_SHOWN = 0.03
+
+
+def _streamer_lineups(
+    kept: list[RosterEntry],
+    dropped: RosterEntry | None,
+    candidate: RosterEntry,
+    weekly_lock: bool,
+    week_in_progress: bool,
+) -> list[tuple[str, list[RosterEntry]]]:
+    """Every sensible place to put a newly added player: (description, roster).
+
+    He can take the dropped player's starting slot; in a weekly-lock league he can also take
+    any other starter's slot he is eligible for, that starter moving to the dropped player's
+    slot when eligible and otherwise to the bench. A slot ESPN has locked for a week in
+    progress is left alone. The bench is always an option (and the only one that changes
+    nothing under a weekly lock).
+    """
+
+    def name(e: RosterEntry) -> str:
+        return e.playerPoolEntry.player.fullName
+
+    def eligible(e: RosterEntry, slot: int) -> bool:
+        slots = e.playerPoolEntry.player.eligibleSlots
+        return slots is None or slot in slots
+
+    def changeable(e: RosterEntry) -> bool:
+        return not week_in_progress or e.lineupLocked is False
+
+    freed: int | None = None
+    if dropped is not None and dropped.lineupSlotId not in (SLOT_BENCH, SLOT_IR):
+        if changeable(dropped):
+            freed = dropped.lineupSlotId
+    options: list[tuple[str, list[RosterEntry]]] = []
+    if freed is not None and dropped is not None and eligible(candidate, freed):
+        options.append(
+            (
+                f"takes {name(dropped)}'s {_slot_label(freed)} slot",
+                [*kept, replace_slot(candidate, freed)],
+            )
+        )
+    if weekly_lock:
+        for starter in kept:
+            slot = starter.lineupSlotId
+            if slot in (SLOT_BENCH, SLOT_IR) or not changeable(starter):
+                continue
+            if not eligible(candidate, slot):
+                continue
+            others = [e for e in kept if e is not starter]
+            if freed is not None and eligible(starter, freed):
+                moved = replace_slot(starter, freed)
+                text = (
+                    f"starts at {_slot_label(slot)}; {name(starter)} moves to {_slot_label(freed)}"
+                )
+            else:
+                moved = replace_slot(starter, SLOT_BENCH)
+                text = f"starts at {_slot_label(slot)}; {name(starter)} goes to the bench"
+            options.append((text, [*others, moved, replace_slot(candidate, slot)]))
+    options.append(("goes to the bench", [*kept, _roster_entry_for(candidate)]))
+    return options
+
+
+async def rank_streamers(
+    client: ESPNFantasyBasketballClient,
+    team_id: int,
+    drop_id: int | None = None,
+    candidate_ids: list[int] | None = None,
+    matchup_period: int | None = None,
+    basis: str = "projections",
+    pool_size: int = 25,
+    top: int = 10,
+) -> StreamerRanking:
+    """Rank free agents by what each does to the matchup when swapped in for `drop_id`.
+
+    The candidates are `candidate_ids`, or the `pool_size` most-owned free agents. Each is
+    tried in every sensible slot (see _streamer_lineups) and kept at his best, the matchup is
+    re-run with the same arithmetic as analyze_matchup, and the candidates are ranked by the
+    change in expected category wins (when the league's standings count every category) or in
+    matchup win probability. Everything is fetched once for all candidates, so the cost does
+    not grow with the pool beyond a legality check for each option returned.
+    """
+    if not 1 <= pool_size <= STREAMER_MAX_POOL:
+        raise ValueError(f"pool_size must be between 1 and {STREAMER_MAX_POOL}, got {pool_size}")
+    if not 1 <= top <= STREAMER_MAX_POOL:
+        raise ValueError(f"top must be between 1 and {STREAMER_MAX_POOL}, got {top}")
+    inputs = await gather_inputs(client, team_id, matchup_period, basis)
+    before = compute_analysis(inputs)
+    weekly_lock = inputs.settings.rosterSettings.lineupLocktimeType in WEEKLY_LOCK_RULES
+    week_in_progress = inputs.target_period <= inputs.settings.status.currentMatchupPeriod
+    by_categories = _standings_unit(inputs) == "categories"
+    notes: list[str] = []
+
+    dropped: RosterEntry | None = None
+    if drop_id is not None:
+        dropped = next((e for e in inputs.your_entries if e.playerId == drop_id), None)
+        if dropped is None:
+            raise ValueError(f"Player {drop_id} is not on team {team_id}'s roster")
+    else:
+        notes.append(
+            "No drop_id given: each candidate is added without a drop, which is only legal "
+            "with an open roster spot (see canAdd)"
+        )
+    kept = [e for e in inputs.your_entries if e is not dropped]
+    rostered = {e.playerId for e in inputs.your_entries}
+
+    if candidate_ids:
+        wanted = [pid for pid in dict.fromkeys(candidate_ids) if pid not in rostered]
+        if len(wanted) > STREAMER_MAX_POOL:
+            raise ValueError(f"At most {STREAMER_MAX_POOL} candidate_ids, got {len(wanted)}")
+        skipped = [pid for pid in dict.fromkeys(candidate_ids) if pid in rostered]
+        if skipped:
+            notes.append(f"Already on your roster, ignored: {skipped}")
+    else:
+        free_agents = await client.get_free_agents(size=pool_size)
+        wanted = [p.id for p in free_agents if p.id not in rostered]
+        notes.append(
+            f"Candidates are the {len(wanted)} most-owned free agents; pass candidate_ids to "
+            "rank specific players, or raise pool_size (max 50)"
+        )
+    candidates = await client.roster_entries_for_players(wanted) if wanted else []
+    unknown = sorted(set(wanted) - {e.playerId for e in candidates})
+    if unknown:
+        notes.append(f"Unknown player IDs, ignored: {unknown}")
+
+    ids = [e.playerId for e in candidates]
+    subjects = [
+        (e.playerId, e.playerPoolEntry.player.fullName, e.playerPoolEntry.player.proTeamId, True)
+        for e in candidates
+    ]
+    if candidates:
+        extra_schedule, extra_stats, extra_dispersion = await asyncio.gather(
+            client._schedule_summary(
+                subjects, inputs.start_date, inputs.end_date, inputs.target_period, team_id=team_id
+            ),
+            fetch_stats(client, ids, basis),
+            fetch_dispersion(client, ids),
+        )
+        schedule = inputs.your_schedule.model_copy(
+            update={
+                "playerSchedules": inputs.your_schedule.playerSchedules
+                + extra_schedule.playerSchedules
+            }
+        )
+    else:
+        extra_stats, extra_dispersion, schedule = {}, {}, inputs.your_schedule
+    stats = {k: dict(v) for k, v in inputs.stats.items()}
+    for timeframe, by_id in extra_stats.items():
+        stats.setdefault(timeframe, {}).update(by_id)
+    shared = replace(
+        inputs,
+        your_schedule=schedule,
+        stats=stats,
+        dispersion={**inputs.dispersion, **extra_dispersion},
+        basis_notes=[],
+    )
+
+    def value(analysis: MatchupAnalysis) -> tuple[float, float]:
+        wins, p = _expected_wins(analysis) or 0.0, _win_probability(analysis) or 0.0
+        return (wins, p) if by_categories else (p, wins)
+
+    alternate = "season" if basis != "season" else "projections"
+    has_alternate = bool(stats.get(alternate))
+    before_alt = (
+        compute_analysis(replace(inputs, basis=alternate, basis_notes=[]))
+        if has_alternate
+        else None
+    )
+    base_wins, base_p = _expected_wins(before) or 0.0, _win_probability(before) or 0.0
+    before_by = {c.category: c for c in before.categoryProjections}
+
+    ranked: list[tuple[tuple[float, float], StreamerOption]] = []
+    for candidate in candidates:
+        best: tuple[str, MatchupAnalysis, list[RosterEntry]] | None = None
+        for text, entries in _streamer_lineups(
+            kept, dropped, candidate, weekly_lock, week_in_progress
+        ):
+            analysis = compute_analysis(replace(shared, your_entries=entries))
+            if best is None or value(analysis) > value(best[1]):
+                best = (text, analysis, entries)
+        assert best is not None  # the bench is always an option
+        placement, after, entries = best
+        rec = next(r for r in after.playerRecommendations if r.playerId == candidate.playerId)
+        player = candidate.playerPoolEntry.player
+        alt_delta: float | None = None
+        if before_alt is not None:
+            after_alt = compute_analysis(
+                replace(shared, your_entries=entries, basis=alternate, basis_notes=[])
+            )
+            alt_delta = round(
+                (_expected_wins(after_alt) or 0.0) - (_expected_wins(before_alt) or 0.0), 2
+            )
+        changes: dict[str, float] = {}
+        flipped: list[str] = []
+        for c in after.categoryProjections:
+            b = before_by.get(c.category)
+            if b is None:
+                continue
+            if b.projectedResult != c.projectedResult:
+                flipped.append(f"{c.category}: {b.projectedResult} -> {c.projectedResult}")
+            change = (c.winProbability or 0.0) - (b.winProbability or 0.0)
+            if abs(change) >= WIN_PROBABILITY_CHANGE_SHOWN:
+                changes[c.category] = round(change, 3)
+        wins, p = _expected_wins(after) or 0.0, _win_probability(after) or 0.0
+        ownership = player.ownership.percentOwned if player.ownership else None
+        option = StreamerOption(
+            rank=0,
+            playerId=candidate.playerId,
+            playerName=player.fullName,
+            proTeam=player.proTeamAbbrev,
+            position=player.defaultPosition,
+            percentOwned=ownership,
+            availability=rec.availability,
+            gamesThisPeriod=rec.gamesRemaining or 0,
+            expectedGames=rec.expectedGames or 0.0,
+            gamesInProjection=rec.gamesInProjection or 0.0,
+            placement=placement,
+            projectedRecord=_record(after),
+            expectedCategoryWins=wins,
+            expectedCategoryWinsDelta=round(wins - base_wins, 2),
+            matchupWinProbability=p,
+            matchupWinProbabilityDelta=round(p - base_p, 3),
+            categoriesFlipped=flipped,
+            winProbabilityChanges=changes,
+            alternateBasis=alternate if before_alt is not None else None,
+            alternateExpectedCategoryWinsDelta=alt_delta,
+            perGame=rec.basisPerGame,
+            seasonGamesPlayed=rec.seasonGamesPlayed,
+            projectionNote=projection_gap_note(stats, candidate.playerId),
+        )
+        ranked.append((value(after), option))
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    options = [option for _, option in ranked[:top]]
+    for i, option in enumerate(options, start=1):
+        option.rank = i
+
+    # Legality only for what is returned: one ESPN request per option
+    async def legality(option: StreamerOption) -> None:
+        try:
+            verdict = await client.check_roster_move(
+                team_id, [option.playerId], [drop_id] if drop_id is not None else []
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not check legality of adding {option.playerId}: {e}")
+            return
+        option.canAdd = verdict.canMake
+        option.legalityNotes = list(verdict.reasons) + list(verdict.warnings)
+
+    await asyncio.gather(*(legality(option) for option in options))
+    illegal = [o.playerName for o in options if o.canAdd is False]
+    if illegal:
+        notes.append(
+            "Not allowed under the roster rules (see legalityNotes): " + ", ".join(illegal)
+        )
+    if weekly_lock and dropped is not None and dropped.lineupSlotId == SLOT_BENCH:
+        notes.append(
+            "Weekly lineup lock: the dropped player is on the bench, so each candidate was "
+            "also tried in every starting slot he is eligible for (placement says which "
+            "starter he displaces)"
+        )
+    if weekly_lock and week_in_progress:
+        notes.append(
+            "The week is in progress: slots ESPN has locked were left alone, so a candidate "
+            "with gamesInProjection 0 cannot score until the next matchup period"
+        )
+    if not weekly_lock:
+        notes.append(
+            "Daily lineup lock: every non-IR player's games count, on the assumption the "
+            "lineup is set each day, so placement does not matter"
+        )
+    gaps = [o.playerName for o in options if o.projectionNote]
+    if gaps and basis in ("projections", "blend"):
+        notes.append(
+            "ESPN's projection is far from this season's actuals for: "
+            + ", ".join(gaps)
+            + ". Compare alternateExpectedCategoryWinsDelta before trusting their rank"
+        )
+    notes.append(
+        "Deltas are against your roster as it is, with the lineup as set; run optimize_lineup "
+        "after a move to see whether a different lineup does better still"
+    )
+    return StreamerRanking(
+        teamId=team_id,
+        matchupPeriod=inputs.target_period,
+        basis=basis,
+        dropped=(
+            f"{dropped.playerPoolEntry.player.fullName} ({dropped.playerId})" if dropped else None
+        ),
+        rankedBy=(
+            "expected category wins, then matchup win probability (this league's standings "
+            "count every category)"
+            if by_categories
+            else "matchup win probability, then expected category wins"
+        ),
+        baselineProjectedRecord=_record(before),
+        baselineExpectedCategoryWins=_expected_wins(before),
+        baselineMatchupWinProbability=_win_probability(before),
+        options=options,
+        candidatesConsidered=len(candidates),
+        notes=notes,
+        projectionMethod=before.projectionMethod,
+    )
 
 
 async def optimize_lineup(

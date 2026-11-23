@@ -970,6 +970,13 @@ async def analyze_matchup(
           logs) and method. These are estimates from a normal approximation built on each
           player's game-to-game spread, NOT a simulation; matchupWinProbability treats
           categories as independent and is somewhat overconfident. Quote them as estimates.
+        - outcomeRange.standingsUnit / standingsNote: whether this league's standings count
+          every category ("categories": quote expectedCategoryWins, not the matchup win
+          probability) or one result per matchup ("matchups")
+        - outcomeRange.returnScenarios: for each player on either team listed OUT with a
+          return date inside the window whose games the projection does not count (ESPN's
+          next-game placeholder, or a date already passed), the record, expected category
+          wins and matchup win probability if he plays from that date. Also in strategyNotes
         - lowerIsBetter: true for turnovers (the lower total wins); currentLead and
           projectedLead are flipped for such a category so that positive is always good
         - strategyNotes: Strategic recommendations
@@ -1056,11 +1063,16 @@ async def simulate_roster_move(
         given), started / benched / lineupChanges / lineupWarnings, absences,
         projectedRecordBefore/After, matchupWinProbabilityBefore/After and
         expectedCategoryWinsBefore/After (estimates; see analyze_matchup's outcomeRange),
+        alternateBasis with alternateProjectedRecordBefore/After and
+        alternateExpectedCategoryWinsBefore/After (the same move on season actuals when the
+        simulation used ESPN projections, and the reverse: a second opinion),
         categoryDeltas (before, after, delta, result, closeness and winProbability
         before/after, and your
         projected made/attempted before and after for FG% and FT%), categoriesFlipped,
         addedPlayers (their projection lines, games and projectedTotals), legality (its
-        warnings are repeated in the summary), and a summary.
+        warnings are repeated in the summary), and a summary (which also warns when an added
+        player's ESPN projection is far from his season actuals). To compare several free
+        agents, use rank_streamers instead of calling this once per player.
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
     team_id = _get_team_id(team_id)
@@ -1096,6 +1108,79 @@ async def simulate_roster_move(
         sit_ids=sits,
         absent_ids=absents,
         missed_games=missed,
+    )
+    return _dump(result)
+
+
+@mcp.tool()
+async def rank_streamers(
+    drop_id: int | None = None,
+    candidate_ids: list[int] | None = None,
+    team_id: int | None = None,
+    matchup_period: int | None = None,
+    basis: str = "projections",
+    pool_size: int = 25,
+    top: int = 10,
+    league_id: int | None = None,
+    year: int | None = None,
+) -> dict:
+    """Which free agent helps this matchup most? Rank streamers in one call.
+
+    Swaps each candidate in for `drop_id`, re-runs the matchup projection (same arithmetic
+    and basis as analyze_matchup) and ranks the candidates by the change in expected category
+    wins when the league's standings count every category, otherwise by the change in matchup
+    win probability (`rankedBy` says which). Use this instead of calling simulate_roster_move
+    once per free agent. Each candidate is tried in every sensible slot and shown at his best:
+    the dropped player's starting slot, or (weekly-lock leagues) any starting slot he is
+    eligible for, with `placement` naming the starter he displaces. Slots ESPN has locked for
+    a week in progress are left alone. Read-only: nothing is added or dropped on ESPN.
+
+    Args:
+        drop_id: The player you would drop (ESPN player ID). Optional: without it each
+            candidate is simply added, which needs an open roster spot
+        candidate_ids: Specific players to rank (ESPN player IDs, at most 50). Optional:
+            defaults to the `pool_size` most-owned free agents
+        team_id: Your team ID (optional, uses ESPN_TEAM_ID env var)
+        matchup_period: Matchup period to rank for (optional, defaults to the next one, like
+            analyze_matchup; pass the current period for this week)
+        basis: projections (default), season, last_7, last_15, last_30 or blend
+        pool_size: How many of the most-owned free agents to consider when candidate_ids is
+            not given (1-50, default 25)
+        top: How many ranked options to return (1-50, default 10)
+        league_id: ESPN Fantasy Basketball league ID (optional, uses ESPN_LEAGUE_ID env var)
+        year: ESPN season ID, the year the season ends in (optional)
+
+    Returns:
+        Dictionary with dropped, rankedBy, baselineProjectedRecord,
+        baselineExpectedCategoryWins, baselineMatchupWinProbability, candidatesConsidered,
+        notes, projectionMethod and options, best first. Each option has playerId,
+        playerName, proTeam, position, percentOwned, availability, gamesThisPeriod (scheduled
+        games left in the period), expectedGames, gamesInProjection (0 if he would sit on the
+        bench under a weekly lock), placement, projectedRecord, expectedCategoryWins and
+        matchupWinProbability with their deltas against your roster as it is,
+        categoriesFlipped, winProbabilityChanges (per category, when it moves 3 points or
+        more), alternateBasis / alternateExpectedCategoryWinsDelta (the same swap on season
+        actuals when the ranking used ESPN projections, and the reverse), perGame,
+        seasonGamesPlayed, projectionNote (set when ESPN's projection and his
+        season actuals are far apart) and canAdd / legalityNotes (roster rules, position
+        limits, acquisition limit). The probabilities are estimates from a normal
+        approximation; see analyze_matchup's outcomeRange.method.
+    """
+    league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
+    team_id = _get_team_id(team_id)
+    if team_id is None:
+        raise ValueError(
+            "team_id is required. Provide it as a parameter or set ESPN_TEAM_ID environment variable."
+        )
+    drop = _coerce_player_ids([drop_id])[0] if drop_id is not None else None
+    candidates = _coerce_player_ids(candidate_ids) if candidate_ids else None
+    if matchup_period is not None:
+        matchup_period = int(matchup_period) if isinstance(matchup_period, str) else matchup_period
+    pool_size = int(pool_size) if isinstance(pool_size, str) else pool_size
+    top = int(top) if isinstance(top, str) else top
+    client = ESPNFantasyBasketballClient(league_id, year, espn_s2, swid)
+    result = await client.rank_streamers(
+        team_id, drop, candidates, matchup_period, basis, pool_size, top
     )
     return _dump(result)
 
