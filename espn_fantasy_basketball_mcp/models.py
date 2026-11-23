@@ -208,6 +208,46 @@ class CategoryProjection(BaseModel):
     alternateResult: str | None = None
     alternateCloseness: str | None = None
     basesAgree: bool | None = None
+    # True for turnovers (and any category the league scores in reverse): the lower total
+    # wins, and currentLead / projectedLead are flipped so that positive is still good
+    lowerIsBetter: bool = False
+    # Range of outcomes (see MatchupAnalysis.outcomeRange for the method). The ranges are
+    # [low, high] central 80% intervals for each team's final value; leadStdDev is the
+    # standard deviation of projectedLead; the three probabilities sum to 1.
+    yourRange: list[float] | None = None
+    opponentRange: list[float] | None = None
+    leadStdDev: float | None = None
+    winProbability: float | None = None
+    tieProbability: float | None = None
+    lossProbability: float | None = None
+
+
+class RecordProbability(BaseModel):
+    """One possible category record and how likely it is."""
+
+    record: str  # "W-L-T"
+    probability: float
+
+
+class OutcomeRange(BaseModel):
+    """How uncertain the matchup projection is: odds for the matchup and the spread behind
+    the per-category ranges. Probabilities are estimates from a normal approximation."""
+
+    confidenceLevel: float  # the ranges on each categoryProjection are this central interval
+    # Sum of the category win / loss / tie probabilities: the record to expect on average
+    expectedCategoryWins: float
+    expectedCategoryLosses: float
+    expectedCategoryTies: float
+    # More category wins than losses. Categories are treated as independent, so these are
+    # somewhat overconfident (see method)
+    matchupWinProbability: float
+    matchupTieProbability: float
+    matchupLossProbability: float
+    mostLikelyRecords: list[RecordProbability] = []  # the five most likely "W-L-T" records
+    tossUpCategories: list[str] = []  # win probability between 35% and 65%
+    # How many players' spreads came from their own game logs rather than league-typical values
+    varianceSource: str | None = None
+    method: str
 
 
 class PlayerRecommendation(BaseModel):
@@ -328,6 +368,9 @@ class MatchupAnalysis(BaseModel):
     alternateBasis: str | None = None
     alternateProjectedRecord: str | None = None  # "W-L-T"
     basisDisagreements: list[str] = []
+    # Range of outcomes: matchup win probability, expected category record and the method
+    # behind the per-category ranges and win probabilities
+    outcomeRange: OutcomeRange | None = None
     # The opponent's roster as the projection sees it
     opponentPlayers: list[OpponentPlayerSummary] = []
     currentCategoryWins: int | None = None  # Current category wins
@@ -354,6 +397,8 @@ class CategoryDelta(BaseModel):
     closenessBefore: str | None = None  # close / near / clear
     closenessAfter: str | None = None
     changed: bool = False  # result or closeness changed
+    winProbabilityBefore: float | None = None  # see CategoryProjection.winProbability
+    winProbabilityAfter: float | None = None
     # Percentage categories only: your projected [made, attempted] before and after
     yourMadeAttemptedBefore: list[float] | None = None
     yourMadeAttemptedAfter: list[float] | None = None
@@ -416,6 +461,12 @@ class RosterMoveSimulation(BaseModel):
     expectedGamesAfter: float | None = None
     projectedRecordBefore: str  # "W-L-T"
     projectedRecordAfter: str
+    # Range of outcomes before and after (see MatchupAnalysis.outcomeRange): a move that
+    # leaves the projected record unchanged can still shift the odds
+    matchupWinProbabilityBefore: float | None = None
+    matchupWinProbabilityAfter: float | None = None
+    expectedCategoryWinsBefore: float | None = None
+    expectedCategoryWinsAfter: float | None = None
     categoryDeltas: list[CategoryDelta]
     categoriesFlipped: list[str] = []  # "rebounds: loss -> win"
     addedPlayers: list[PlayerRecommendation] = []  # how the added players project
@@ -433,6 +484,9 @@ class LineupOption(BaseModel):
     projectedCategoryLosses: int
     projectedCategoryTies: int
     score: float  # wins, then ties, then clipped margins: see LineupOptimization.scoring
+    # Range of outcomes for this lineup (not used for ranking): see MatchupAnalysis.outcomeRange
+    matchupWinProbability: float | None = None
+    expectedCategoryWins: float | None = None
     categoriesWon: list[str] = []
     categoriesLost: list[str] = []
     closeCategories: list[str] = []

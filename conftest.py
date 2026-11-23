@@ -13,6 +13,21 @@ def event_loop():
     loop.close()
 
 
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """Nothing in the test suite may reach ESPN: the client's real HTTP GET always raises.
+
+    Tests supply responses by patching `_make_request` (or the client methods above it); a
+    code path that slips past those mocks fails here instead of making a live request.
+    """
+    from espn_fantasy_basketball_mcp.client import ESPNFantasyBasketballClient
+
+    async def blocked(self, url, params=None, headers=None):
+        raise RuntimeError(f"network access attempted in tests: {url}")
+
+    monkeypatch.setattr(ESPNFantasyBasketballClient, "_fetch", blocked)
+
+
 @pytest.fixture
 def sample_team_data():
     """Sample team data for testing."""

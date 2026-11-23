@@ -941,7 +941,7 @@ async def analyze_matchup(
           already projected lost by a wide margin is not penalised. Each reasoning carries the
           per-game numbers behind it.
         - projectionMethod: how the projections are built (per-game averages x expected
-          remaining games; no confidence range). An OUT player with a reported return date
+          remaining games; a point estimate, with the range in outcomeRange). An OUT player with a reported return date
           inside the window keeps the games on and after that date. In a weekly-lock league
           only starting slots count: bench players' games never reach the score, so they are
           listed under benchPlayersNotCounted and each player carries gamesInProjection /
@@ -962,6 +962,16 @@ async def analyze_matchup(
           categories where the two give a different result or one calls close and the other
           clear; each categoryProjection carries alternateResult / alternateCloseness /
           basesAgree. Treat a call the bases disagree on as uncertain.
+        - range of outcomes: each categoryProjection carries yourRange / opponentRange (the
+          central 80% interval for each team's final value), leadStdDev, and winProbability /
+          tieProbability / lossProbability. outcomeRange gives matchupWinProbability (also
+          tie and loss), expectedCategoryWins/Losses/Ties, mostLikelyRecords, tossUpCategories
+          (35-65% to win), varianceSource (how many players' spreads come from their own game
+          logs) and method. These are estimates from a normal approximation built on each
+          player's game-to-game spread, NOT a simulation; matchupWinProbability treats
+          categories as independent and is somewhat overconfident. Quote them as estimates.
+        - lowerIsBetter: true for turnovers (the lower total wins); currentLead and
+          projectedLead are flipped for such a category so that positive is always good
         - strategyNotes: Strategic recommendations
     """
     league_id, year, espn_s2, swid = _get_espn_credentials(league_id, year)
@@ -1044,8 +1054,10 @@ async def simulate_roster_move(
     Returns:
         Dictionary with dropped/added names, placements (which slot each added player was
         given), started / benched / lineupChanges / lineupWarnings, absences,
-        projectedRecordBefore/After,
-        categoryDeltas (before, after, delta, result and closeness before/after, and your
+        projectedRecordBefore/After, matchupWinProbabilityBefore/After and
+        expectedCategoryWinsBefore/After (estimates; see analyze_matchup's outcomeRange),
+        categoryDeltas (before, after, delta, result, closeness and winProbability
+        before/after, and your
         projected made/attempted before and after for FG% and FT%), categoriesFlipped,
         addedPlayers (their projection lines, games and projectedTotals), legality (its
         warnings are repeated in the summary), and a summary.
@@ -1121,7 +1133,8 @@ async def optimize_lineup(
 
     Returns:
         Dictionary with currentProjectedRecord, currentLineup, currentIsBest, options (rank,
-        projectedRecord, score, categoriesWon/Lost, closeCategories, expectedGames, lineup,
+        projectedRecord, score, matchupWinProbability and expectedCategoryWins (estimates,
+        not used for ranking), categoriesWon/Lost, closeCategories, expectedGames, lineup,
         bench, changes, isCurrent), lineupsEvaluated, fixedPlayers, scoring, searchNote (when
         the search was limited), notes and projectionMethod.
     """

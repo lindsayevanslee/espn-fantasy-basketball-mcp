@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Fixed
+- Turnovers were projected, and counted in the current and projected records, as won by the
+  team with MORE turnovers. `analyze_matchup`, `simulate_roster_move` and `optimize_lineup`
+  now treat turnovers (and any category the league marks `isReverseItem`) as lower-wins:
+  `currentLead` / `projectedLead` are flipped for such a category so positive is always good,
+  and `lowerIsBetter` says so. Raw totals are unchanged. Projected records that included
+  turnovers can change by one category, and the optimizer no longer rewards turnovers.
 - `optimize_lineup` options reshuffled starters between slots even when the ten starters were
   unchanged (live report: option 1 had Black at SG and Holiday at G while the lineup as set
   had the reverse). Every starter who stays a starter now keeps his current slot and only
@@ -25,6 +31,28 @@
   player's games are discounted.
 
 ### Added
+- Range of outcomes on the matchup projection. Each `categoryProjection` carries `yourRange`
+  / `opponentRange` (central 80% intervals), `leadStdDev` and `winProbability` /
+  `tieProbability` / `lossProbability`; `analyze_matchup` adds `outcomeRange` (matchup win /
+  tie / loss probability, expected category record, the five most likely records, toss-up
+  categories, how many players' spreads came from their own game logs, and the method) and a
+  strategy note. `simulate_roster_move` reports the matchup win probability and expected
+  category wins before and after (and per-category win probability on each delta);
+  `optimize_lineup` options carry both, without changing the ranking. The spread is a normal
+  approximation (`espn_fantasy_basketball_mcp/outcomes.py`): one game's variance is the
+  player's dispersion x his per-game average, a DOUBTFUL game is a coin flip, the error in
+  the average is carried through, and FG% / FT% makes are binomial. Categories are combined
+  as if independent, so the matchup probability is somewhat overconfident; the method text
+  says so.
+- `get_player_game_logs` on the client: each player's most recent games (30 by default) as
+  box-score lines, from ESPN's per-game stat sets. One extra ESPN request per analysis. A
+  player's own game-to-game spread is used once he has 5 logged games, shrunk toward
+  league-typical values measured from live game logs on 2026-11-22; if the request fails the
+  league values are used and the analysis still returns.
+- The test suite now blocks the client's real HTTP GET for every test (`conftest.py`), so a
+  code path that slips past the mocks fails instead of reaching ESPN.
+- `scripts/verify_live.py` checks that every category has a consistent range and win
+  probability, that the matchup probabilities sum to 1, and that game logs reached the range.
 - `optimize_lineup` tool: for a weekly-lock league, evaluates every valid assignment of your
   players to the starting slots with the matchup projection and ranks the lineups by projected
   category wins, then ties, then margins clipped to three close-thresholds per category. Locked

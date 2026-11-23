@@ -790,7 +790,7 @@ async def test_simulate_roster_move_reports_deltas_on_one_basis(client):
     )
     assert sim.dropped == ["Benched Guy (1004)"] and sim.added == ["Streamer One (9001)"]
     assert (sim.expectedGamesBefore, sim.expectedGamesAfter) == (8.0, 12.0), "DEN has 4 games"
-    assert (sim.projectedRecordBefore, sim.projectedRecordAfter) == ("6-3-0", "8-1-0")
+    assert (sim.projectedRecordBefore, sim.projectedRecordAfter) == ("5-4-0", "7-2-0")
     assert sim.categoriesFlipped == ["blocks: loss -> win", "rebounds: loss -> win"]
     points = next(d for d in sim.categoryDeltas if d.category == "points")
     assert points.delta == pytest.approx(12.9 * 4, abs=0.01), "added player's per-game x games"
@@ -798,11 +798,11 @@ async def test_simulate_roster_move_reports_deltas_on_one_basis(client):
     [added] = sim.addedPlayers
     assert added.playerName == "Streamer One" and added.gamesRemaining == 4
     assert sim.legality is not None and sim.legality.canMake
-    assert sim.summary[0] == "Projected record 6-3-0 -> 8-1-0 on basis 'projections'"
+    assert sim.summary[0] == "Projected record 5-4-0 -> 7-2-0 on basis 'projections'"
     assert sim.basis == "projections" and sim.matchupPeriod == 3
 
     season = await client.simulate_roster_move(MY_TEAM, [1004], [9001], 3, basis="season")
-    assert season.basis == "season" and season.projectedRecordBefore == "6-3-0"
+    assert season.basis == "season" and season.projectedRecordBefore == "5-4-0"
 
     with pytest.raises(ValueError, match="at least one player"):
         await client.simulate_roster_move(MY_TEAM, [], [], 3)
@@ -859,7 +859,7 @@ async def test_can_add_player_checks_size_positions_waivers_and_budget(client, m
 @pytest.mark.asyncio
 async def test_new_tools_end_to_end(espn):
     sim = await simulate_roster_move_tool(drop_ids=["1004"], add_ids=["9001"], matchup_period=3)
-    assert sim["projectedRecordAfter"] == "8-1-0" and sim["legality"]["canMake"] is True
+    assert sim["projectedRecordAfter"] == "7-2-0" and sim["legality"]["canMake"] is True
     check = await can_add_player_tool(add_ids=[7001])
     assert check["canMake"] is True and check["rosterSizeAfter"] == 5
     with pytest.raises(ValueError, match="add_ids is required"):

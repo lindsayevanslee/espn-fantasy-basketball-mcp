@@ -16,6 +16,8 @@ An MCP server (FastMCP, Python 3.10+) exposing ESPN Fantasy Basketball data as t
 - `espn_fantasy_basketball_mcp/client.py`: ESPN API client (requests, cache, fetchers, draft, stats).
 - `espn_fantasy_basketball_mcp/analysis.py`, `dates.py`, `search.py`, `constants.py`: matchup
   analysis, period/calendar math, player name matching, and ESPN ID tables.
+- `espn_fantasy_basketball_mcp/outcomes.py`: the range of outcomes around a projection (spread
+  from game logs, win probabilities). Pure arithmetic, no network.
 - `espn_fantasy_basketball_mcp/models.py`: Pydantic models for everything the tools return.
 - `espn_fantasy_basketball_mcp/http_transport.py`: Streamable HTTP transport and its auth gate,
   used when the server is hosted for claude.ai / the Claude mobile app (`MCP_AUTH_MODE`).
