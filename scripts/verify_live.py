@@ -482,6 +482,44 @@ async def main() -> int:
             f"regressed: {regress}",
         )
 
+        # Range of outcomes: sane probabilities, and game logs actually reached the model
+        odds = analysis.outcomeRange
+        bad_ranges = [
+            c.category
+            for c in analysis.categoryProjections
+            if c.yourRange is None
+            or c.yourProjected is None
+            or not (c.yourRange[0] - 1e-6 <= c.yourProjected <= c.yourRange[1] + 1e-6)
+            or c.winProbability is None
+            or not 0.0 <= c.winProbability <= 1.0
+        ]
+        report.check(
+            odds is not None and not bad_ranges,
+            "Every category has a range around its projection and a win probability",
+            f"missing or inconsistent: {bad_ranges}",
+        )
+        if odds is not None:
+            total = (
+                odds.matchupWinProbability
+                + odds.matchupTieProbability
+                + odds.matchupLossProbability
+            )
+            report.check(
+                abs(total - 1.0) < 0.01,
+                "Matchup win / tie / loss probabilities sum to 1",
+                f"sum {total:.3f}",
+            )
+            report.check(
+                not (odds.varianceSource or "").startswith("0 of"),
+                "Game logs reached the range (some players use their own spread)",
+                odds.varianceSource or "",
+            )
+            report.info(
+                f"matchup win probability {odds.matchupWinProbability:.0%}, expected categories "
+                f"{odds.expectedCategoryWins:g}-{odds.expectedCategoryLosses:g}-"
+                f"{odds.expectedCategoryTies:g}; {odds.varianceSource}"
+            )
+
         print(f"\n       {'player':<26}{'left':>5}{'/wk':>4}  {'status':<12}helped / hurt")
         for r in analysis.playerRecommendations[:15]:
             print(

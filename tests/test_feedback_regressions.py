@@ -499,8 +499,10 @@ async def test_expected_games_gap_is_itemised_and_method_is_stated(client):
     assert lines[0].startswith("Jon Collins: 3 scheduled, 0 expected (OUT;")
     assert lines[-1] == "11 scheduled - 3 discounted = 8 expected"
     assert analysis.opponentExpectedGamesBreakdown == [], "nobody discounted, nothing to explain"
-    assert "OUT" in analysis.projectionMethod and "no confidence range" in analysis.projectionMethod
-    assert analysis.projectionMethod.endswith("noisy.")
+    assert "OUT" in analysis.projectionMethod and "outcomeRange.method" in analysis.projectionMethod
+    assert (
+        analysis.outcomeRange is not None and "normal approximation" in analysis.outcomeRange.method
+    )
     opp = {p.playerName: p for p in analysis.opponentPlayers}
     assert opp["Solid Wing"].gamesRemaining == 4 and opp["Solid Wing"].expectedGames == 4.0
     categories = {c.category for c in analysis.categoryProjections}

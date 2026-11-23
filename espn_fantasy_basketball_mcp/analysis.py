@@ -48,12 +48,29 @@ from .models import (
     LineupOption,
     MatchupAnalysis,
     OpponentPlayerSummary,
+    OutcomeRange,
     PlayerRecommendation,
     PlayerStats,
+    RecordProbability,
     RosterEntry,
     RosterLegality,
     RosterMoveSimulation,
     RosterScheduleSummary,
+)
+from .outcomes import (
+    CONFIDENCE,
+    COUNTING_TIE_BAND,
+    METHOD,
+    CategoryOutcome,
+    PlayerDispersion,
+    ShootingLoad,
+    category_outcome,
+    dispersion_from_logs,
+    dispersion_ratio,
+    interval,
+    matchup_odds,
+    percentage_variance,
+    total_variance,
 )
 
 if TYPE_CHECKING:
@@ -332,7 +349,9 @@ def projection_method(end_date: str, basis: str = "projections", weekly_lock: bo
         "games on and after that date (ESPN's next-game placeholder dates for day-to-day "
         f"players are ignored). {slots}FG% and FT% are projected as made/attempted. A player "
         "with no numbers on the chosen basis falls back to ESPN's projections (listed in "
-        "basisNotes). There is no confidence range given: early-season numbers are noisy."
+        "basisNotes). These are point estimates; the range around them (yourRange, "
+        "opponentRange, winProbability on each category, and outcomeRange for the matchup) is "
+        "described in outcomeRange.method."
     )
 
 
@@ -365,6 +384,9 @@ class MatchupInputs:
     # playerId -> games he is simulated to miss (counted from his next game); a number at
     # least as large as his schedule means he does not play at all. Simulation only.
     absences: dict[int, int] = field(default_factory=dict)
+    # playerId -> game-to-game spread from his recent game logs (see outcomes.py). A player
+    # missing here gets the league-typical spread, so the range still works without logs.
+    dispersion: dict[int, PlayerDispersion] = field(default_factory=dict)
 
 
 def _blend(a: PlayerStats, b: PlayerStats) -> PlayerStats:
@@ -506,7 +528,9 @@ async def gather_inputs(
     all_player_ids = [e.playerId for e in matchup.yourRoster.entries] + [
         e.playerId for e in matchup.opponentRoster.entries
     ]
-    stats = await fetch_stats(client, all_player_ids, basis)
+    stats, dispersion = await asyncio.gather(
+        fetch_stats(client, all_player_ids, basis), fetch_dispersion(client, all_player_ids)
+    )
 
     roster_source = (
         "today's roster for both teams (the same players get_team_roster returns), with "
@@ -542,6 +566,7 @@ async def gather_inputs(
         timezone=client._get_timezone(),
         roster_source=roster_source,
         effective_from=effective_from,
+        dispersion=dispersion,
     )
 
 
@@ -600,7 +625,130 @@ async def fetch_stats(
     return stats
 
 
+async def fetch_dispersion(
+    client: ESPNFantasyBasketballClient, player_ids: list[int]
+) -> dict[int, PlayerDispersion]:
+    """Game-to-game spread per player from recent game logs, for the range of outcomes.
+
+    The range is an extra on top of the projection, so a failed fetch is logged and the
+    league-typical spread is used instead of failing the analysis.
+    """
+    if not player_ids:
+        return {}
+    try:
+        logs = await client.get_player_game_logs(player_ids)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not get game logs; using league-typical spread: {e}")
+        return {}
+    return {pid: dispersion_from_logs(games) for pid, games in logs.items()}
+
+
 # --------------------------------------------------------------------------- compute
+def _sample_games(inputs: MatchupInputs, player_id: int, line: PlayerStats) -> float:
+    """How many games the per-game line is based on: the window's games for a last-N basis,
+    this season's games played otherwise (ESPN's projection is not a sample; the season's
+    games stand in for how much is known about the player)."""
+    if line.timeframe.startswith("last_") and line.gamesPlayed:
+        return float(line.gamesPlayed)
+    season = inputs.stats.get("season", {}).get(player_id)
+    return float((season.gamesPlayed if season else None) or 0)
+
+
+def _counting_variance(
+    inputs: MatchupInputs,
+    entries: list[RosterEntry],
+    lines: dict[int, PlayerStats | None],
+    games: dict[int, ExpectedGames],
+    stat: str,
+) -> float:
+    """Variance of a team's remaining total in one counting stat."""
+    variance = 0.0
+    for e in entries:
+        line, g = lines.get(e.playerId), games.get(e.playerId)
+        if line is None or g is None or g.counted <= 0:
+            continue
+        variance += total_variance(
+            getattr(line, stat, None) or 0.0,
+            dispersion_ratio(inputs.dispersion.get(e.playerId), stat),
+            g.counted,
+            g.factor,
+            _sample_games(inputs, e.playerId, line),
+        )
+    return variance
+
+
+def _shooting_loads(
+    inputs: MatchupInputs,
+    entries: list[RosterEntry],
+    lines: dict[int, PlayerStats | None],
+    games: dict[int, ExpectedGames],
+    made_attr: str,
+    att_attr: str,
+    pct_attr: str,
+    share: float,
+) -> list[ShootingLoad]:
+    """Each player's remaining makes / attempts and attempt variance, for percentage_variance."""
+    loads: list[ShootingLoad] = []
+    for e in entries:
+        line, g = lines.get(e.playerId), games.get(e.playerId)
+        if line is None or g is None or g.counted <= 0:
+            continue
+        shooting = _shooting_per_game(line, made_attr, att_attr, pct_attr, share)
+        if not shooting:
+            continue
+        sample = _sample_games(inputs, e.playerId, line)
+        loads.append(
+            ShootingLoad(
+                made=shooting[0] * g.counted,
+                attempted=shooting[1] * g.counted,
+                attempt_variance=total_variance(
+                    shooting[1],
+                    dispersion_ratio(inputs.dispersion.get(e.playerId), att_attr),
+                    g.counted,
+                    g.factor,
+                    sample,
+                ),
+                games=g.counted,
+                sample_games=sample,
+            )
+        )
+    return loads
+
+
+def _outcome_range(
+    inputs: MatchupInputs,
+    projections: list[CategoryProjection],
+    outcomes: list[CategoryOutcome],
+    counted_ids: list[int],
+) -> OutcomeRange:
+    """Matchup-level odds from the per-category outcomes."""
+    odds = matchup_odds(outcomes)
+    with_logs = sum(
+        1 for pid in counted_ids if (d := inputs.dispersion.get(pid)) is not None and d.from_logs
+    )
+    return OutcomeRange(
+        confidenceLevel=CONFIDENCE,
+        expectedCategoryWins=round(odds.expected_wins, 2),
+        expectedCategoryLosses=round(odds.expected_losses, 2),
+        expectedCategoryTies=round(odds.expected_ties, 2),
+        matchupWinProbability=round(odds.win, 3),
+        matchupTieProbability=round(odds.tie, 3),
+        matchupLossProbability=round(odds.loss, 3),
+        mostLikelyRecords=[
+            RecordProbability(record=record, probability=round(p, 3))
+            for record, p in odds.records[:5]
+        ],
+        tossUpCategories=[
+            c.category for c, o in zip(projections, outcomes, strict=True) if o.toss_up
+        ],
+        varianceSource=(
+            f"{with_logs} of {len(counted_ids)} players with games counted use their own game "
+            "logs for game-to-game spread; the rest use league-typical values"
+        ),
+        method=METHOD,
+    )
+
+
 def _shooting_per_game(
     stats: PlayerStats, made_attr: str, att_attr: str, pct_attr: str, points_share: float
 ) -> tuple[float, float] | None:
@@ -653,6 +801,12 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
     ]
     your_scores = matchup.yourTeam.categoryScores or {}
     opp_scores = matchup.opponentTeam.categoryScores or {}
+    # Categories where the lower total wins: turnovers, and anything the league marks reverse
+    lower_is_better = {"turnovers"} | {
+        name
+        for item in inputs.settings.scoringSettings.scoringItems
+        if item.isReverseItem and (name := stat_mapping.get(str(item.statId)))
+    }
 
     # What a starter's owner can actually do about a dead slot depends on the lock rule, and
     # under a weekly lock only starting slots score at all
@@ -732,6 +886,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
     opp_raw = (matchup.opponentTeam.cumulativeScore or {}).get("scoreByStat") or {}
 
     category_projections: list[CategoryProjection] = []
+    category_outcomes: list[CategoryOutcome] = []
     winning: list[str] = []
     losing: list[str] = []
     tied: list[str] = []
@@ -778,6 +933,34 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             attempts_basis = max(y_pa, o_pa)
             your_projected = y_pm / y_pa if y_pa > 0 else your_current
             opp_projected = o_pm / o_pa if o_pa > 0 else opp_current
+            your_var = percentage_variance(
+                _shooting_loads(
+                    inputs,
+                    inputs.your_entries,
+                    your_lines,
+                    your_games,
+                    made_attr,
+                    att_attr,
+                    category,
+                    share,
+                ),
+                y_made,
+                y_att,
+            )
+            opp_var = percentage_variance(
+                _shooting_loads(
+                    inputs,
+                    inputs.opponent_entries,
+                    opp_lines,
+                    opp_games,
+                    made_attr,
+                    att_attr,
+                    category,
+                    share,
+                ),
+                o_made,
+                o_att,
+            )
             pct_fields: dict[str, Any] = {
                 "yourCurrentMade": round(y_made, 2),
                 "yourCurrentAttempted": round(y_att, 2),
@@ -804,9 +987,17 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
             )
             your_projected = your_current + y_add
             opp_projected = opp_current + o_add
+            your_var = _counting_variance(
+                inputs, inputs.your_entries, your_lines, your_games, category
+            )
+            opp_var = _counting_variance(
+                inputs, inputs.opponent_entries, opp_lines, opp_games, category
+            )
 
-        current_lead = your_current - opp_current
-        projected_lead = your_projected - opp_projected
+        # Leads are oriented so that positive is good for you, whichever way the category runs
+        sign = -1.0 if category in lower_is_better else 1.0
+        current_lead = sign * (your_current - opp_current)
+        projected_lead = sign * (your_projected - opp_projected)
         margin = abs(projected_lead)
         close_threshold, closeness_rule = category_close_threshold(
             category, is_pct, your_current, attempts_basis
@@ -839,6 +1030,21 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
         else:
             cur_t += 1
 
+        # Range of outcomes: a spread around each projected value and the odds on the lead
+        your_sd, opp_sd = math.sqrt(your_var), math.sqrt(opp_var)
+        lead_sd = math.sqrt(your_var + opp_var)
+        outcome = category_outcome(
+            projected_lead, lead_sd, 0.0 if is_pct else COUNTING_TIE_BAND, result
+        )
+        category_outcomes.append(outcome)
+        digits = 4 if is_pct else 1
+        if is_pct:
+            your_range = interval(your_projected, your_sd, 0.0, 1.0)
+            opp_range = interval(opp_projected, opp_sd, 0.0, 1.0)
+        else:  # a counting total cannot fall below what is already scored
+            your_range = interval(your_projected, your_sd, low=your_current)
+            opp_range = interval(opp_projected, opp_sd, low=opp_current)
+
         category_projections.append(
             CategoryProjection(
                 category=category,
@@ -855,6 +1061,13 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
                 closeThreshold=close_threshold,
                 nearThreshold=near_threshold,
                 closenessRule=closeness_rule,
+                lowerIsBetter=category in lower_is_better,
+                yourRange=[round(v, digits) for v in your_range],
+                opponentRange=[round(v, digits) for v in opp_range],
+                leadStdDev=round(lead_sd, digits),
+                winProbability=round(outcome.win, 3),
+                tieProbability=round(outcome.tie, 3),
+                lossProbability=round(outcome.loss, 3),
                 **pct_fields,
             )
         )
@@ -1151,6 +1364,19 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
         notes.append("Projected lost by a wide margin, not worth chasing: " + ", ".join(far_behind))
     if basis_notes:
         notes.append(f"{len(basis_notes)} player(s) fell back to projections: see basisNotes")
+    counted_ids = [pid for pid, n in your_expected.items() if n > 0] + [
+        pid for pid, n in opp_expected.items() if n > 0
+    ]
+    outcome_range = _outcome_range(inputs, category_projections, category_outcomes, counted_ids)
+    odds_note = (
+        f"Estimated {outcome_range.matchupWinProbability:.0%} chance to win the matchup "
+        f"(expected categories {outcome_range.expectedCategoryWins:g}-"
+        f"{outcome_range.expectedCategoryLosses:g}-{outcome_range.expectedCategoryTies:g}); "
+        "an approximation, see outcomeRange.method"
+    )
+    if outcome_range.tossUpCategories:
+        odds_note += ". Toss-ups (35-65% to win): " + ", ".join(outcome_range.tossUpCategories)
+    notes.append(odds_note)
 
     return MatchupAnalysis(
         matchupId=matchup.matchupId,
@@ -1189,6 +1415,7 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
         currentCategoryTies=cur_t,
         projectedCategoryWins=pw,
         projectedCategoryLosses=pl,
+        outcomeRange=outcome_range,
         strategyNotes=notes,
         lineupWarnings=lineup_warnings,
     )
@@ -1436,6 +1663,14 @@ def _record(analysis: MatchupAnalysis) -> str:
     return f"{analysis.projectedCategoryWins}-{analysis.projectedCategoryLosses}-{len(analysis.categoriesTied)}"
 
 
+def _win_probability(analysis: MatchupAnalysis) -> float | None:
+    return analysis.outcomeRange.matchupWinProbability if analysis.outcomeRange else None
+
+
+def _expected_wins(analysis: MatchupAnalysis) -> float | None:
+    return analysis.outcomeRange.expectedCategoryWins if analysis.outcomeRange else None
+
+
 async def simulate_roster_move(
     client: ESPNFantasyBasketballClient,
     team_id: int,
@@ -1549,6 +1784,7 @@ async def simulate_roster_move(
     )
     new_ids = [e.playerId for e in added_entries]
     extra_stats = await fetch_stats(client, new_ids, basis) if new_ids else {}
+    extra_dispersion = await fetch_dispersion(client, new_ids)
     merged_stats = {k: dict(v) for k, v in inputs.stats.items()}
     for timeframe, by_id in extra_stats.items():
         merged_stats.setdefault(timeframe, {}).update(by_id)
@@ -1559,6 +1795,7 @@ async def simulate_roster_move(
         your_schedule=new_schedule,
         stats=merged_stats,
         absences=absences,
+        dispersion={**inputs.dispersion, **extra_dispersion},
         roster_source=inputs.roster_source
         + f"; simulated: dropped {len(dropped_names)}, added {len(added_entries)}, "
         f"lineup changes {len(lineup_changes)}, absences {len(absences)}",
@@ -1590,6 +1827,8 @@ async def simulate_roster_move(
                 resultAfter=c.projectedResult,
                 closenessBefore=b.closeness if b else None,
                 closenessAfter=c.closeness,
+                winProbabilityBefore=b.winProbability if b else None,
+                winProbabilityAfter=c.winProbability,
                 changed=changed,
                 yourMadeAttemptedBefore=(
                     [b.yourProjectedMade, b.yourProjectedAttempted]
@@ -1619,6 +1858,12 @@ async def simulate_roster_move(
         f"Projected record {_record(before)} -> {_record(after)} on basis '{basis}'",
         f"Expected games {before.yourExpectedGames} -> {after.yourExpectedGames}",
     ]
+    p_before, p_after = _win_probability(before), _win_probability(after)
+    if p_before is not None and p_after is not None:
+        summary.append(
+            f"Estimated chance to win the matchup {p_before:.0%} -> {p_after:.0%} (an "
+            "approximation; see analyze_matchup's outcomeRange.method)"
+        )
     if placements:
         summary.append("Slots: " + "; ".join(placements))
     if lineup_changes:
@@ -1680,6 +1925,10 @@ async def simulate_roster_move(
         expectedGamesAfter=after.yourExpectedGames,
         projectedRecordBefore=_record(before),
         projectedRecordAfter=_record(after),
+        matchupWinProbabilityBefore=_win_probability(before),
+        matchupWinProbabilityAfter=_win_probability(after),
+        expectedCategoryWinsBefore=_expected_wins(before),
+        expectedCategoryWinsAfter=_expected_wins(after),
         categoryDeltas=deltas,
         categoriesFlipped=flipped,
         addedPlayers=added_recs,
@@ -1808,6 +2057,8 @@ async def optimize_lineup(
             projectedCategoryLosses=analysis.projectedCategoryLosses or 0,
             projectedCategoryTies=len(analysis.categoriesTied),
             score=_lineup_score(analysis),
+            matchupWinProbability=_win_probability(analysis),
+            expectedCategoryWins=_expected_wins(analysis),
             categoriesWon=analysis.categoriesWinning,
             categoriesLost=analysis.categoriesLosing,
             closeCategories=analysis.closeCategories,

@@ -20,6 +20,8 @@ from .analysis import simulate_roster_move as simulate_roster_move_impl
 from .constants import (
     ABBREV_ALIASES,
     AVAILABILITY_FACTORS,
+    GAME_LOG_GAMES,
+    GAME_LOG_STAT_IDS,
     INJURY_SEVERITY,
     LINEUP_LOCK_DESCRIPTIONS,
     LINEUP_SLOT_NAMES,
@@ -3604,6 +3606,72 @@ class ESPNFantasyBasketballClient:
                 )[0]
                 or r.injuryDetails
             )
+
+    async def get_player_game_logs(
+        self, player_ids: list[int], games: int = GAME_LOG_GAMES
+    ) -> dict[int, list[dict[str, float]]]:
+        """Box-score lines for each player's most recent games, newest first.
+
+        ESPN returns one stat set per game (statSplitTypeId 5) when asked for a player's top
+        scoring periods; `games` is how many to ask for. Early in a season the most recent
+        games reach into the previous season, which is kept: the logs are used for how much a
+        player varies from game to game, not for his level. Games he did not play in (an
+        empty stat set, or no minutes) are left out.
+
+        Args:
+            player_ids: ESPN player IDs
+            games: How many recent games to request per player
+
+        Returns:
+            playerId -> list of {stat name: value} (points, rebounds, assists, steals, blocks,
+            threePointMade, turnovers, made/attempted field goals and free throws, minutes).
+            A player ESPN returns nothing for is absent.
+        """
+        if not player_ids:
+            return {}
+        for requested in player_ids:
+            self._validate_positive_int(requested, "player_id")
+        self._validate_positive_int(games, "games")
+
+        url = f"{self.BASE_URL}/seasons/{self.year}/segments/0/leagues/{self.league_id}"
+        filter_dict = {
+            "players": {
+                "filterIds": {"value": player_ids},
+                "filterStatsForTopScoringPeriodIds": {
+                    "value": games,
+                    "additionalValue": [f"00{self.year}"],
+                },
+            }
+        }
+        headers = {"x-fantasy-filter": json.dumps(filter_dict)}
+        data = await self._make_request(url, {"view": "kona_player_info"}, headers)
+
+        wanted = set(player_ids)
+        logs: dict[int, list[dict[str, float]]] = {}
+        for entry in data.get("players") or []:
+            info = entry.get("player") or {}
+            pid = info.get("id")
+            if not isinstance(pid, int) or pid not in wanted:
+                continue
+            played: list[tuple[tuple[int, int], dict[str, float]]] = []
+            for stat_set in info.get("stats") or []:
+                raw = stat_set.get("stats") or {}
+                if (
+                    stat_set.get("statSplitTypeId") != 5
+                    or stat_set.get("statSourceId") != 0
+                    or not isinstance(raw, dict)
+                    or not (raw.get("40") or 0) > 0
+                ):
+                    continue
+                line = {
+                    name: float(raw.get(stat_id) or 0.0)
+                    for stat_id, name in GAME_LOG_STAT_IDS.items()
+                }
+                order = (stat_set.get("seasonId") or 0, stat_set.get("scoringPeriodId") or 0)
+                played.append((order, line))
+            played.sort(key=lambda item: item[0], reverse=True)
+            logs[pid] = [line for _, line in played[:games]]
+        return logs
 
     @overload
     async def get_player_stats(self, player_id: int, timeframe: str = ...) -> PlayerStats: ...

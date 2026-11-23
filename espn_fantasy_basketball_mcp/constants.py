@@ -227,3 +227,22 @@ INJURY_SEVERITY: dict[str, int] = {
     "SUSPENDED": 3,
     "IR": 3,
 }
+
+
+# ESPN stat IDs kept from a per-game box score (game log), by the PlayerStats field name.
+GAME_LOG_STAT_IDS: dict[str, str] = {
+    "0": "points",
+    "1": "blocks",
+    "2": "steals",
+    "3": "assists",
+    "6": "rebounds",
+    "11": "turnovers",
+    "13": "fieldGoalsMade",
+    "14": "fieldGoalsAttempted",
+    "15": "freeThrowsMade",
+    "16": "freeThrowsAttempted",
+    "17": "threePointMade",
+    "40": "minutes",
+}
+# How many of a player's most recent games to ask ESPN for (they can reach into last season)
+GAME_LOG_GAMES = 30
