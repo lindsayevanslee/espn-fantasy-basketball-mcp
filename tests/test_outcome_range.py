@@ -318,6 +318,32 @@ async def test_with_no_games_left_the_result_is_certain_and_the_range_is_a_point
 
 
 @pytest.mark.asyncio
+async def test_a_finished_percentage_has_a_point_range_at_the_rounded_projection(monkeypatch):
+    """Live report: with no games left the rounded range sat a hair off the unrounded
+    projection (0.4622 vs 0.46218...), which the live check read as inconsistent."""
+    analysis = await _analyze(
+        monkeypatch,
+        stat_ids=[19],
+        mine=[_entry(101)],
+        theirs=[_entry(201)],
+        my_games={101: [_day(-1)]},
+        their_games={201: [_day(-1)]},
+        per_game={
+            101: {"fieldGoalsMade": 8.0, "fieldGoalsAttempted": 17.0},
+            201: {"fieldGoalsMade": 7.0, "fieldGoalsAttempted": 15.0},
+        },
+        my_scores={"fieldGoalPercentage": 0.46218},
+        their_scores={"fieldGoalPercentage": 0.49613},
+    )
+    fg = _category(analysis, "fieldGoalPercentage")
+    assert fg.yourRange == [0.4622, 0.4622] and fg.opponentRange == [0.4961, 0.4961]
+    assert abs(fg.yourRange[0] - fg.yourProjected) <= 5e-5
+    assert (fg.winProbability, fg.lossProbability, fg.leadStdDev) == (0.0, 1.0, 0.0)
+    note = next(n for n in analysis.strategyNotes if n.startswith("Estimated matchup odds"))
+    assert "0% win, 0% tie, 100% loss" in note
+
+
+@pytest.mark.asyncio
 async def test_a_counting_range_never_drops_below_the_current_total(monkeypatch):
     # 2 points a game on top of 300 banked: the low end is clamped at 300, not below it
     setup = _points_matchup([_day(1)])

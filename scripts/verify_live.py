@@ -484,12 +484,18 @@ async def main() -> int:
 
         # Range of outcomes: sane probabilities, and game logs actually reached the model
         odds = analysis.outcomeRange
+
+        # Ranges are rounded (4 places for percentages, 1 for counts) and the projection is
+        # not, so allow half a rounding step: with no games left the range is a single point
+        def step(c: Any) -> float:
+            return 5e-5 if c.category in ("fieldGoalPercentage", "freeThrowPercentage") else 0.05
+
         bad_ranges = [
             c.category
             for c in analysis.categoryProjections
             if c.yourRange is None
             or c.yourProjected is None
-            or not (c.yourRange[0] - 1e-6 <= c.yourProjected <= c.yourRange[1] + 1e-6)
+            or not (c.yourRange[0] - step(c) <= c.yourProjected <= c.yourRange[1] + step(c))
             or c.winProbability is None
             or not 0.0 <= c.winProbability <= 1.0
         ]

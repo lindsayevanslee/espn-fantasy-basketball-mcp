@@ -1369,7 +1369,9 @@ def compute_analysis(inputs: MatchupInputs) -> MatchupAnalysis:
     ]
     outcome_range = _outcome_range(inputs, category_projections, category_outcomes, counted_ids)
     odds_note = (
-        f"Estimated {outcome_range.matchupWinProbability:.0%} chance to win the matchup "
+        f"Estimated matchup odds: {outcome_range.matchupWinProbability:.0%} win, "
+        f"{outcome_range.matchupTieProbability:.0%} tie, "
+        f"{outcome_range.matchupLossProbability:.0%} loss "
         f"(expected categories {outcome_range.expectedCategoryWins:g}-"
         f"{outcome_range.expectedCategoryLosses:g}-{outcome_range.expectedCategoryTies:g}); "
         "an approximation, see outcomeRange.method"
