@@ -31,6 +31,32 @@
   player's games are discounted.
 
 ### Added
+- `rank_streamers` tool: ranks free agents by what each does to the matchup when swapped in
+  for the player you would drop, in one call (live feedback: comparing four free agents took
+  one `simulate_roster_move` call each, and the free-agent list does not show games in the
+  period). Candidates are the most-owned free agents (`pool_size`, default 25, max 50) or
+  `candidate_ids`. Each is tried in the dropped player's starting slot and, in a weekly-lock
+  league, in every starting slot he is eligible for, and shown at his best; slots ESPN has
+  locked for a week in progress are left alone. Ranked by the change in expected category
+  wins when the league's standings count every category, otherwise by the change in matchup
+  win probability. Each option has games left in the period, placement, categories that flip,
+  per-category win-probability changes, the same swap on the alternate basis, a note when
+  ESPN's projection is 25% or more away from his season points (five or more games), and
+  roster legality. Schedules, stats and game logs are fetched once for the whole pool; only
+  the legality check is per option returned.
+- `analyze_matchup` adds `outcomeRange.returnScenarios`: for each player on either team
+  listed OUT with a return date inside the window whose games are not counted (ESPN's
+  next-game placeholder, or a date that has passed), the matchup re-run with him playing
+  from that date, with a strategy note (live feedback: an opponent's star was OUT on a
+  placeholder date and the tool could not say what his return would cost).
+- `outcomeRange.standingsUnit` / `standingsNote` say whether the league's standings count
+  every category (H2H Each Category: expected category wins is the figure that matters) or
+  one result per matchup, and the odds note leads with that figure (live feedback: the
+  matchup win probability was quoted in a league that counts categories).
+- `simulate_roster_move` reports the same move on the alternate basis
+  (`alternateProjectedRecordBefore/After`, `alternateExpectedCategoryWinsBefore/After`) and
+  its summary gives the change in expected category wins and warns when an added player's
+  ESPN projection is far from his season actuals.
 - Range of outcomes on the matchup projection. Each `categoryProjection` carries `yourRange`
   / `opponentRange` (central 80% intervals), `leadStdDev` and `winProbability` /
   `tieProbability` / `lossProbability`; `analyze_matchup` adds `outcomeRange` (matchup win /

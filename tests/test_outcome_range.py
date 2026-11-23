@@ -213,11 +213,13 @@ async def _analyze(
     season_games: int = 20,
     logs: dict[int, list[dict[str, float]]] | Exception | None = None,
     reverse_stat_ids: tuple[int, ...] = (),
+    scoring_type: str = "H2H_CATEGORY",
 ) -> MatchupAnalysis:
     """analyze_matchup for the current period with every fetch mocked."""
     monkeypatch.setenv("MY_TIMEZONE", "UTC")
     client = ESPNFantasyBasketballClient(league_id=12345, year=2027)
     settings = _settings(stat_ids)
+    settings.scoringSettings.scoringType = scoring_type
     settings.scoringSettings.scoringItems = [
         ScoringItem(statId=i, points=1.0, isReverseItem=i in reverse_stat_ids) for i in stat_ids
     ]
@@ -339,7 +341,7 @@ async def test_a_finished_percentage_has_a_point_range_at_the_rounded_projection
     assert fg.yourRange == [0.4622, 0.4622] and fg.opponentRange == [0.4961, 0.4961]
     assert abs(fg.yourRange[0] - fg.yourProjected) <= 5e-5
     assert (fg.winProbability, fg.lossProbability, fg.leadStdDev) == (0.0, 1.0, 0.0)
-    note = next(n for n in analysis.strategyNotes if n.startswith("Estimated matchup odds"))
+    note = next(n for n in analysis.strategyNotes if n.startswith("Expected category record"))
     assert "0% win, 0% tie, 100% loss" in note
 
 
@@ -508,7 +510,7 @@ async def test_simulation_and_optimizer_carry_the_odds(espn):
     assert (sim.projectedRecordBefore, sim.projectedRecordAfter) == ("5-4-0", "7-2-0")
     assert sim.matchupWinProbabilityAfter > sim.matchupWinProbabilityBefore
     assert sim.expectedCategoryWinsAfter > sim.expectedCategoryWinsBefore
-    assert any(line.startswith("Estimated chance to win the matchup") for line in sim.summary)
+    assert any(line.startswith("Expected category wins") for line in sim.summary)
     assert all(d.winProbabilityBefore is not None for d in sim.categoryDeltas)
     assert all(d.winProbabilityAfter is not None for d in sim.categoryDeltas)
 

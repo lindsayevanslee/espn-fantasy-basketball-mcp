@@ -16,6 +16,7 @@ import httpx
 from .analysis import analyze_matchup as analyze_matchup_impl
 from .analysis import optimize_lineup as optimize_lineup_impl
 from .analysis import player_availability
+from .analysis import rank_streamers as rank_streamers_impl
 from .analysis import simulate_roster_move as simulate_roster_move_impl
 from .constants import (
     ABBREV_ALIASES,
@@ -76,6 +77,7 @@ from .models import (
     ScheduleSettings,
     ScoringItem,
     ScoringSettings,
+    StreamerRanking,
     Team,
     TeamDraftSummary,
     TeamSeasonStats,
@@ -2591,6 +2593,26 @@ class ESPNFantasyBasketballClient:
         lineup warnings. `basis` picks the per-game numbers for both teams (projections,
         season, last_7, last_15, last_30, blend). See analysis.analyze_matchup."""
         return await analyze_matchup_impl(self, team_id, matchup_period, basis)
+
+    async def rank_streamers(
+        self,
+        team_id: int,
+        drop_id: int | None = None,
+        candidate_ids: list[int] | None = None,
+        matchup_period: int | None = None,
+        basis: str = "projections",
+        pool_size: int = 25,
+        top: int = 10,
+    ) -> StreamerRanking:
+        """Rank free agents by what each does to the matchup when swapped in for drop_id.
+        See analysis.rank_streamers."""
+        self._validate_positive_int(team_id, "team_id")
+        self._validate_positive_int(drop_id, "drop_id")
+        for pid in candidate_ids or []:
+            self._validate_positive_int(pid, "candidate_id")
+        return await rank_streamers_impl(
+            self, team_id, drop_id, candidate_ids, matchup_period, basis, pool_size, top
+        )
 
     async def simulate_roster_move(
         self,

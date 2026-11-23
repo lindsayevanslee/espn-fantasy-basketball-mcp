@@ -229,6 +229,24 @@ class RecordProbability(BaseModel):
     probability: float
 
 
+class ReturnScenario(BaseModel):
+    """The matchup re-run assuming one player listed OUT plays from his listed return date.
+
+    ESPN's return date for a day-to-day player is often just his team's next game, so the
+    projection gives him no games; this shows what changes if he does play them."""
+
+    playerId: int
+    playerName: str
+    side: str  # "you" or "opponent"
+    returnDate: str | None = None
+    returnDateType: str | None = None  # "placeholder" (ESPN's next-game date), "reported", ...
+    gamesAssumed: float  # games he plays in this scenario that the projection does not count
+    projectedRecord: str  # "W-L-T" for you in this scenario
+    expectedCategoryWins: float
+    matchupWinProbability: float
+    categoriesFlipped: list[str] = []  # "points: win -> loss"
+
+
 class OutcomeRange(BaseModel):
     """How uncertain the matchup projection is: odds for the matchup and the spread behind
     the per-category ranges. Probabilities are estimates from a normal approximation."""
@@ -247,6 +265,14 @@ class OutcomeRange(BaseModel):
     tossUpCategories: list[str] = []  # win probability between 35% and 65%
     # How many players' spreads came from their own game logs rather than league-typical values
     varianceSource: str | None = None
+    # What this league's standings count: "categories" (H2H Each Category: every category is
+    # a win or loss in your record, so expectedCategoryWins is the figure that matters) or
+    # "matchups" (one result per week: matchupWinProbability is). standingsNote says so.
+    standingsUnit: str | None = None
+    standingsNote: str | None = None
+    # analyze_matchup only: the odds if a player listed OUT with a return date inside the
+    # window plays from that date (one scenario per such player, either team)
+    returnScenarios: list[ReturnScenario] = []
     method: str
 
 
@@ -467,11 +493,69 @@ class RosterMoveSimulation(BaseModel):
     matchupWinProbabilityAfter: float | None = None
     expectedCategoryWinsBefore: float | None = None
     expectedCategoryWinsAfter: float | None = None
+    # The same move on the alternate basis (season actuals when the simulation used ESPN
+    # projections, and the reverse): a second opinion on whether the move helps
+    alternateBasis: str | None = None
+    alternateProjectedRecordBefore: str | None = None
+    alternateProjectedRecordAfter: str | None = None
+    alternateExpectedCategoryWinsBefore: float | None = None
+    alternateExpectedCategoryWinsAfter: float | None = None
     categoryDeltas: list[CategoryDelta]
     categoriesFlipped: list[str] = []  # "rebounds: loss -> win"
     addedPlayers: list[PlayerRecommendation] = []  # how the added players project
     legality: RosterLegality | None = None
     summary: list[str]
+    projectionMethod: str | None = None
+
+
+class StreamerOption(BaseModel):
+    """One free agent tried in place of the dropped player, with the matchup re-run."""
+
+    rank: int
+    playerId: int
+    playerName: str
+    proTeam: str | None = None
+    position: str | None = None
+    percentOwned: float | None = None
+    availability: str | None = None  # ACTIVE, DAY_TO_DAY, OUT, ...
+    gamesThisPeriod: int = 0  # scheduled games not yet played in the matchup period
+    expectedGames: float = 0.0  # discounted by availability
+    gamesInProjection: float = 0.0  # 0 if he would sit on the bench under a weekly lock
+    placement: str  # the best slot found for him and what it displaces
+    projectedRecord: str  # "W-L-T" with him
+    expectedCategoryWins: float
+    expectedCategoryWinsDelta: float  # against the baseline (your roster as it is)
+    matchupWinProbability: float
+    matchupWinProbabilityDelta: float
+    categoriesFlipped: list[str] = []  # "points: loss -> win"
+    # category -> change in win probability, for categories that move by 3 points or more
+    winProbabilityChanges: dict[str, float] = {}
+    # The same swap on the alternate basis (season actuals vs ESPN projections)
+    alternateBasis: str | None = None
+    alternateExpectedCategoryWinsDelta: float | None = None
+    perGame: dict[str, float] | None = None  # his line on the basis used
+    seasonGamesPlayed: int | None = None
+    # Set when ESPN's projection and his season actuals are far apart, so the two bases
+    # will disagree about him
+    projectionNote: str | None = None
+    canAdd: bool | None = None  # roster legality, checked for the options returned
+    legalityNotes: list[str] = []
+
+
+class StreamerRanking(BaseModel):
+    """Free agents ranked by what each does to the matchup when swapped in."""
+
+    teamId: int
+    matchupPeriod: int
+    basis: str
+    dropped: str | None = None  # "Name (id)"; None when nobody is dropped
+    rankedBy: str
+    baselineProjectedRecord: str
+    baselineExpectedCategoryWins: float | None = None
+    baselineMatchupWinProbability: float | None = None
+    options: list[StreamerOption] = []
+    candidatesConsidered: int = 0
+    notes: list[str] = []
     projectionMethod: str | None = None
 
 
